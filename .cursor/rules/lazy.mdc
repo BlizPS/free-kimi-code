@@ -1,0 +1,5 @@
+---
+description: Use Lazy skills for compact, evidence-driven software work
+alwaysApply: true
+---
+Route implementation → lazy-developer; failure → lazy-debug; verification → lazy-test; review → lazy-review. Inspect first, search only when current/external facts matter, preserve active requirements/local conventions, and verify actual coverage.

@@ -1,0 +1,25 @@
+{
+  "name": "lazy-developer",
+  "version": "1.0.0",
+  "description": "Token-efficient development and code review skills with verification, security awareness, and low ceremony.",
+  "author": {
+    "name": "BlizPS"
+  },
+  "repository": "https://github.com/BlizPS/lazy-developer-skill",
+  "license": "MIT",
+  "keywords": [
+    "coding",
+    "code-review",
+    "security",
+    "agent-skill",
+    "developer"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Lazy Developer",
+    "shortDescription": "Ship code with less ceremony and more verification",
+    "longDescription": "Four low-ceremony skills for implementation, code review, debugging, and verification. They prioritize evidence, security checks, project conventions, and real verification while keeping context and output small.",
+    "developerName": "BlizPS",
+    "category": "Productivity"
+  }
+}

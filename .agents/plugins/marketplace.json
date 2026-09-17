@@ -1,0 +1,21 @@
+{
+  "name": "blizps",
+  "interface": {
+    "displayName": "BlizPS plugins"
+  },
+  "plugins": [
+    {
+      "name": "lazy-developer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/lazy-developer"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "NOT_REQUIRED"
+      },
+      "category": "Productivity",
+      "description": "Four token-efficient Agent Skills for implementation, review, debugging, and verification."
+    }
+  ]
+}

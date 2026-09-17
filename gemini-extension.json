@@ -1,0 +1,11 @@
+{
+  "name": "lazy-developer",
+  "version": "1.0.0",
+  "description": "Token-efficient development and code review skills with verification and security awareness.",
+  "author": {
+    "name": "BlizPS"
+  },
+  "repository": "https://github.com/BlizPS/lazy-developer-skill",
+  "license": "MIT",
+  "contextFileName": "GEMINI.md"
+}
