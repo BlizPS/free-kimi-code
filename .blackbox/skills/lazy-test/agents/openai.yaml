@@ -1,6 +1,0 @@
-interface:
-  display_name: "Lazy Test"
-  short_description: "Prove changed behavior with the cheapest useful checks"
-  default_prompt: "Use $lazy-test to verify this change by risk."
-policy:
-  allow_implicit_invocation: true
