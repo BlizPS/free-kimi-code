@@ -8,14 +8,14 @@ ps=(ROOT/'install.ps1').read_text(encoding='utf-8')
 pkg=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))
 
 checks=[
-    ('install.sh', 'KIMI_VERSION="0.43.1"', sh),
+    ('install.sh', 'KIMI_VERSION="2.0.0"', sh),
     ('install.sh', 'KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"', sh),
     ('install.sh', 'GITHUB_API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"', sh),
     ('install.sh', '.lazydev-revision', sh),
     ('install.sh', 'KIMI_NEEDS_UPDATE=0', sh),
     ('install.sh', 'LAZYDEV_NEEDS_UPDATE=0', sh),
     ('install.sh', 'Existing Kimi sessions and configuration were left in place.', sh),
-    ('install.ps1', "$KimiVersion = '0.43.1'", ps),
+    ('install.ps1', "$KimiVersion = '2.0.0'", ps),
     ('install.ps1', "https://code.kimi.com/kimi-code/install.ps1", ps),
     ('install.ps1', "$GitHubApiUrl =", ps),
     ('install.ps1', "'.lazydev-revision'", ps),

@@ -10,6 +10,7 @@ ${base_prompt}
 - Load only relevant skills; avoid filler, fake data, and unnecessary rewrites.
 - For UI, check responsive behavior, state, accessibility, and product fit.
 - Keep context lean; retain only evidence needed to prove the result.
+- For web research, use native WebSearch when present; otherwise use the LazyDev search_web MCP tool.
 
 # Execution
 

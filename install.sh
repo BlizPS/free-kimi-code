@@ -4,7 +4,7 @@ set -eu
 REPO="BlizPS/lazy-developer-free-kimi-code"
 BRANCH="${LAZYDEV_BRANCH:-main}"
 LAZYDEV_VERSION="1.0.0"
-KIMI_VERSION="0.43.1"
+KIMI_VERSION="2.0.0"
 NODE_VERSION="22.19.0"
 KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"
 RTK_INSTALL_URL="https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh"

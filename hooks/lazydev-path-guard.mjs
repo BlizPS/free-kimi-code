@@ -38,8 +38,11 @@ async function main() {
   const standaloneExt=/\.(?:html?|pdf|docx?|xlsx?|pptx?|zip|ahk|png|jpe?g|webp|gif|svg|csv|md|txt)$/iu.test(resolved);
   const workspaceRootFile=path.dirname(resolved) === cwd;
   const toolName=String(event.tool_name || '');
-  if (implied && standaloneExt && workspaceRootFile) {
-    process.stderr.write(`BLOCKED by LazyDev: standalone deliverables must be written under ${out}. Target was ${resolved}. Use ${path.join(out, path.basename(resolved))}. Do not claim the file is saved until that exact path is verified.\n`);
+  const artifactSegment=path.basename(out);
+  const pathSegments=resolved.split(path.sep).filter(Boolean);
+  const looksLikeArtifactAlias=pathSegments.includes(artifactSegment) && !inside(resolved,out);
+  if (implied && standaloneExt && (workspaceRootFile || looksLikeArtifactAlias)) {
+    process.stderr.write(`BLOCKED by LazyDev: standalone deliverables must be written at ${out}. Target was ${resolved}. Use ${path.join(out, path.basename(resolved))}. Do not claim the file is saved until that exact path is verified.\n`);
     process.exit(2);
   }
   if (implied && toolName === 'WriteFile' && inside(resolved, out) && fs.existsSync(resolved)) {

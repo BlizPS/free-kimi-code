@@ -11,13 +11,14 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { platformPaths } from '../runtime/platform-policy.mjs';
 import { modelIntelligenceProfile, buildIntelligenceAliasSystem } from '../runtime/intelligence-kernel.mjs';
+import { extractSessionModelAliases } from '../runtime/session-model-compat.mjs';
 
 const version = '1.0.0';
 const TOKEN_SAVINGS_FLOOR = 0.75;
 const TOKEN_SAVINGS_TARGET = 0.80;
 const MAX_SKILL_FRACTION = 0.24;
 const KIMI_PACKAGE = '@moonshot-ai/kimi-code';
-const KIMI_VERSION = '0.43.1';
+const KIMI_VERSION = '2.0.0';
 const OPENROUTER_FREE_MODEL = 'openrouter/free';
 const OPENROUTER_MODEL_FALLBACK_LIMIT = 3;
 const GEMINI_NO_TOOL_MODELS = [];
@@ -596,6 +597,71 @@ function hasKimiSessions() {
   } catch {}
   return false;
 }
+
+function readTextSlice(file, maxBytes = 262144) {
+  try {
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) return '';
+    if (stat.size <= maxBytes) return fs.readFileSync(file, 'utf8');
+    const fd = fs.openSync(file, 'r');
+    try {
+      const headSize = Math.floor(maxBytes / 2);
+      const tailSize = maxBytes - headSize;
+      const head = Buffer.alloc(headSize);
+      const tail = Buffer.alloc(tailSize);
+      fs.readSync(fd, head, 0, headSize, 0);
+      fs.readSync(fd, tail, 0, tailSize, Math.max(0, stat.size - tailSize));
+      return `${head.toString('utf8')}
+${tail.toString('utf8')}`;
+    } finally { fs.closeSync(fd); }
+  } catch { return ''; }
+}
+
+function discoverSessionModelAliases(currentAlias = '') {
+  const rootDir = path.join(kimiHome(), 'sessions');
+  const sources = [path.join(kimiHome(), 'session_index.jsonl')];
+  try {
+    if (fs.existsSync(rootDir)) {
+      const stack = [rootDir];
+      let inspected = 0;
+      while (stack.length && inspected < 5000) {
+        const dir = stack.pop();
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const file = path.join(dir, entry.name);
+          if (entry.isDirectory()) stack.push(file);
+          else if (entry.name === 'state.json' || entry.name === 'wire.jsonl' || entry.name === 'context.jsonl') sources.push(file);
+          inspected += 1;
+          if (inspected >= 5000) break;
+        }
+      }
+    }
+  } catch {}
+  const texts = [];
+  for (const file of sources.slice(0, 1500)) {
+    const text = readTextSlice(file, file.endsWith('wire.jsonl') || file.endsWith('context.jsonl') ? 196608 : 131072);
+    if (text) texts.push(text);
+  }
+  return extractSessionModelAliases(texts, currentAlias);
+}
+
+function writeLazyDevMcpConfig() {
+  const file = path.join(kimiHome(), 'mcp.json');
+  let data = {};
+  try {
+    data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!data || typeof data !== 'object') data = {};
+  } catch {}
+  const servers = data.mcpServers && typeof data.mcpServers === 'object' ? { ...data.mcpServers } : {};
+  servers['lazydev-search'] = {
+    command: process.execPath,
+    args: [path.join(root, 'runtime', 'lazydev-web-search.mjs')],
+    env: { LAZYDEV_SEARCH_USER_AGENT: `lazydev/${version}` },
+    cwd: root,
+  };
+  data.mcpServers = servers;
+  writeJsonAtomic(file, data);
+  return file;
+}
 function mergeManagedMarkdown(file, startMarker, endMarker, block) {
   let existing = '';
   try { existing = fs.readFileSync(file, 'utf8'); } catch {}
@@ -630,8 +696,23 @@ function shellQuoteCommand(executable, args = []) {
   };
   return [executable, ...args].map(quote).join(' ');
 }
+function effectiveModelInfo(provider, pc) {
+  const info = { ...(pc?.modelInfo || {}) };
+  if (provider?.id === 'gemini' && /flash-lite/i.test(String(pc?.model || ''))) {
+    const cap = Math.max(65536, Number(process.env.LAZYDEV_GEMINI_CONTEXT_CAP || 131072));
+    const rawContext = Number(info.contextLimit) || Number(info.inputLimit) || cap;
+    const rawInput = Number(info.inputLimit) || rawContext;
+    info.contextLimit = Math.min(rawContext, cap);
+    info.inputLimit = Math.min(rawInput, cap);
+    info.outputLimit = Math.min(Number(info.outputLimit) || 8192, 8192);
+  }
+  return info;
+}
+
 function contextBudget(modelInfo = {}) {
-  const max = Math.max(32768, Number(modelInfo?.contextLimit) || Number(modelInfo?.inputLimit) || 131072);
+  const rawMax = Math.max(32768, Number(modelInfo?.contextLimit) || Number(modelInfo?.inputLimit) || 131072);
+  const cap = Number(process.env.LAZYDEV_CONTEXT_CAP || 0);
+  const max = cap > 0 ? Math.min(rawMax, Math.max(32768, cap)) : rawMax;
   const output = Math.max(4096, Number(modelInfo?.outputLimit) || 8192);
   const reserve = Math.min(49152, Math.max(12000, Math.max(output * 2, Math.round(max * 0.08))));
   const input = Math.max(16384, max - reserve);
@@ -639,7 +720,7 @@ function contextBudget(modelInfo = {}) {
   return { max, output, reserve, input, ratio };
 }
 
-function buildKimiConfig(provider, pc, proxy = null) {
+function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
   const alias = `lazydev/${pc.model}`;
   const budget = contextBudget(pc.modelInfo);
   const context = budget.max;
@@ -694,16 +775,32 @@ function buildKimiConfig(provider, pc, proxy = null) {
     `capabilities = ${JSON.stringify(modelCapabilities)}`,
     `display_name = ${tomlQuote(`${provider.label} · ${pc.model}`)}`,
     ``,
+    ...sessionAliases
+      .filter((alias) => alias && alias !== `lazydev/${pc.model}`)
+      .flatMap((alias) => [
+        `[models.${JSON.stringify(alias)}]`,
+        `provider = ${tomlQuote('lazydev')}`,
+        `model = ${tomlQuote(pc.model)}`,
+        `max_context_size = ${Math.max(32768, context)}`,
+        `max_input_size = ${Math.max(16384, budget.input)}`,
+        `max_output_size = ${Math.max(256, output)}`,
+        `capabilities = ${JSON.stringify(modelCapabilities)}`,
+        `display_name = ${tomlQuote(`Session compatibility · ${provider.label} · ${pc.model}`)}`,
+        ``,
+      ]),
     `[thinking]`,
     `enabled = ${provider.id === 'gemini' && !antigravity ? 'true' : 'false'}`,
     ...(provider.id === 'gemini' && !antigravity ? [`effort = ${tomlQuote('low')}`] : []),
     ``,
     `[loop_control]`,
     `max_attempts_per_step = 2`,
-    `max_steps_per_turn = 18`,
+    `max_steps_per_turn = ${provider.id === 'gemini' && /flash-lite/i.test(pc.model) ? 12 : 18}`,
     `reserved_context_size = ${budget.reserve}`,
     `compaction_trigger_ratio = ${budget.ratio.toFixed(2)}`,
     `compaction_max_attempts = 2`,
+    ``,
+    `[mcp.client]`,
+    `tool_call_timeout_ms = 60000`,
     ``,
     `[background]`,
     `keep_alive_on_exit = false`,
@@ -720,7 +817,7 @@ function buildKimiConfig(provider, pc, proxy = null) {
     ``,
     `[[hooks]]`,
     `event = ${tomlQuote('PreToolUse')}`,
-    `matcher = ${tomlQuote('WriteFile|StrReplaceFile')}`,
+    `matcher = ${tomlQuote('Write|WriteFile|StrReplaceFile')}`,
     `command = ${tomlQuote(artifactCommand)}`,
     `timeout = 3`,
     ``,
@@ -1019,6 +1116,8 @@ async function chat() {
     return;
   }
   const proxy = !['gemini','openai','anthropic'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null;
+  pc.modelInfo = effectiveModelInfo(provider, pc);
+  const sessionAliases = discoverSessionModelAliases(`lazydev/${pc.model}`);
   if (provider.id === 'ollama') assertHttpUrl(ollamaChatUrl(pc.baseUrl), 'Ollama API URL');
   else if (provider.id === 'gemini') {
     // Standard Gemini models use Kimi Code's native Google GenAI adapter.
@@ -1029,14 +1128,15 @@ async function chat() {
   fs.mkdirSync(kimiHome(), { recursive: true, mode: 0o700 });
   const configPath = path.join(kimiHome(), 'config.toml');
   const tuiPath = path.join(kimiHome(), 'tui.toml');
-  fs.writeFileSync(configPath, buildKimiConfig(provider, pc, proxy), { mode: 0o600 });
+  fs.writeFileSync(configPath, buildKimiConfig(provider, pc, proxy, sessionAliases), { mode: 0o600 });
   fs.writeFileSync(tuiPath, buildTuiConfig(), { mode: 0o600 });
   writeKimiAgentGuidance();
+  const mcpConfig = writeLazyDevMcpConfig();
   const invocation = findKimiInvocation();
   if (!invocation) { try { proxy?.server.close(); } catch {} line(red(`Kimi Code launcher not found. Install Kimi Code ${KIMI_VERSION} with the LazyDev installer.`)); return; }
   // Kimi Code reads its managed configuration from KIMI_CODE_HOME.
   // LazyDev owns that directory and regenerates the provider/model config on each launch.
-  const launchArgs = [...invocation.args];
+  const launchArgs = [...invocation.args, '--add-dir', outputDirectory(), '--mcp-config-file', mcpConfig];
   const workDirIndex = process.argv.indexOf('--work-dir');
   if (workDirIndex >= 0 && process.argv[workDirIndex + 1]) launchArgs.push('--work-dir', process.argv[workDirIndex + 1]);
   const mode = process.argv.includes('--new') ? 'new' : process.argv.includes('--sessions') || process.argv.includes('--session') ? 'sessions' : process.argv.includes('--resume') || process.argv.includes('--continue') ? 'continue' : 'new';

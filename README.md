@@ -26,7 +26,7 @@ install → setup → chat
 
 ### 1. Install or update
 
-On desktop, the installer handles the whole setup for you: **Kimi Code 0.43.1**, **RTK**, and **Lazy Developer 1.0.0**. It does not require npm.
+On desktop, the installer handles the whole setup for you: **Kimi Code 2.0.0**, **RTK**, and **Lazy Developer 1.0.0**. It does not require npm.
 
 **macOS / Linux**
 
@@ -73,6 +73,8 @@ Pick a provider, authenticate it, and choose one of the models returned by the p
 8. **CodeBuddy** — API key + live model catalog
 9. **Anthropic** — API key + live model catalog
 
+Standalone artifacts use the platform-specific `lazydevfile` directory. Native Linux keeps `$HOME/lazydevfile`; Termux, including Debian/Ubuntu guests launched through proot-distro, uses `/storage/emulated/0/lazydevfile`. File creation never overwrites an existing standalone artifact: a collision such as `report.html` becomes `report1.html`, then `report2.html`, and so on.
+
 Ollama is the only provider that does not ask for an API key. Give Lazy Developer the address of the local Ollama API, it checks the endpoint, reads the models that are actually running there, and uses the selected local model. Your inference still happens on your own Ollama machine; Lazy Developer and RTK remain in the workflow around Kimi Code.
 
 ### 3. Start coding
@@ -84,6 +86,14 @@ lazydev chat
 ```
 
 Bare `lazydev` opens the Lazy Developer command center. `lazydev chat` is the entry point that launches Kimi Code.
+
+## Switching models without breaking old sessions
+
+Lazy Developer keeps the conversation history in Kimi Code's session store and refreshes the active model mapping each time `lazydev chat` starts. When an older session refers to a previous LazyDev model alias, the runtime adds a compatibility alias that points to the currently selected provider/model instead of editing or deleting the saved session. That keeps old conversation context while letting the session continue on the model you selected now. Kimi Code stores session context and runtime state separately from `config.toml`, so this compatibility layer only changes the launch-time model mapping.
+
+## Web search with third-party models
+
+Kimi Code's built-in `WebSearch` is host-provided and is only available when its search service is configured. Lazy Developer therefore adds a small local `search_web` MCP server for providers that do not expose Kimi's managed search service. If native `WebSearch` is available, it is preferred; otherwise the model can use the LazyDev search tool without changing providers.
 
 ## Live models, not a frozen list
 
