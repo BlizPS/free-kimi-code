@@ -794,7 +794,7 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     ``,
     `[loop_control]`,
     `max_attempts_per_step = 2`,
-    `max_steps_per_turn = ${provider.id === 'gemini' && /flash-lite/i.test(pc.model) ? 12 : 18}`,
+    `max_steps_per_turn = 0`,
     `reserved_context_size = ${budget.reserve}`,
     `compaction_trigger_ratio = ${budget.ratio.toFixed(2)}`,
     `compaction_max_attempts = 2`,
@@ -1134,15 +1134,15 @@ async function chat() {
   writeLazyDevMcpConfig();
   const invocation = findKimiInvocation();
   if (!invocation) { try { proxy?.server.close(); } catch {} line(red(`Kimi Code launcher not found. Install Kimi Code ${KIMI_VERSION} with the LazyDev installer.`)); return; }
-  // Kimi Code loads $KIMI_CODE_HOME/mcp.json automatically.
-  // Do not pass the newer --mcp-config-file flag: older installed launchers
-  // may reject it even when they can read their normal MCP config location.
-  const launchArgs = [...invocation.args, '--add-dir', outputDirectory()];
+  // Use an explicit config file so Kimi's account setup flow cannot rewrite the LazyDev proxy config.
+  // Kimi rejects /login, /logout, and /model when a custom config file is active.
+  const launchArgs = [...invocation.args, '--config-file', configPath, '--add-dir', outputDirectory()];
   const workDirIndex = process.argv.indexOf('--work-dir');
   if (workDirIndex >= 0 && process.argv[workDirIndex + 1]) launchArgs.push('--work-dir', process.argv[workDirIndex + 1]);
   const mode = process.argv.includes('--new') ? 'new' : process.argv.includes('--sessions') || process.argv.includes('--session') ? 'sessions' : process.argv.includes('--resume') || process.argv.includes('--continue') ? 'continue' : 'new';
   if (mode === 'sessions') launchArgs.push('--session');
   else if (mode === 'continue') launchArgs.push('--continue');
+  else launchArgs.push('--agent', 'default');
   const child = spawn(invocation.command, launchArgs, {
     cwd: process.cwd(),
     stdio: 'inherit',
@@ -1150,6 +1150,7 @@ async function chat() {
       ...sanitizeKimiChildEnv(provider),
       KIMI_CODE_HOME: kimiHome(),
       KIMI_CODE_NO_AUTO_UPDATE: '1',
+      KIMI_LOOP_MAX_STEPS_PER_TURN: '0',
       LAZYDEV_ARTIFACT_DIR: outputDirectory(),
       LAZYDEV_VERSION: version,
       LAZYDEV_MODEL: pc.model,
