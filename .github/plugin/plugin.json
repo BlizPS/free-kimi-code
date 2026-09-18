@@ -1,0 +1,30 @@
+{
+  "name": "lazy-developer",
+  "description": "Token-efficient engineering skills with verification, security awareness, and intelligent UI/UX + 3D design-system generation.",
+  "version": "1.0.0",
+  "author": {
+    "name": "BlizPS"
+  },
+  "homepage": "https://github.com/BlizPS/lazy-developer-skill-cli",
+  "repository": "https://github.com/BlizPS/lazy-developer-skill-cli",
+  "license": "MIT",
+  "keywords": [
+    "agent-skill",
+    "coding",
+    "debugging",
+    "code-review",
+    "testing",
+    "verification",
+    "security",
+    "ui-ux",
+    "design-system",
+    "responsive-design",
+    "animation",
+    "3d",
+    "threejs",
+    "webgl",
+    "anti-slop"
+  ],
+  "commands": "commands/",
+  "skills": "skills/"
+}

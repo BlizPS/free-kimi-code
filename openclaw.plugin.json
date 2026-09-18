@@ -2,12 +2,12 @@
   "id": "lazy-developer",
   "name": "Lazy Developer",
   "version": "1.0.0",
-  "description": "Token-efficient development and code review skills with verification and security awareness.",
+  "description": "Token-efficient engineering skills with verification, security awareness, and intelligent UI/UX + 3D design-system generation.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false
   },
   "skills": [
-    "./skills"
+    "./skills/"
   ]
 }

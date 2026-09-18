@@ -2,20 +2,27 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "lazy-developer",
   "version": "1.0.0",
-  "description": "Token-efficient software development and code review skills with verification and security awareness.",
+  "description": "Token-efficient engineering, anti-slop UI/UX, artifact routing, and verification.",
   "author": {
     "name": "BlizPS"
   },
-  "repository": "https://github.com/BlizPS/lazy-developer-skill",
+  "repository": "https://github.com/BlizPS/lazy-developer-skill-cli",
   "license": "MIT",
   "keywords": [
     "agent-skill",
-    "code-review",
     "coding",
     "debugging",
-    "developer",
-    "security",
+    "code-review",
     "testing",
-    "verification"
+    "verification",
+    "security",
+    "ui-ux",
+    "design-system",
+    "responsive-design",
+    "animation",
+    "3d",
+    "threejs",
+    "webgl",
+    "anti-slop"
   ]
 }

@@ -1,0 +1,9 @@
+name: lazy-developer
+version: 1.0.0
+description: Token-efficient engineering, anti-slop UI/UX, strict artifact routing, and verification across supported agent CLIs and plugins.
+author: BlizPS
+provides_skills:
+  - lazy-developer
+  - lazy-debug
+  - lazy-review
+  - lazy-test

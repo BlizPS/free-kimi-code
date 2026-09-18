@@ -1,0 +1,4 @@
+tests/
+.github/workflows/
+.github/ISSUE_TEMPLATE/
+*.zip

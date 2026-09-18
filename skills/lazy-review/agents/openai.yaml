@@ -1,0 +1,6 @@
+interface:
+  display_name: "Lazy Review"
+  short_description: "Find actionable defects with reachable evidence"
+  default_prompt: "Use $lazy-review to inspect this change for actionable findings."
+policy:
+  allow_implicit_invocation: true

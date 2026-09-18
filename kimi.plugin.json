@@ -1,0 +1,55 @@
+{
+  "name": "lazy-developer",
+  "version": "1.0.0",
+  "description": "Token-efficient engineering workflow, anti-slop UI, artifact routing, and verification for the managed agent adapter.",
+  "author": {
+    "name": "BlizPS"
+  },
+  "repository": "https://github.com/BlizPS/lazy-developer-skill-cli",
+  "license": "MIT",
+  "keywords": [
+    "coding",
+    "debugging",
+    "code-review",
+    "testing",
+    "anti-slop",
+    "ui-ux",
+    "artifact-routing",
+    "token-efficient"
+  ],
+  "skills": [
+    "./skills/"
+  ],
+  "systemPromptPath": "./runtime/PLUGIN-PROMPT.md",
+  "skillInstructions": "Load the relevant LazyDev Skill for the task. Follow Runtime Policy, especially artifact routing and verification. Do not turn concise guidance into boilerplate.",
+  "commands": "./commands/",
+  "hooks": [
+    {
+      "event": "TurnStarted",
+      "command": "node ./hooks/lazydev-prompt-context.mjs",
+      "timeout": 3
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": "WriteFile|StrReplaceFile",
+      "command": "node ./hooks/lazydev-path-guard.mjs",
+      "timeout": 3
+    },
+    {
+      "event": "PreToolUse",
+      "matcher": "Shell",
+      "command": "node ./hooks/lazydev-shell-guard.mjs",
+      "timeout": 3
+    }
+  ],
+  "interface": {
+    "displayName": "Lazy Developer",
+    "shortDescription": "Compact coding + anti-slop workflow",
+    "longDescription": "Evidence-first implementation, strict artifact routing, focused verification, and intentional UI/UX.",
+    "developerName": "BlizPS",
+    "websiteURL": "https://github.com/BlizPS/lazy-developer-skill-cli"
+  },
+  "sessionStart": {
+    "skill": "lazy-developer"
+  }
+}

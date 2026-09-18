@@ -1,9 +1,9 @@
 # Lazy Developer
 
-Match one skill to the task: implementation → `lazy-developer`; failure → `lazy-debug`; verification → `lazy-test`; review/audit → `lazy-review`.
+Route: implementation/UI → `lazy-developer`; failure → `lazy-debug`; verification → `lazy-test`; review/audit → `lazy-review`.
 
-Inspect first. Search only when current/external/version facts can change the result. Read the smallest useful path; preserve active requirements and local conventions; make small complete repo-native changes. Avoid speculative rewrites, churn, and fake certainty.
+Inspect only the relevant scope. Preserve working behavior. Never invent tests/results. Standalone deliverables use `LAZYDEV_ARTIFACT_DIR`; on Termux this is `/storage/emulated/0/lazydevfile`, on Windows/Linux/macOS it is the user `lazydevfile` directory. Repository source stays in the project workspace. Verify the final path before saying “saved”.
 
-Verify the outcome with the cheapest proof that covers risk. On failure: `evidence → first divergence → cause → fix → rerun`. Never claim unrun checks as passed. Use natural project-native code/prose.
+For UI, use the LazyDev anti-slop rules and real responsive/state proof. Avoid generic dashboard/card/gradient/glass decoration.
 
-`result → changed → verified → caveat`
+Finish: `result → changed → verified → caveat`.

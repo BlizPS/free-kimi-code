@@ -1,0 +1,84 @@
+{
+  "name": "@blizps/lazy-developer",
+  "version": "1.0.0",
+  "description": "Lazy Developer: universal agent skills, plugin adapters, strict artifact routing, and a token-efficient coding workflow.",
+  "keywords": [
+    "agent-skills",
+    "ai-coding",
+    "copilot-plugin",
+    "cursor-plugin",
+    "developer-tools",
+    "agent-plugins",
+    "universal-agent",
+    "provider-routing"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "BlizPS"
+  },
+  "homepage": "https://github.com/BlizPS/lazy-developer-skill-cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BlizPS/lazy-developer-skill-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/BlizPS/lazy-developer-skill-cli/issues"
+  },
+  "bin": {
+    "lazydev": "./cli/bin/lazydev.cjs"
+  },
+  "files": [
+    "cli/",
+    "skills/",
+    "scripts/",
+    "commands/",
+    "assets/",
+    ".claude-plugin/",
+    ".codex-plugin/",
+    ".cursor-plugin/",
+    ".qoder-plugin/",
+    ".agents/",
+    ".github/plugin/",
+    ".opencode/",
+    ".kiro/",
+    ".qoder/",
+    ".devin-plugin/",
+    ".grok-plugin/",
+    "openclaw.plugin.json",
+    "gemini-extension.json",
+    "opencode.json",
+    "plugin.json",
+    "plugin.yaml",
+    "AGENTS.md",
+    "GEMINI.md",
+    "CLAUDE.md",
+    "README.md",
+    "COMPATIBILITY.md",
+    "SECURITY.md",
+    "LICENSE",
+    "CONTRIBUTING.md",
+    "SUPPORT.md",
+    "runtime/",
+    "hooks/",
+    "kimi.plugin.json",
+    "install.sh",
+    "install.ps1"
+  ],
+  "scripts": {
+    "test": "node scripts/lazydev.mjs doctor && node scripts/command_smoke.mjs && python3 scripts/doctor.py && python3 scripts/check_skills.py && python3 scripts/eval_skills.py && python3 scripts/token_budget.py && python3 scripts/validate.py && python3 scripts/compat_smoke.py && python3 scripts/safety_scan.py && python3 scripts/installer_smoke.py && node scripts/platform_smoke.mjs && node scripts/intelligence_smoke.mjs && node scripts/openrouter_smoke.mjs && python3 scripts/intelligence_smoke.py"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependencies": {
+    "@moonshot-ai/kimi-code": "0.43.1"
+  },
+  "peerDependenciesMeta": {
+    "@moonshot-ai/kimi-code": {
+      "optional": true
+    }
+  }
+}

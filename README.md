@@ -2,185 +2,173 @@
 
 # 🦥 Lazy Developer
 
-<img src="assets/image.jpg" alt="Lazy Developer" />
+<img src="assets/image.png" alt="Lazy Developer" />
 
-[![Version](https://img.shields.io/badge/version-1.0.0-6f42c1)](#) [![CI](https://github.com/BlizPS/lazy-developer-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-skill/actions/workflows/validate.yml)
+[![Version](https://img.shields.io/badge/version-1.0.0-6f42c1)](https://github.com/BlizPS/lazy-developer-skill-cli/releases)
+[![CI](https://github.com/BlizPS/lazy-developer-skill-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-skill-cli/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-1.0.0-6f42c1)](#) [![CI](https://github.com/BlizPS/lazy-developer-skill-cli/actions/workflows/validate.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-skill-cli/actions/workflows/validate.yml)
+[![Stars](https://img.shields.io/github/stars/BlizPS/lazy-developer-skill-cli?style=flat)](https://github.com/BlizPS/lazy-developer-skill-cli/stargazers)
+[![Forks](https://img.shields.io/github/forks/BlizPS/lazy-developer-skill-cli?style=flat)](https://github.com/BlizPS/lazy-developer-skill-cli/network/members)
+[![License](https://img.shields.io/badge/license-MIT-111111)](LICENSE)
 
-**Lazy about talking. Relentless about shipping.**
-
-Four execution-first Agent Skills for developers who want less AI slop,
-less wasted context, and more actual engineering — packed for progressive, on-demand loading.
+**A practical skills, plugin, and agent layer for modern coding CLIs.**
 
 </div>
 
----
+Lazy Developer is the part of your coding setup that quietly makes everything feel more put together. It bundles engineering skills, project-aware guidance, guardrails, provider routing, and a simple CLI entrypoint — without forcing you to rebuild your workflow around another giant framework.
 
-## The idea
+Use the built-in LazyDev flow when you want the full experience, or take the same skills and integrations into another compatible coding agent.
 
-Most coding agents spend too many tokens talking about the work.
+## Quick start
 
-**Lazy Developer** flips the priority:
+### 1. Install
 
-> understand → secure → act → verify → ship
+The installer handles the setup in one go. You do **not** need to install LazyDev with npm.
 
-**Lazy Review** uses the same mindset for code review:
-
-> scope → trace → check → report
-
-Less ceremony. More signal.
-
----
-
-## Skills
-
-### Lazy Developer
-The execution skill. Build, debug, refactor, modify, and package real projects with low ceremony, security awareness, project-native code, and verification before shipping.
-
-### Lazy Review
-The review skill. Inspect the relevant surface, trace behavior, find evidence-backed bugs and security issues, and report only findings worth acting on.
-
-### Lazy Debug
-The debugging skill. Reproduce the failure, narrow the executed path, prove the root cause, make the smallest fix, and recheck it. It avoids guess-and-check loops and unnecessary diagnostic noise.
-
-### Lazy Test
-The verification skill. Pick the cheapest checks that actually prove the changed behavior, run them, read what they prove, and stop when the risk is covered.
-
-### Built-in document hygiene
-`lazy-developer` also contains an owned-content document hygiene path for supported text and document formats. It preserves meaning, facts, names, identifiers, and structure while cleaning only clearly non-semantic metadata or formatting residue. It is **not** an authorship claim and is not intended to manipulate detector scores.
-
----
-
-Together, the four skills form a small workflow:
-
-> UNDERSTAND → SECURE → ACT → DEBUG → TEST → REVIEW → SHIP
-
-Each skill is independently usable — use only the one that matches the work. The source skills are kept compact; references and deterministic checks stay outside the hot path.
-
----
-
-## What "lazy" means
-
-Lazy does not mean careless.
-
-It means the agent should be lazy about:
-
-- repeating the request
-- narrating obvious steps
-- printing unchanged code
-- giving five alternatives when one is enough
-- adding architecture nobody asked for
-- producing generic review comments
-- explaining work that can simply be done
-
-It should never be lazy about:
-
-- correctness
-- security
-- requirements
-- relevant edge cases
-- verification
-- evidence
-
----
-
-## Installation
-
-Recommended universal install (project scope):
+**macOS / Linux**
 
 ```bash
-npx skills add BlizPS/lazy-developer-skill --all
+curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-skill-cli/main/install.sh" | sh
 ```
 
-Or target a specific agent:
+**Windows PowerShell**
+
+```powershell
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-skill-cli/main/install.ps1")))
+```
+
+The installer installs or repairs both **Kimi Code 0.43.1** and **Lazy Developer 1.0.0**. Kimi Code is installed through Moonshot's native installer, while LazyDev is installed directly from this GitHub repository. No npm global install is involved in this flow. Kimi Code's official installer is also designed as a native, no-Node prerequisite installation path.
+
+The desktop installer also bootstraps a private Node.js runtime for LazyDev when a compatible Node.js installation is not already available. This keeps the setup self-contained without turning npm into a prerequisite.
+
+> **Termux / Android:** Kimi Code's native installer does not currently publish an Android/Termux build; upstream has an open request for Termux support. The native one-line installer is therefore intended for supported desktop Linux and macOS environments rather than pretending Android is already supported.
+
+### 2. Set up your provider, API key, and model
+
+After installation, configure the AI service LazyDev should use:
 
 ```bash
-npx skills add BlizPS/lazy-developer-skill --skill '*' -a claude-code
+lazydev setup
 ```
 
-GitHub CLI can install the same source to supported coding agents:
+This is the only setup step you need before your first session. Pick a provider, enter its API key, and choose a live model from the provider catalog. Current managed providers include **Gemini, OpenRouter, NVIDIA, Anthropic, and OpenAI**.
+
+### 3. Start coding
+
+Once setup is saved, open the actual coding session with:
 
 ```bash
-gh skill install BlizPS/lazy-developer-skill --all
+lazydev chat
 ```
 
-Claude Code plugin marketplace:
+Running `lazydev` on its own opens the Lazy Developer command center. It does **not** start Kimi Code. The normal flow is simply:
 
 ```text
-/plugin marketplace add BlizPS/lazy-developer-skill
-/plugin install lazy-developer@lazy-developer-marketplace
+Install
+  ↓
+lazydev setup
+  ↓
+Provider + API key + model
+  ↓
+lazydev chat
 ```
 
-Codex marketplace (from a local clone):
+## Why Lazy Developer?
+
+LazyDev is meant to feel like a useful layer on top of your coding tools, not another project-management ceremony.
+
+**Build.** Move from a request to real project changes with a focused engineering workflow.
+
+**Debug.** Follow the evidence, fix the actual path that failed, and verify the result.
+
+**Review.** Look for bugs, regressions, security problems, and the changes that genuinely matter.
+
+**Test.** Run the checks that prove the work, then keep the process moving.
+
+Skills are loaded when they matter, while project guidance and hooks keep the agent grounded in the repository instead of drifting into generic advice.
+
+## Use the skills with other coding CLIs
+
+LazyDev's own CLI is optional. The skills can travel to other compatible agents through the standard Skills CLI:
 
 ```bash
-codex plugin marketplace add .
-codex plugin add lazy-developer@blizps
+npx skills add BlizPS/lazy-developer-skill-cli --all
 ```
 
-OpenCode can consume the same skills through the Agent Skills paths or the universal installer; use its native skill tool after install.
+You can also target a supported agent directly:
 
-Native paths are bundled for Codex/Claude/Cursor/Gemini/Blackbox/OpenCode/Qoder/Kiro and other Agent Skills clients.
-For Gemini extension install, use `gemini extensions install https://github.com/BlizPS/lazy-developer-skill`; for most other clients, prefer the documented native installer or `npx skills`/`gh skill`.
-
-Keep the skills in the standard Agent Skills layout:
-
-```
-skills/
-├── lazy-developer/
-│   └── SKILL.md
-├── lazy-review/
-│   └── SKILL.md
-├── lazy-debug/
-│   └── SKILL.md
-└── lazy-test/
-    └── SKILL.md
+```bash
+npx skills add BlizPS/lazy-developer-skill-cli --agent claude-code
 ```
 
-The skills are independent. Use `lazy-developer` for implementation work and `lazy-review` when you want a focused review of existing code or a change.
+That universal route is separate from `lazydev chat`. LazyDev already ships its bundled skills, so you do not need the Skills CLI just to use LazyDev itself.
 
----
+## Plugins and native integrations
 
-## Package layout
+Where an agent supports native plugins or extensions, LazyDev ships the corresponding integration metadata so you can follow that host's normal installation flow.
 
+The repository includes integration surfaces for environments such as **Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Qoder, Devin, Grok, Kiro, and OpenClaw**.
+
+In other words: keep the coding CLI you already like, and bring LazyDev's skills and integrations with it.
+
+## Providers and models
+
+LazyDev keeps the agent shell separate from the model provider. The built-in `lazydev chat` flow is powered by Kimi Code, while the model endpoint is selected during `lazydev setup`.
+
+| Provider | Credential | Model selection |
+| --- | --- | --- |
+| **Gemini** | `GEMINI_API_KEY` | Live provider catalog |
+| **OpenRouter** | `OPENROUTER_API_KEY` | Live provider catalog |
+| **NVIDIA** | `NVIDIA_API_KEY` | Live provider catalog |
+| **Anthropic** | `ANTHROPIC_API_KEY` | Live provider catalog |
+| **OpenAI** | `OPENAI_API_KEY` | Live provider catalog |
+
+For other coding CLIs, continue using that CLI's own authentication and model-selection flow. LazyDev's skills are independent of that choice.
+
+## Updating
+
+The same installer is both the installer and the updater. Run the command for your platform again:
+
+**macOS / Linux**
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-skill-cli/main/install.sh" | sh
 ```
-skills/
-├── lazy-developer/SKILL.md
-├── lazy-review/SKILL.md
-├── lazy-debug/SKILL.md
-└── lazy-test/SKILL.md
 
-AGENTS.md
-gemini-extension.json
-SECURITY.md
-SUPPORT.md
-scripts/
-├── validate.py
-├── check_skills.py
-├── sync_skills.py
-└── token_budget.py
+**Windows PowerShell**
+
+```powershell
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-skill-cli/main/install.ps1")))
 ```
 
-Edit only the source files under `skills/`, then run `python3 scripts/sync_skills.py` to
-propagate the change to every platform mirror. Run `python3 scripts/token_budget.py`, `python3 scripts/doctor.py`,
-`python3 scripts/eval_skills.py`, `python3 scripts/compat_smoke.py`, `python3 scripts/style_scan.py`, and `python3 scripts/validate.py`; CI runs the same gates
-on every push. The compact skill hot-path is intentionally budgeted to stay at or below one quarter of the original source size.
+It re-applies the pinned Kimi Code version **0.43.1** and refreshes LazyDev from the repository. Kimi Code 0.43.1 is a real upstream release dated September 15, 2026.
 
-The package includes the portable Agent Skills layout plus native discovery paths and plugin/extension entry points where those clients document them. Unknown vendor behavior is not guessed. No vendor-specific feature is assumed when that client does not document it.
+## Troubleshooting
 
----
+If `lazydev chat` says no provider is configured, run `lazydev setup` and save a provider, API key, and model first.
+
+If `lazydev chat` says Kimi Code is missing, rerun the platform installer. The installer checks the native `kimi` launcher instead of relying on npm.
+
+If `lazydev` is installed but the shell cannot find it immediately, open a new terminal or reload your shell profile so the user-level bin directory is picked up.
+
+## Project
+
+Source: https://github.com/BlizPS/lazy-developer-skill-cli
+
+Issues and feature requests: https://github.com/BlizPS/lazy-developer-skill-cli/issues
+
+## Development
+
+The packaged CLI is still a normal Node.js project for contributors, and the repository keeps its npm metadata for publishing/CI compatibility. The **end-user installers do not depend on npm**.
+
+Run the test suite from the repository root:
+
+```bash
+npm test
+```
+
+The validation suite checks package structure, skills, integrations, runtime behavior, provider routing, platform behavior, and installer consistency.
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
-
-Modify, adapt, and redistribute freely.
-
----
-
-<div align="center">
-
-⭐ **Like it? Star it.**
-
-*Less talk More signal*
-
-</div>
+MIT
