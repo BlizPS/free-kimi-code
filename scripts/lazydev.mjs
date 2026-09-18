@@ -1134,9 +1134,11 @@ async function chat() {
   writeLazyDevMcpConfig();
   const invocation = findKimiInvocation();
   if (!invocation) { try { proxy?.server.close(); } catch {} line(red(`Kimi Code launcher not found. Install Kimi Code ${KIMI_VERSION} with the LazyDev installer.`)); return; }
-  // Use an explicit config file so Kimi's account setup flow cannot rewrite the LazyDev proxy config.
-  // Kimi rejects /login, /logout, and /model when a custom config file is active.
-  const launchArgs = [...invocation.args, '--config-file', configPath, '--add-dir', outputDirectory()];
+  // Kimi Code standalone resolves its managed runtime from KIMI_CODE_HOME.
+  // Do not pass the legacy explicit-config flag: recent standalone builds
+  // resolve their runtime config from KIMI_CODE_HOME instead.
+  // The config written above is therefore the canonical runtime configuration.
+  const launchArgs = [...invocation.args, '--add-dir', outputDirectory()];
   const workDirIndex = process.argv.indexOf('--work-dir');
   if (workDirIndex >= 0 && process.argv[workDirIndex + 1]) launchArgs.push('--work-dir', process.argv[workDirIndex + 1]);
   const mode = process.argv.includes('--new') ? 'new' : process.argv.includes('--sessions') || process.argv.includes('--session') ? 'sessions' : process.argv.includes('--resume') || process.argv.includes('--continue') ? 'continue' : 'new';

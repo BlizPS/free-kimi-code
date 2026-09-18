@@ -45,7 +45,7 @@ try {
   const mcp = JSON.parse(fs.readFileSync(path.join(kimiHome, 'mcp.json'), 'utf8'));
   assert.equal(mcp.mcpServers['lazydev-search'].args.at(-1), path.join(root, 'runtime', 'lazydev-web-search.mjs'));
   const args = fs.readFileSync(argsFile, 'utf8');
-  assert.match(args, /--config-file/);
+  assert.doesNotMatch(args, /--config-file/);
   assert.match(args, /--add-dir/);
   assert.doesNotMatch(args, /--mcp-config-file/);
   assert.match(config, /max_steps_per_turn = 0/);
