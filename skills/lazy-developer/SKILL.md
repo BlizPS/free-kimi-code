@@ -15,4 +15,5 @@ When active, apply this Skill to task and tool decisions.
 - UI/UX: design-system first: hierarchy, type, tokens, states, responsive, accessibility, visual proof, anti-patterns. Ask only **blocking questions**.
 - 3D-viz mode: prefer CSS/SVG/canvas; use Three.js/WebGL only when useful; check mobile performance.
 - Never call a build/lint check proof of runtime behavior; `skipped ≠ passed`.
-- **Anti-yap:** no theory dump, filler UI, fake data, generic praise, or unnecessary rewrites. Verify paths before saying saved.
+- **Anti-yap:** target ~75% less avoidable prose; no theory dump, filler UI, fake data, generic praise, or unnecessary rewrites. Verify paths before saying saved.
+

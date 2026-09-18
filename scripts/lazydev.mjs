@@ -54,10 +54,19 @@ const providers = [
   { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', modelsUrl: 'https://api.anthropic.com/v1/models', chatUrl: 'https://api.anthropic.com/v1/messages', env: 'ANTHROPIC_API_KEY' },
 ];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const EFFICIENCY_POLICY_FILE = path.join(root, 'runtime', 'lazy-efficiency.md');
 const isWin = process.platform === 'win32';
 const platform = platformPaths();
 const isTermux = platform.termux;
 const localRequire = createRequire(import.meta.url);
+function efficiencyPolicy() {
+  try { return fs.readFileSync(EFFICIENCY_POLICY_FILE, 'utf8').trim(); } catch { return ''; }
+}
+function efficiencyStatus() {
+  const text = efficiencyPolicy();
+  return { active: Boolean(text), target: text.includes('~75%') ? 0.75 : null, policyFile: EFFICIENCY_POLICY_FILE };
+}
+
 function outputDirectory() {
   const configured = String(process.env.LAZYDEV_ARTIFACT_DIR || '').trim();
   return configured || platform.artifactDirectory;
@@ -1086,6 +1095,7 @@ async function envInfo(jsonMode=false) {
     maxSkillFraction:MAX_SKILL_FRACTION,
     contextBudget:contextBudget(readConfig()?.providers?.[activeProvider(readConfig()).id]?.modelInfo || {}),
     intelligenceProfile:modelIntelligenceProfile(readConfig()?.providers?.[activeProvider(readConfig()).id]?.model || ''),
+    responseEconomy:efficiencyStatus(),
   };
   if (jsonMode) return console.log(JSON.stringify(data,null,2));
   clearScreen(); title(`LazyDev ${version}`); line(`${ansi('36','◆')} Runtime`); line(`  ${data.platform} · ${data.arch} · ${data.node}`); line(`${ansi('36','◆')} Workspace`); line(`  ${data.workspace}`); line(`${ansi('36','◆')} Artifacts`); line(`  ${data.artifactDirectory}`); line(`${ansi('36','◆')} Config`); line(`  ${data.configDirectory}`); line(`${ansi('36','◆')} Kimi home`); line(`  ${data.kimiHome}`); line(`${ansi('36','◆')} Skills`); line(`  ${data.skillsRoot}`); line(`${ansi('36','◆')} Token target`); line(`  >= ${Math.round(data.tokenSavingsFloor*100)}% skill hot-path reduction · target ${Math.round(data.tokenSavingsTarget*100)}%`);
@@ -1160,6 +1170,7 @@ function doctor() {
     ['package.json', fs.existsSync(path.join(root, 'package.json')), true],
     [KIMI_PACKAGE, Boolean(kimiEntry()), false],
     ['Managed CLI adapter', Boolean(findKimiCli()), false],
+    ['Response economy policy', fs.existsSync(EFFICIENCY_POLICY_FILE), true],
     ...skills.map(([name]) => [`skills/${name}/SKILL.md`, fs.existsSync(path.join(root, 'skills', name, 'SKILL.md')), true]),
   ];
   checks.forEach(([name, ok, required]) => line(`${ok ? ansi('32', '✓') : required ? ansi('31', '✗') : ansi('33', '○')} ${name}${!ok && !required ? ' · not installed on this machine' : ''}`));
@@ -1170,7 +1181,8 @@ function doctor() {
   });
   const activeCfg = activeProvider(cfg); const activePc = providerConfig(cfg, activeCfg.id);
   line(); line(`Active       ${activeCfg.label}${activePc.model ? ` · ${activePc.model}` : ' · not configured'}`);
-  line(`Policy        ${green('artifact guard')} · ${green('prompt context')} · ${green('shell guard')}`);
+  line(`Policy        ${green('artifact guard')} · ${green('prompt context')} · ${green('shell guard')} · ${green('response economy')}`);
+  line(`Economy       ${efficiencyStatus().active ? green('active · ~75% avoidable prose target') : red('missing')}`);
   if (providerConfig(cfg, 'openrouter').apiKey) line(dim(`OpenRouter free routing: ${OPENROUTER_FREE_MODEL} + live free fallback candidates`));
 }
 async function listSkills() {

@@ -8,7 +8,8 @@ metadata:
 
 **SCOPE → TRACE → CHALLENGE → PROVE → REPORT.**
 
-- Start at changed files; expand only through proven dependencies. Trace input → validation → state → sink/output.
-- Challenge schema drift, auth, injection, stale state, resource leaks, error paths, compatibility, and regressions.
+- Start at changed files; expand through dependencies. Trace input → validation → state → sink/output.
+- Challenge schema drift, auth, injection, leaks, error paths, compatibility.
 - Finding = **path+evidence+impact + fix**. **style ≠ finding**.
-- **Lead with findings**. Skip **generic praise**. If none: `No actionable findings.`
+- **Lead with findings**. Target ~75% less avoidable prose; skip **generic praise** and restatement. If none: `No actionable findings.`
+

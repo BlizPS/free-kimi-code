@@ -10,5 +10,6 @@ metadata:
 
 - Reproduce the smallest signal; find the **first divergence** with **high-information** checks.
 - Trace input → boundary → failure; fix the root cause narrowly and preserve behavior.
-- Add **regression** proof. No blind retries, dependency swaps, or speculative rewrites.
-- **Anti-yap:** no **theory dump**. Report **cause → fix → proof → caveat**; distinguish skipped from passed.
+- Add **regression** proof. No blind retries or speculative rewrites.
+- **Anti-yap:** target ~75% less avoidable prose; report **cause → fix → proof → caveat** only when each adds information; no **theory dump**.
+
