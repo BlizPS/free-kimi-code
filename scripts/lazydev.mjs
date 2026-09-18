@@ -36,8 +36,12 @@ const providers = [
   { id: 'openrouter', label: 'OpenRouter', kind: 'openai', modelsUrl: 'https://openrouter.ai/api/v1/models', chatUrl: 'https://openrouter.ai/api/v1/chat/completions', env: 'OPENROUTER_API_KEY' },
   { id: 'gemini', label: 'Gemini', kind: 'gemini', modelsUrl: 'https://generativelanguage.googleapis.com/v1beta/models', env: 'GEMINI_API_KEY' },
   { id: 'nvidia', label: 'NVIDIA', kind: 'openai', modelsUrl: 'https://integrate.api.nvidia.com/v1/models', chatUrl: 'https://integrate.api.nvidia.com/v1/chat/completions', env: 'NVIDIA_API_KEY' },
-  { id: 'openai', label: 'OpenAI', kind: 'openai', modelsUrl: 'https://api.openai.com/v1/models', env: 'OPENAI_API_KEY' },
-  { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', modelsUrl: 'https://api.anthropic.com/v1/models', env: 'ANTHROPIC_API_KEY' },
+  { id: 'openai', label: 'OpenAI', kind: 'openai', modelsUrl: 'https://api.openai.com/v1/models', chatUrl: 'https://api.openai.com/v1/chat/completions', env: 'OPENAI_API_KEY' },
+  { id: 'ollama', label: 'Ollama Local', kind: 'ollama', env: null },
+  { id: 'llm7', label: 'LLM7', kind: 'openai', modelsUrl: 'https://api.llm7.io/v1/models', chatUrl: 'https://api.llm7.io/v1/chat/completions', env: 'LLM7_API_KEY' },
+  { id: 'groq', label: 'Groq', kind: 'openai', modelsUrl: 'https://api.groq.com/openai/v1/models', chatUrl: 'https://api.groq.com/openai/v1/chat/completions', env: 'GROQ_API_KEY' },
+  { id: 'codebuddy', label: 'CodeBuddy', kind: 'codebuddy', modelsUrls: ['https://copilot.tencent.com/v3/config', 'https://api.codebuddy.ai/v1/models'], chatUrls: ['https://copilot.tencent.com/v2/chat/completions', 'https://api.codebuddy.ai/v1/chat/completions'], env: 'CODEBUDDY_API_KEY' },
+  { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', modelsUrl: 'https://api.anthropic.com/v1/models', chatUrl: 'https://api.anthropic.com/v1/messages', env: 'ANTHROPIC_API_KEY' },
 ];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const isWin = process.platform === 'win32';
@@ -162,36 +166,70 @@ function prompt(question) {
   });
 }
 
-function requestJson(urlString, { method = 'GET', headers = {}, body, timeout = 30000 } = {}) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(urlString);
-    const req = https.request({ protocol: url.protocol, hostname: url.hostname, port: url.port || 443, path: `${url.pathname}${url.search}`, method, headers: { accept: 'application/json', ...headers }, timeout }, (res) => {
-      let text = '';
-      res.setEncoding('utf8');
-      res.on('data', (chunk) => { text += chunk; });
-      res.on('end', () => {
-        let data = null; try { data = text ? JSON.parse(text) : {}; } catch {}
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          reject(new Error(`${res.statusCode}: ${data?.error?.message || data?.message || text.slice(0, 500) || 'request failed'}`));
-          return;
-        }
-        resolve(data ?? {});
-      });
-      res.on('error', reject);
+async function requestJson(urlString, { method = 'GET', headers = {}, body, timeout = 12000 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(1000, timeout));
+  try {
+    const response = await fetch(urlString, {
+      method,
+      headers: { accept: 'application/json', ...headers },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+      redirect: 'follow',
     });
-    req.on('timeout', () => req.destroy(new Error(`Request timed out after ${timeout}ms.`)));
-    req.on('error', reject);
-    if (body !== undefined) req.write(JSON.stringify(body));
-    req.end();
-  });
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : {}; } catch {}
+    if (!response.ok) {
+      throw new Error(`${response.status}: ${data?.error?.message || data?.message || text.slice(0, 500) || 'request failed'}`);
+    }
+    return data ?? {};
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error(`Request timed out after ${Math.max(1000, timeout)}ms.`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function knownModelInfo(_id) { return {}; }
+function normalizeOllamaBaseUrl(value) {
+  let url = String(value || '').trim();
+  if (!url) url = 'http://127.0.0.1:11434';
+  url = url.replace(/\/+$/, '');
+  for (const suffix of ['/api/tags', '/api/tag', '/v1/models', '/v1']) {
+    if (url.toLowerCase().endsWith(suffix)) { url = url.slice(0, -suffix.length); break; }
+  }
+  url = url.replace(/\/$/, '');
+  return url;
+}
+function ollamaModelsUrl(baseUrl) { return `${normalizeOllamaBaseUrl(baseUrl)}/api/tags`; }
+function ollamaChatUrl(baseUrl) { return `${normalizeOllamaBaseUrl(baseUrl)}/v1/chat/completions`; }
+function extractModelRecords(value, depth = 0) {
+  if (depth > 5 || value == null) return [];
+  if (Array.isArray(value)) return value.flatMap((item) => extractModelRecords(item, depth + 1));
+  if (typeof value !== 'object') return [];
+  const direct = [];
+  const id = value.id ?? value.model ?? value.name ?? value.slug;
+  if (typeof id === 'string' && id.trim()) direct.push({ ...value, id: id.trim() });
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'id' || key === 'model' || key === 'name' || key === 'slug') continue;
+    if (Array.isArray(child) || (child && typeof child === 'object')) direct.push(...extractModelRecords(child, depth + 1));
+  }
+  return direct;
+}
 function normalizeModel(item, provider) {
   const id = String(provider.kind === 'gemini' ? item.name || '' : item.id || '').replace(/^models\//, '');
   const known = knownModelInfo(id);
   if (provider.kind === 'gemini') {
     return { id, name: String(item.displayName || item.name || id), inputLimit: Number(item.inputTokenLimit) || known.inputLimit || null, outputLimit: Number(item.outputTokenLimit) || known.outputLimit || null, contextLimit: Number(item.inputTokenLimit) || known.contextLimit || null, live: true, supportedActions: Array.isArray(item.supportedGenerationMethods) ? item.supportedGenerationMethods : [] };
+  }
+  if (provider.kind === 'ollama') {
+    const id = String(item.name || item.id || item.model || '').trim();
+    return { id, name: id, inputLimit: null, outputLimit: null, contextLimit: null, live: true, toolUse: true, local: true };
+  }
+  if (provider.kind === 'codebuddy') {
+    return { id, name: String(item.displayName || item.name || item.id || id), inputLimit: Number(item.max_input_tokens) || Number(item.context_window) || null, outputLimit: Number(item.max_output_tokens) || Number(item.max_tokens) || null, contextLimit: Number(item.context_window) || Number(item.max_input_tokens) || null, live: true, toolUse: item.supportsToolCall !== false };
   }
   if (provider.kind === 'anthropic') {
     const capabilities = item.capabilities && typeof item.capabilities === 'object' ? item.capabilities : {};
@@ -239,21 +277,45 @@ function buildOpenRouterFreeFallbacks(primaryModel, models) {
   }
   return unique;
 }
-async function fetchModels(provider, apiKey) {
+async function fetchModels(provider, apiKey, options = {}) {
+  const timeout = Number(options.timeout) || 12000;
+  if (provider.kind === 'ollama') {
+    const baseUrl = normalizeOllamaBaseUrl(options.baseUrl);
+    try {
+      const data = await requestJson(ollamaModelsUrl(baseUrl), { timeout });
+      return (Array.isArray(data.models) ? data.models : []).map((item) => normalizeModel(item, provider)).filter((x) => x.id);
+    } catch (primaryError) {
+      const data = await requestJson(`${baseUrl}/v1/models`, { timeout });
+      return (Array.isArray(data.data) ? data.data : []).map((item) => normalizeModel(item, provider)).filter((x) => x.id);
+    }
+  }
   if (provider.kind === 'gemini') {
-    const data = await requestJson(`${provider.modelsUrl}?key=${encodeURIComponent(apiKey)}&pageSize=1000`);
-    return (Array.isArray(data.models) ? data.models : []).filter((x) => Array.isArray(x.supportedGenerationMethods) && x.supportedGenerationMethods.includes('generateContent')).map((x) => normalizeModel(x, provider)).filter((x) => x.id);
+    const data = await requestJson(`${provider.modelsUrl}?key=${encodeURIComponent(apiKey)}&pageSize=1000`, { timeout });
+    return (Array.isArray(data.models) ? data.models : [])
+      .filter((x) => Array.isArray(x.supportedGenerationMethods) && x.supportedGenerationMethods.includes('generateContent'))
+      .map((x) => normalizeModel(x, provider)).filter((x) => x.id);
   }
   if (provider.kind === 'anthropic') {
-    const data = await requestJson(provider.modelsUrl, { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'user-agent': `lazydev/${version}` } });
+    const data = await requestJson(provider.modelsUrl, { timeout, headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'user-agent': `lazydev/${version}` } });
     return (Array.isArray(data.data) ? data.data : []).map((x) => normalizeModel(x, provider)).filter((x) => x.id);
   }
-  const data = await requestJson(provider.modelsUrl, { headers: { Authorization: `Bearer ${apiKey}`, 'user-agent': `lazydev/${version}` } });
+  if (provider.kind === 'codebuddy') {
+    const urls = Array.isArray(provider.modelsUrls) ? provider.modelsUrls : [];
+    let lastError = null;
+    for (const url of urls) {
+      try {
+        const headers = { Authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey, 'user-agent': `lazydev/${version}` };
+        const data = await requestJson(url, { timeout, headers });
+        const raw = Array.isArray(data.data) ? data.data : extractModelRecords(data);
+        const models = raw.map((x) => typeof x === 'string' ? ({ id: x }) : x).map((x) => normalizeModel(x, provider)).filter((x) => x.id);
+        if (models.length) return Array.from(new Map(models.map((m) => [m.id, m])).values());
+      } catch (error) { lastError = error; }
+    }
+    throw lastError || new Error('CodeBuddy did not return a live model catalog.');
+  }
+  const data = await requestJson(provider.modelsUrl, { timeout, headers: { Authorization: `Bearer ${apiKey}`, 'user-agent': `lazydev/${version}` } });
   const list = Array.isArray(data.data) ? data.data : [];
   if (provider.id !== 'openrouter') return list.map((x) => normalizeModel(x, provider)).filter((x) => x.id);
-  // OpenRouter documents `openrouter/free` as a dedicated router endpoint.
-  // It may not appear as an ordinary `/api/v1/models` record, so keep it
-  // explicitly visible and use the live catalog only for the fallback pool.
   const filtered = list.filter((x) => !Array.isArray(x.supported_parameters) || x.supported_parameters.includes('tools'));
   const models = filtered.map((x) => normalizeModel(x, provider)).filter((x) => x.id);
   if (!models.some((x) => x.id === OPENROUTER_FREE_MODEL)) models.unshift(syntheticOpenRouterFreeModel());
@@ -265,6 +327,15 @@ function clearScreen() {
   process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
 }
 function findKimiInvocation() {
+  // Prefer the native Kimi Code installation managed by this project.
+  // This prevents an older npm/global shim from shadowing a freshly refreshed launcher.
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const nativeCandidates = isWin
+    ? [path.join(home, '.kimi-code', 'bin', 'kimi.exe'), path.join(home, '.local', 'bin', 'kimi.exe'), path.join(home, '.local', 'bin', 'kimi.cmd')]
+    : [path.join(home, '.kimi-code', 'bin', 'kimi'), path.join(home, '.local', 'bin', 'kimi')];
+  for (const candidate of nativeCandidates) {
+    try { if (fs.existsSync(candidate)) return { command: candidate, args: [] }; } catch {}
+  }
   const pathCandidates = isWin ? ['kimi.cmd', 'kimi.exe'] : ['kimi'];
   const probe = isWin ? 'where' : 'which';
   for (const candidate of pathCandidates) {
@@ -275,13 +346,6 @@ function findKimiInvocation() {
         if (first) return { command: first, args: [] };
       }
     } catch {}
-  }
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  const nativeCandidates = isWin
-    ? [path.join(home, '.kimi-code', 'bin', 'kimi.exe'), path.join(home, '.local', 'bin', 'kimi.exe')]
-    : [path.join(home, '.kimi-code', 'bin', 'kimi'), path.join(home, '.local', 'bin', 'kimi')];
-  for (const candidate of nativeCandidates) {
-    try { if (fs.existsSync(candidate)) return { command: candidate, args: [] }; } catch {}
   }
   const packageRoot = resolveKimiPackageRoot();
   if (!packageRoot) return null;
@@ -354,11 +418,17 @@ async function createProxy(provider, pc, proxyOptions = {}) {
       // not part of the standard chat completions schema before forwarding.
       for (const field of UNSUPPORTED_PASSTHROUGH_FIELDS) delete body[field];
       const payload = JSON.stringify(body);
-      const target = new URL(provider.chatUrl);
+      const chatUrl = provider.id === 'ollama' ? ollamaChatUrl(pc.baseUrl) : (provider.chatUrl || provider.chatUrls?.[0]);
+      if (!chatUrl) {
+        res.writeHead(500, {'content-type':'application/json'});
+        res.end(JSON.stringify({error:{message:'Provider chat endpoint is not configured.'}}));
+        return;
+      }
+      const target = new URL(chatUrl);
       const headers = {
         'content-type': 'application/json',
         'accept': req.headers.accept || 'application/json',
-        'authorization': `Bearer ${pc.apiKey}`,
+        ...(provider.id === 'ollama' ? {} : {'authorization': `Bearer ${pc.apiKey}`}),
         'user-agent': `lazydev/${version}`,
         'content-length': Buffer.byteLength(payload)
       };
@@ -507,16 +577,14 @@ function buildKimiConfig(provider, pc, proxy = null) {
   const budget = contextBudget(pc.modelInfo);
   const context = budget.max;
   const output = budget.output;
-  const providerType = provider.id === 'gemini' ? 'google-genai' : provider.id === 'openai' ? 'openai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
+  const providerType = provider.id === 'gemini' ? 'google-genai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
   const intelligence = modelIntelligenceProfile(pc.model);
   const modelCapabilities = provider.id === 'gemini' ? ['tool_use','thinking'] : ['tool_use'];
   const providerLines = provider.id === 'gemini'
     ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`api_key = ${tomlQuote(pc.apiKey)}`]
-    : provider.id === 'openai'
-      ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote('https://api.openai.com/v1')}`,`api_key = ${tomlQuote(pc.apiKey)}`]
-      : provider.id === 'anthropic'
-        ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote('https://api.anthropic.com')}`,`api_key = ${tomlQuote(pc.apiKey)}`]
-        : [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote(`http://127.0.0.1:${proxy?.port}/v1`)}`,`api_key = ${tomlQuote(proxy?.token || '')}`];
+    : provider.id === 'anthropic'
+      ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote('https://api.anthropic.com')}`,`api_key = ${tomlQuote(pc.apiKey)}`]
+      : [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote(`http://127.0.0.1:${proxy?.port}/v1`)}`,`api_key = ${tomlQuote(proxy?.token || '')}`];
   const artifactHook = path.join(root, 'hooks', 'lazydev-path-guard.mjs');
   const promptHook = path.join(root, 'hooks', 'lazydev-prompt-context.mjs');
   const shellHook = path.join(root, 'hooks', 'lazydev-shell-guard.mjs');
@@ -605,24 +673,32 @@ async function setup() {
   line();
   providers.forEach((p, i) => {
     const c = providerConfig(cfg, p.id);
-    const state = c.apiKey && c.model ? green('saved') : dim('not configured');
+    const configured = p.id === 'ollama' ? Boolean(c.baseUrl && c.model) : Boolean(c.apiKey && c.model);
+    const state = configured ? green('saved') : dim('not configured');
     line(`${i + 1}. ${p.label} · ${state}${c.model ? ` · ${truncate(c.model, 42)}` : ''}`);
   });
   line();
-  const n = Number((await prompt('Provider [1-5]: ')).trim());
-  if (!Number.isInteger(n) || n < 1 || n > 5) { line(red('Choose 1, 2, 3, 4, or 5.')); return; }
+  const n = Number((await prompt('Provider [1-9]: ')).trim());
+  if (!Number.isInteger(n) || n < 1 || n > providers.length) { line(red('Choose a provider number from 1 to 9.')); return; }
   const provider = providers[n - 1];
   const saved = providerConfig(cfg, provider.id);
   let apiKey = String(saved.apiKey || '').trim();
-  if (apiKey) {
-    const keep = (await prompt(`${provider.label} key saved. Keep it? [Y/n]: `)).trim().toLowerCase();
-    if (keep && !['y', 'yes'].includes(keep)) apiKey = '';
+  let baseUrl = String(saved.baseUrl || '').trim();
+  if (provider.id === 'ollama') {
+    baseUrl = (await prompt(`Ollama API URL [${baseUrl || 'http://127.0.0.1:11434'}]: `)).trim() || baseUrl || 'http://127.0.0.1:11434';
+    baseUrl = normalizeOllamaBaseUrl(baseUrl);
+    process.stdout.write(`${provider.label} · checking local API + live models ... `);
+  } else {
+    if (apiKey) {
+      const keep = (await prompt(`${provider.label} key saved. Keep it? [Y/n]: `)).trim().toLowerCase();
+      if (keep && !['y', 'yes'].includes(keep)) apiKey = '';
+    }
+    if (!apiKey) apiKey = (await prompt(`${provider.label} API key: `)).trim();
+    if (!apiKey) { line(yellow('Skipped: no API key entered.')); return; }
+    process.stdout.write(`${provider.label} · loading live models (15s timeout) ... `);
   }
-  if (!apiKey) apiKey = (await prompt(`${provider.label} API key: `)).trim();
-  if (!apiKey) { line(yellow('Skipped: no API key entered.')); return; }
-  process.stdout.write(`${provider.label} · loading live models ... `);
   try {
-    const models = await fetchModels(provider, apiKey);
+    const models = await fetchModels(provider, apiKey, { baseUrl, timeout: 15000 });
     process.stdout.write(green(`${models.length} found\n`));
     if (!models.length) throw new Error('No compatible models returned.');
     if (provider.id === 'openrouter') {
@@ -632,7 +708,9 @@ async function setup() {
     const current = String(saved.model || '');
     let index = Math.max(0, models.findIndex((m) => m.id === current));
     const chosen = await selectModel(models, index);
-    cfg.providers[provider.id] = { apiKey, model: chosen.id, modelInfo: chosen };
+    cfg.providers[provider.id] = provider.id === 'ollama'
+      ? { baseUrl, apiKey: 'ollama', model: chosen.id, modelInfo: chosen }
+      : { apiKey, model: chosen.id, modelInfo: chosen };
     cfg.activeProvider = provider.id;
     writeConfig(cfg);
     line(green(`✓ ${provider.label} · saved`));
@@ -841,11 +919,11 @@ async function chat() {
     }
     openRouterModels = live.models || [];
   }
-  // Gemini uses Kimi Code's native google-genai protocol; OpenRouter/NVIDIA use the local compatibility proxy.
+  // Gemini and Anthropic use their native Kimi provider types; the other providers are normalized through the local compatibility proxy where needed.
   const freeFallbacks = provider.id === 'openrouter' && (pc.model === OPENROUTER_FREE_MODEL || /:free$/i.test(pc.model))
     ? buildOpenRouterFreeFallbacks(pc.model, openRouterModels)
     : [];
-  const proxy = ['openrouter','nvidia'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null;
+  const proxy = !['gemini','openai','anthropic'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null;
   fs.mkdirSync(kimiHome(), { recursive: true, mode: 0o700 });
   const configPath = path.join(kimiHome(), 'config.toml');
   const tuiPath = path.join(kimiHome(), 'tui.toml');

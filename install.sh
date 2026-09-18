@@ -55,13 +55,13 @@ cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT INT TERM HUP
 
 find_kimi() {
+  for candidate in "$HOME/.kimi-code/bin/kimi" "$HOME/.local/bin/kimi"; do
+    if [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
+  done
   if command -v kimi >/dev/null 2>&1; then
     command -v kimi
     return 0
   fi
-  for candidate in "$HOME/.kimi-code/bin/kimi" "$HOME/.local/bin/kimi"; do
-    if [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
-  done
   return 1
 }
 
@@ -76,6 +76,52 @@ find_rtk() {
   return 1
 }
 
+
+is_lazydev_launcher() {
+  file="$1"
+  [ -f "$file" ] || [ -L "$file" ] || return 1
+  target="$file"
+  if [ -L "$target" ] && command -v readlink >/dev/null 2>&1; then
+    resolved="$(readlink -f "$target" 2>/dev/null || true)"
+    [ -n "$resolved" ] && target="$resolved"
+  fi
+  [ -f "$target" ] || return 1
+  grep -Eq 'Lazy Developer managed launcher|scripts/lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code' "$target" 2>/dev/null
+}
+
+replace_legacy_lazydev_launchers() {
+  canonical="$LAZYDEV_BIN_DIR/lazydev"
+  [ -f "$canonical" ] || return 0
+  old_path="${PATH:-}"
+  old_ifs="$IFS"
+  IFS=':'
+  for dir in $old_path; do
+    IFS="$old_ifs"
+    [ -n "$dir" ] || { IFS=':'; continue; }
+    candidate="$dir/lazydev"
+    if [ "$candidate" != "$canonical" ] && is_lazydev_launcher "$candidate" && [ -w "$candidate" ]; then
+      cp "$canonical" "$candidate"
+      chmod 755 "$candidate" 2>/dev/null || true
+      say "✓ Refreshed existing LazyDev launcher: $candidate"
+    fi
+    IFS=':'
+  done
+  IFS="$old_ifs"
+}
+
+refresh_shell_path() {
+  rc="$1"
+  [ -n "$rc" ] || return 0
+  mkdir -p "$(dirname "$rc")"
+  tmp="$rc.lazydev.$$"
+  if [ -f "$rc" ]; then
+    awk '!/^# Lazy Developer PATH$/ && !/^export PATH=.*\.kimi-code\/bin.*$/ && !/^fish_add_path .*\.kimi-code/ {print}' "$rc" > "$tmp"
+  else
+    : > "$tmp"
+  fi
+  printf '# Lazy Developer PATH\nexport PATH="%s:%s:$PATH"\n' "$LAZYDEV_BIN_DIR" "$HOME/.kimi-code/bin" >> "$tmp"
+  mv "$tmp" "$rc"
+}
 KIMI_COMMAND="$(find_kimi 2>/dev/null || true)"
 KIMI_CURRENT_VERSION=""
 KIMI_NEEDS_UPDATE=1
@@ -114,9 +160,19 @@ fi
 if [ -f "$LAZYDEV_HOME/.lazydev-revision" ]; then
   CURRENT_LAZY_REVISION="$(tr -d '[:space:]' < "$LAZYDEV_HOME/.lazydev-revision")"
 fi
+LAZYDEV_INSTALL_COMPLETE=0
+if [ -f "$LAZYDEV_HOME/package.json" ] && \
+   [ -f "$LAZYDEV_HOME/scripts/lazydev.mjs" ] && \
+   [ -f "$LAZYDEV_HOME/skills/lazy-developer/SKILL.md" ] && \
+   [ -f "$LAZYDEV_HOME/skills/lazy-debug/SKILL.md" ] && \
+   [ -f "$LAZYDEV_HOME/skills/lazy-review/SKILL.md" ] && \
+   [ -f "$LAZYDEV_HOME/skills/lazy-test/SKILL.md" ] && \
+   [ -x "$LAZYDEV_BIN_DIR/lazydev" ]; then
+  LAZYDEV_INSTALL_COMPLETE=1
+fi
 if [ -n "$CURRENT_LAZY_VERSION" ] && [ "$CURRENT_LAZY_VERSION" != "$LAZYDEV_VERSION" ]; then
   say "Lazy Developer version $CURRENT_LAZY_VERSION differs from $LAZYDEV_VERSION — update required."
-elif [ -n "$CURRENT_LAZY_REVISION" ] && [ "$CURRENT_LAZY_REVISION" = "$REMOTE_REVISION" ] && [ -x "$LAZYDEV_BIN_DIR/lazydev" ]; then
+elif [ "$LAZYDEV_INSTALL_COMPLETE" -eq 1 ] && [ -n "$CURRENT_LAZY_REVISION" ] && [ "$CURRENT_LAZY_REVISION" = "$REMOTE_REVISION" ]; then
   LAZYDEV_NEEDS_UPDATE=0
   say "Lazy Developer $LAZYDEV_VERSION is already current — skipped."
 elif [ -n "$CURRENT_LAZY_REVISION" ]; then
@@ -185,11 +241,21 @@ if [ "$RTK_NEEDS_UPDATE" -eq 1 ]; then
 fi
 
 # Make RTK available to Kimi without touching the user's project files.
+RTK_CONNECT_NEEDED=0
 if [ -n "$RTK_COMMAND" ]; then
+  if [ "$KIMI_NEEDS_UPDATE" -ne 0 ] || [ "$RTK_NEEDS_UPDATE" -ne 0 ] || [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
+    RTK_CONNECT_NEEDED=1
+  elif [ ! -f "$KIMI_RUNTIME_HOME/AGENTS.md" ] || ! grep -qi 'rtk' "$KIMI_RUNTIME_HOME/AGENTS.md" 2>/dev/null; then
+    RTK_CONNECT_NEEDED=1
+  fi
+fi
+if [ "$RTK_CONNECT_NEEDED" -ne 0 ]; then
   mkdir -p "$KIMI_RUNTIME_HOME"
   step "Connecting RTK to Kimi Code"
   (cd "$KIMI_RUNTIME_HOME" && RTK_TELEMETRY_DISABLED=1 "$RTK_COMMAND" init --agent kimi) || fatal "RTK Kimi integration failed."
   say "✓ RTK is connected to Kimi Code"
+elif [ -n "$RTK_COMMAND" ]; then
+  say "RTK Kimi integration already current — skipped."
 fi
 
 if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
@@ -268,6 +334,7 @@ if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
   LAZYDEV_LAUNCHER="$LAZYDEV_BIN_DIR/lazydev"
   cat > "$LAZYDEV_LAUNCHER" <<EOF
 #!/bin/sh
+# Lazy Developer managed launcher
 set -eu
 LAZYDEV_ROOT="$(printf '%s' "$LAZYDEV_HOME" | sed 's/[\\&]/\\&/g')"
 if [ -x "\$LAZYDEV_ROOT/runtime-node/node" ]; then
@@ -283,23 +350,26 @@ EOF
   PATH="$LAZYDEV_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
   export PATH
 
-  case "${SHELL:-}" in
-    */zsh) RC_FILE="$HOME/.zshrc" ;;
-    */fish) RC_FILE="$HOME/.config/fish/config.fish" ;;
-    *) RC_FILE="$HOME/.bashrc" ;;
-  esac
-  if [ "$(basename "${SHELL:-sh}")" = "fish" ]; then
-    mkdir -p "$(dirname "$RC_FILE")"
-    grep -Fq "# Lazy Developer PATH" "$RC_FILE" 2>/dev/null || {
-      printf "# Lazy Developer PATH\nfish_add_path '%s' '%s'\n" "$LAZYDEV_BIN_DIR" "$HOME/.kimi-code/bin" >> "$RC_FILE"
-    }
-  else
-    grep -Fq "# Lazy Developer PATH" "$RC_FILE" 2>/dev/null || {
-      printf '# Lazy Developer PATH\nexport PATH="%s:%s:$PATH"\n' "$LAZYDEV_BIN_DIR" "$HOME/.kimi-code/bin" >> "$RC_FILE"
-    }
-  fi
   say "✓ Lazy Developer $LAZYDEV_VERSION ready"
 fi
+
+# Reconcile launchers and shell PATH even when every component was skipped.
+# This matters when an older npm/user-local launcher is still first in the current PATH.
+replace_legacy_lazydev_launchers
+case "${SHELL:-}" in
+  */zsh) RC_FILE="$HOME/.zshrc" ; refresh_shell_path "$RC_FILE" ;;
+  */fish)
+    RC_FILE="$HOME/.config/fish/config.fish"
+    mkdir -p "$(dirname "$RC_FILE")"
+    tmp="$RC_FILE.lazydev.$$"
+    if [ -f "$RC_FILE" ]; then
+      awk '!/^# Lazy Developer PATH$/ && !/^fish_add_path .*\.kimi-code/ {print}' "$RC_FILE" > "$tmp"
+    else : > "$tmp"; fi
+    printf "# Lazy Developer PATH\nfish_add_path '%s' '%s'\n" "$LAZYDEV_BIN_DIR" "$HOME/.kimi-code/bin" >> "$tmp"
+    mv "$tmp" "$RC_FILE"
+    ;;
+  *) RC_FILE="$HOME/.bashrc" ; refresh_shell_path "$RC_FILE" ;;
+esac
 
 printf '\n'
 say "Lazy Developer installer finished."
@@ -307,6 +377,8 @@ say "Kimi Code: ${KIMI_CURRENT_VERSION:-unknown}"
 say "RTK: ${RTK_CURRENT_VERSION:-unknown}"
 say "Lazy Developer: $LAZYDEV_VERSION"
 say "Existing Kimi sessions and configuration were left in place."
+say ""
+say "If this terminal still resolves an older lazydev, run: hash -r 2>/dev/null || true"
 say ""
 say "Next:"
 say "  lazydev setup"

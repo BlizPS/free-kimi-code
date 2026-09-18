@@ -8,6 +8,9 @@ $LazyDevHome = if ($env:LAZYDEV_HOME) { $env:LAZYDEV_HOME } else { Join-Path $HO
 $LazyDevBin = if ($env:LAZYDEV_BIN_DIR) { $env:LAZYDEV_BIN_DIR } else { Join-Path $HOME '.local\bin' }
 $LazyDevConfig = if ($env:LAZYDEV_CONFIG_DIR) { $env:LAZYDEV_CONFIG_DIR } else { Join-Path $env:APPDATA 'lazydev' }
 $KimiNativeHome = Join-Path $HOME '.kimi-code'
+$KimiLegacyHome = Join-Path $HOME '.kimi'
+$KimiLegacyDirs = @($KimiLegacyHome, (Join-Path $env:APPDATA 'kimi'), (Join-Path $env:APPDATA 'kimi-code'), (Join-Path $env:LOCALAPPDATA 'kimi'), (Join-Path $env:LOCALAPPDATA 'kimi-code'))
+$RtkDataDirs = @((Join-Path $HOME '.local\share\rtk'), (Join-Path $HOME '.cache\rtk'))
 $ArtifactDir = Join-Path $HOME 'lazydevfile'
 $RtkConfigs = @(
     (Join-Path $env:APPDATA 'rtk'),
@@ -25,6 +28,26 @@ Project directories outside those managed locations are left untouched.
 To reinstall later, run the Lazy Developer installer again.
 "@ | Write-Host
 exit 0
+}
+
+function Remove-IfManagedFile([string]$Path, [string]$Pattern) {
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    try {
+        $text = Get-Content -Raw -LiteralPath $Path -ErrorAction Stop
+        if ($text -match $Pattern) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
+    } catch {}
+}
+function Remove-CommandShims {
+    $commands = @(Get-Command lazydev,kimi,rtk -All -ErrorAction SilentlyContinue)
+    foreach ($cmd in $commands) {
+        $path = $cmd.Source
+        if (-not $path) { continue }
+        switch -Regex ($cmd.Name) {
+            '^lazydev' { Remove-IfManagedFile $path 'Lazy Developer managed launcher|lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code' }
+            '^kimi' { Remove-IfManagedFile $path '\.kimi-code|kimi-code|@moonshot-ai/kimi-code' }
+            '^rtk' { Remove-IfManagedFile $path 'rtk-ai/rtk|Rust Token Killer' }
+        }
+    }
 }
 
 function Stop-IfRunning([string]$Name) {
@@ -50,16 +73,41 @@ Remove-Item -LiteralPath $LazyDevConfig -Recurse -Force -ErrorAction SilentlyCon
 Remove-Item -LiteralPath (Join-Path $LazyDevBin 'lazydev.cmd') -Force -ErrorAction SilentlyContinue
 
 Write-Host "`n==> Removing Kimi Code"
-Remove-Item -LiteralPath $KimiNativeHome -Recurse -Force -ErrorAction SilentlyContinue
+foreach ($dir in @($KimiNativeHome) + $KimiLegacyDirs) {
+    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+}
+foreach ($dir in @((Join-Path $HOME '.local\share\kimi-code'), (Join-Path $HOME '.cache\kimi-code'), (Join-Path $HOME '.local\state\kimi-code'))) {
+    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+}
+Remove-Item -LiteralPath (Join-Path $LazyDevBin 'kimi.exe') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $LazyDevBin 'kimi.cmd') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $HOME '.local\bin\kimi.exe') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $HOME '.local\bin\kimi.cmd') -Force -ErrorAction SilentlyContinue
 if (Get-Command npm.cmd -ErrorAction SilentlyContinue) {
     & npm.cmd uninstall -g @blizps/lazy-developer @moonshot-ai/kimi-code *> $null
     $global:LASTEXITCODE = 0
 }
+$LegacyNpmRoots = @(
+    (Join-Path $env:APPDATA 'npm\node_modules'),
+    (Join-Path $env:LOCALAPPDATA 'npm\node_modules'),
+    (Join-Path $HOME '.npm-global\node_modules')
+)
+foreach ($npmRoot in $LegacyNpmRoots) {
+    Remove-Item -LiteralPath (Join-Path $npmRoot '@blizps\lazy-developer') -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $npmRoot '@moonshot-ai\kimi-code') -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 Write-Host "`n==> Removing RTK"
+$RtkExeCurrent = Get-Command rtk.exe -ErrorAction SilentlyContinue
+if ($RtkExeCurrent) {
+    & $RtkExeCurrent.Source gain *> $null
+    if ($LASTEXITCODE -eq 0) { & $RtkExeCurrent.Source init -g --uninstall *> $null }
+}
 Remove-Item -LiteralPath (Join-Path $LazyDevBin 'rtk.exe') -Force -ErrorAction SilentlyContinue
 foreach ($dir in $RtkConfigs) {
+    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+}
+foreach ($dir in $RtkDataDirs) {
     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
@@ -67,6 +115,8 @@ Write-Host "`n==> Removing LazyDev workspace artifacts"
 Remove-Item -LiteralPath $ArtifactDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "`n==> Cleaning user PATH entries"
+Remove-CommandShims
+
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if ($userPath) {
     $entries = @($userPath -split ';' | Where-Object { $_ })
@@ -81,10 +131,12 @@ $paths = @(
     $LazyDevHome,
     $LazyDevConfig,
     $KimiNativeHome,
+    $KimiLegacyHome,
     (Join-Path $LazyDevBin 'lazydev.cmd'),
     (Join-Path $LazyDevBin 'rtk.exe'),
+    (Join-Path $LazyDevBin 'kimi.exe'),
     $ArtifactDir
-) + $RtkConfigs
+) + $RtkConfigs + $RtkDataDirs + $KimiLegacyDirs
 foreach ($path in $paths) {
     if (Test-Path -LiteralPath $path) { throw "Cleanup incomplete: $path still exists." }
 }

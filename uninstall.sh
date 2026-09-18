@@ -11,7 +11,11 @@ else
   RTK_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rtk"
 fi
 KIMI_NATIVE_HOME="$HOME/.kimi-code"
+KIMI_LEGACY_HOME="$HOME/.kimi"
+KIMI_CONFIG_DIRS="${XDG_CONFIG_HOME:-$HOME/.config}/kimi ${XDG_CONFIG_HOME:-$HOME/.config}/kimi-code $HOME/.config/kimi $HOME/.config/kimi-code"
 ARTIFACT_DIR="$HOME/lazydevfile"
+RTK_DATA_DIR="$HOME/.local/share/rtk"
+RTK_CACHE_DIR="$HOME/.cache/rtk"
 
 say() { printf '%s\n' "$*"; }
 step() { printf '\n==> %s\n' "$*"; }
@@ -23,10 +27,53 @@ remove_path_lines() {
   tmp="${file}.lazydev-uninstall.$$"
   sed \
     -e '/^[[:space:]]*# Lazy Developer PATH[[:space:]]*$/d' \
-    -e '\|export PATH="[^"]*\.kimi-code/bin:[^"]*"$|d' \
-    -e "\|fish_add_path '$LAZYDEV_BIN_DIR' '$HOME/.kimi-code/bin'|d" \
+    -e '\|^export PATH=.*\.kimi-code/bin.*$|d' \
+    -e "\|fish_add_path .*\.kimi-code.*|d" \
     "$file" > "$tmp"
   mv "$tmp" "$file"
+}
+
+remove_managed_launchers_from_path() {
+  paths="${PATH:-}"
+  old_ifs="$IFS"
+  IFS=':'
+  for dir in $paths; do
+    IFS="$old_ifs"
+    [ -n "$dir" ] || { IFS=':'; continue; }
+    for name in lazydev kimi rtk; do
+      candidate="$dir/$name"
+      [ -e "$candidate" ] || { continue; }
+      case "$name" in
+        lazydev)
+          if is_managed_file "$candidate" 'Lazy Developer managed launcher|scripts/lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code'; then rm -f "$candidate" 2>/dev/null || true; fi
+          ;;
+        kimi)
+          if is_managed_file "$candidate" '\.kimi-code|kimi-code|@moonshot-ai/kimi-code'; then rm -f "$candidate" 2>/dev/null || true; fi
+          ;;
+        rtk)
+          if is_managed_file "$candidate" 'rtk-ai/rtk|Rust Token Killer'; then rm -f "$candidate" 2>/dev/null || true; fi
+          ;;
+      esac
+    done
+    IFS=':'
+  done
+  IFS="$old_ifs"
+}
+
+is_managed_file() {
+  file="$1"; pattern="$2"
+  [ -f "$file" ] || [ -L "$file" ] || return 1
+  target="$file"
+  if [ -L "$target" ] && command -v readlink >/dev/null 2>&1; then
+    resolved="$(readlink -f "$target" 2>/dev/null || true)"
+    [ -n "$resolved" ] && target="$resolved"
+  fi
+  if [ -L "$file" ] && command -v readlink >/dev/null 2>&1; then
+    link_target="$(readlink "$file" 2>/dev/null || true)"
+    if printf '%s\n' "$link_target" | grep -Eq "$pattern"; then return 0; fi
+  fi
+  [ -f "$target" ] || return 1
+  grep -Eq "$pattern" "$target" 2>/dev/null
 }
 
 process_running() {
@@ -51,27 +98,44 @@ assert_stopped
 
 step "Removing Lazy Developer"
 rm -rf "$LAZYDEV_HOME" "$LAZYDEV_HOME.previous" "$LAZYDEV_CONFIG_DIR"
-rm -f "$LAZYDEV_BIN_DIR/lazydev"
+rm -f "$LAZYDEV_BIN_DIR/lazydev" "$LAZYDEV_BIN_DIR/lazydev.cmd" "$LAZYDEV_BIN_DIR/lazydev.ps1"
 
 step "Removing Kimi Code"
-rm -rf "$KIMI_NATIVE_HOME" 2>/dev/null || true
-# LazyDev's Kimi data directory lives under its config root and was removed above.
+rm -rf "$KIMI_NATIVE_HOME" "$KIMI_LEGACY_HOME" 2>/dev/null || true
+for dir in $KIMI_CONFIG_DIRS; do rm -rf "$dir" 2>/dev/null || true; done
+rm -rf "$HOME/.local/share/kimi-code" "$HOME/.cache/kimi-code" "$HOME/.local/state/kimi-code" 2>/dev/null || true
+rm -rf "$HOME/Library/Application Support/kimi-code" "$HOME/Library/Caches/kimi-code" "$HOME/Library/Logs/kimi-code" 2>/dev/null || true
 # Remove legacy npm installs when npm happens to be present; npm is not required for uninstall.
 if command -v npm >/dev/null 2>&1; then
   npm uninstall -g @blizps/lazy-developer @moonshot-ai/kimi-code >/dev/null 2>&1 || true
 fi
-rm -f "$LAZYDEV_BIN_DIR/kimi" "$LAZYDEV_BIN_DIR/kimi.cmd" 2>/dev/null || true
+# Remove legacy global package directories even when npm itself is unavailable.
+for npm_root in \
+  "$HOME/.npm-global/lib/node_modules" \
+  "$HOME/.local/lib/node_modules" \
+  "$HOME/.nvm/versions/node"/*/lib/node_modules \
+  "${PREFIX:-}/lib/node_modules" \
+  "/usr/local/lib/node_modules" \
+  "/usr/lib/node_modules"; do
+  [ -d "$npm_root" ] || continue
+  rm -rf "$npm_root/@blizps/lazy-developer" "$npm_root/@moonshot-ai/kimi-code" 2>/dev/null || true
+done
+rm -f "$LAZYDEV_BIN_DIR/kimi" "$LAZYDEV_BIN_DIR/kimi.exe" "$LAZYDEV_BIN_DIR/kimi.cmd" "$HOME/.local/bin/kimi" "$HOME/.local/bin/kimi.exe" "$HOME/.local/bin/kimi.cmd" 2>/dev/null || true
 
 step "Removing RTK"
-rm -f "$LAZYDEV_BIN_DIR/rtk"
-rm -rf "$RTK_CONFIG_DIR"
-# Clean the RTK binary only when it is the user-local copy this installer targets.
-if [ -x "$HOME/.cargo/bin/rtk" ] && [ "$(command -v rtk 2>/dev/null || true)" = "$HOME/.cargo/bin/rtk" ]; then
-  rm -f "$HOME/.cargo/bin/rtk"
+RTK_PATH="$(command -v rtk 2>/dev/null || true)"
+if [ -n "$RTK_PATH" ]; then
+  if "$RTK_PATH" gain >/dev/null 2>&1; then
+    "$RTK_PATH" init -g --uninstall >/dev/null 2>&1 || true
+  fi
 fi
+rm -f "$LAZYDEV_BIN_DIR/rtk" "$HOME/.local/bin/rtk" "$HOME/.cargo/bin/rtk" 2>/dev/null || true
+rm -rf "$RTK_CONFIG_DIR" "$RTK_DATA_DIR" "$RTK_CACHE_DIR" 2>/dev/null || true
+rm -rf "$HOME/Library/Application Support/rtk" "$HOME/Library/Caches/rtk" 2>/dev/null || true
 
 step "Removing LazyDev workspace artifacts"
 rm -rf "$ARTIFACT_DIR"
+remove_managed_launchers_from_path
 
 case "${SHELL:-}" in
   */zsh) remove_path_lines "$HOME/.zshrc" ;;
@@ -80,7 +144,7 @@ case "${SHELL:-}" in
 esac
 
 step "Checking cleanup"
-for path in "$LAZYDEV_HOME" "$LAZYDEV_CONFIG_DIR" "$KIMI_NATIVE_HOME" "$RTK_CONFIG_DIR" "$LAZYDEV_BIN_DIR/lazydev" "$LAZYDEV_BIN_DIR/rtk" "$ARTIFACT_DIR"; do
+for path in "$LAZYDEV_HOME" "$LAZYDEV_CONFIG_DIR" "$KIMI_NATIVE_HOME" "$KIMI_LEGACY_HOME" "$RTK_CONFIG_DIR" "$RTK_DATA_DIR" "$RTK_CACHE_DIR" "$LAZYDEV_BIN_DIR/lazydev" "$LAZYDEV_BIN_DIR/rtk" "$ARTIFACT_DIR"; do
   [ ! -e "$path" ] || fatal "Cleanup incomplete: $path still exists."
 done
 

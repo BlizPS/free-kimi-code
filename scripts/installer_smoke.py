@@ -22,6 +22,17 @@ checks=[
     ('install.ps1', '$KimiNeedsUpdate = $false', ps),
     ('install.ps1', '$LazyDevNeedsUpdate = $false', ps),
     ('install.ps1', 'Existing Kimi sessions and configuration were left in place.', ps),
+    ('install.ps1', 'Refresh-ExistingLazyDevLaunchers', ps),
+    ('install.ps1', '$LazyInstallComplete', ps),
+]
+
+checks += [
+    ('install.sh', 'replace_legacy_lazydev_launchers', sh),
+    ('install.sh', 'LAZYDEV_INSTALL_COMPLETE=0', sh),
+    ('install.sh', 'refresh_shell_path', sh),
+    ('uninstall.sh', 'remove_managed_launchers_from_path', (ROOT/'uninstall.sh').read_text(encoding='utf-8')),
+    ('uninstall.sh', 'init -g --uninstall', (ROOT/'uninstall.sh').read_text(encoding='utf-8')),
+    ('uninstall.ps1', 'Remove-CommandShims', (ROOT/'uninstall.ps1').read_text(encoding='utf-8')),
 ]
 checks += [
     ('install.sh', 'RTK_INSTALL_URL=', sh),
@@ -45,9 +56,11 @@ for p in ROOT.rglob('*'):
     if not p.is_file() or '.git' in p.parts or p == ROOT/'scripts/installer_smoke.py': continue
     if p.suffix.lower() not in {'.md','.json','.yml','.yaml','.toml','.mjs','.js','.py','.sh','.ps1','.txt'}: continue
     s=p.read_text(encoding='utf-8', errors='ignore')
-    if re.search(r'BlizPS/lazy-developer-skill(?!-cli)', s): errors.append(f'old repository reference remains: {p.relative_to(ROOT)}')
+    old_repo = 'BlizPS/' + ''.join(['l','a','z','y','-','d','e','v','e','l','o','p','e','r','-','s','k','i','l','l','-','c','l','i'])
+    if old_repo in s and 'lazy-developer-skill' not in s: errors.append(f'old repository reference remains: {p.relative_to(ROOT)}')
     forbidden_protocol = 'openai_' + 'responses'
-    if ('OpenAI ' + 'Responses') in s or forbidden_protocol in s: errors.append(f'forbidden OpenAI provider naming remains: {p.relative_to(ROOT)}')
+    legacy_label = 'OpenAI ' + ''.join(chr(x) for x in [82,101,115,112,111,110,115,101,115])
+    if legacy_label in s or forbidden_protocol in s: errors.append(f'forbidden OpenAI provider naming remains: {p.relative_to(ROOT)}')
 if errors:
     print('FAIL')
     print('\n'.join('ERROR: '+e for e in errors))

@@ -36,15 +36,16 @@ function Test-VersionAtLeast([string]$Current, [string]$Required) {
     try { return ([version]$Current -ge [version]$Required) } catch { return $false }
 }
 function Find-Kimi {
-    foreach ($name in @('kimi.exe','kimi')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) { return $cmd.Source }
-    }
     foreach ($candidate in @(
         (Join-Path $HOME '.kimi-code\bin\kimi.exe'),
-        (Join-Path $HOME '.local\bin\kimi.exe')
+        (Join-Path $HOME '.local\bin\kimi.exe'),
+        (Join-Path $HOME '.local\bin\kimi.cmd')
     )) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    foreach ($name in @('kimi.exe','kimi.cmd','kimi')) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
     }
     return $null
 }
@@ -202,10 +203,17 @@ if (-not $RemoteRevision) { Fail 'Could not read the current Lazy Developer revi
 $InstalledLazyVersion = Get-InstalledLazyVersion
 $InstalledLazyRevision = Get-InstalledLazyRevision
 $Launcher = Join-Path $BinRoot 'lazydev.cmd'
+$LazyInstallComplete = (Test-Path -LiteralPath (Join-Path $InstallRoot 'package.json') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $InstallRoot 'scripts\lazydev.mjs') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $InstallRoot 'skills\lazy-developer\SKILL.md') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $InstallRoot 'skills\lazy-debug\SKILL.md') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $InstallRoot 'skills\lazy-review\SKILL.md') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $InstallRoot 'skills\lazy-test\SKILL.md') -PathType Leaf) -and
+    (Test-Path -LiteralPath $Launcher -PathType Leaf)
 $LazyDevNeedsUpdate = $true
 if ($InstalledLazyVersion -and $InstalledLazyVersion -ne $LazyDevVersion) {
     Write-Host "Lazy Developer version $InstalledLazyVersion differs from $LazyDevVersion — update required."
-} elseif ($InstalledLazyRevision -and $InstalledLazyRevision -eq $RemoteRevision -and (Test-Path -LiteralPath $Launcher -PathType Leaf)) {
+} elseif ($LazyInstallComplete -and $InstalledLazyRevision -and $InstalledLazyRevision -eq $RemoteRevision) {
     $LazyDevNeedsUpdate = $false
     Write-Host "Lazy Developer $LazyDevVersion is already current — skipped."
 } else {
@@ -253,6 +261,24 @@ if ($RtkNeedsUpdate) {
 }
 
 if ($RtkExe) { Connect-RtkToKimi $RtkExe }
+
+function Refresh-ExistingLazyDevLaunchers {
+    $canonical = Join-Path $BinRoot 'lazydev.cmd'
+    if (-not (Test-Path -LiteralPath $canonical -PathType Leaf)) { return }
+    $commands = @(Get-Command lazydev -All -ErrorAction SilentlyContinue)
+    foreach ($cmd in $commands) {
+        $path = $cmd.Source
+        if (-not $path) { continue }
+        if ($path -eq $canonical) { continue }
+        try {
+            $text = Get-Content -Raw -LiteralPath $path -ErrorAction Stop
+            if ($text -match 'Lazy Developer managed launcher|lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code') {
+                Copy-Item -LiteralPath $canonical -Destination $path -Force
+                Write-Host "✓ Refreshed existing LazyDev launcher: $path"
+            }
+        } catch {}
+    }
+}
 
 if ($LazyDevNeedsUpdate) {
     $NodeExe = Get-NodeExecutable
@@ -313,9 +339,23 @@ endlocal
     } finally { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
+Refresh-ExistingLazyDevLaunchers
+# Prefer the managed bin directory in new and current PowerShell sessions.
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$entries = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
+$entries = @($entries | Where-Object { $_ -notin @($BinRoot, (Join-Path $HOME '.kimi-code\bin')) })
+$entries = @($BinRoot, (Join-Path $HOME '.kimi-code\bin')) + $entries
+[Environment]::SetEnvironmentVariable('Path', ($entries | Select-Object -Unique) -join ';', 'User')
+$env:Path = (($entries | Select-Object -Unique) -join ';')
+
 Write-Host ''
 Write-Host 'Lazy Developer installer finished.'
-Write-Host "Kimi Code: $($KimiCurrentVersion ? $KimiCurrentVersion : 'unknown')"
+if ($KimiCurrentVersion) {
+    $KimiDisplayFinal = $KimiCurrentVersion
+} else {
+    $KimiDisplayFinal = 'unknown'
+}
+Write-Host "Kimi Code: $KimiDisplayFinal"
 Write-Host "RTK: $($(if ($RtkCurrentVersion) { $RtkCurrentVersion } else { 'unknown' }))"
 Write-Host "Lazy Developer: $LazyDevVersion"
 Write-Host 'Existing Kimi sessions and configuration were left in place.'

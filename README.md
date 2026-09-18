@@ -15,15 +15,18 @@
 
 </div>
 
-Lazy Developer is built around one simple idea: your coding agent should spend its context on the work, not on repeating setup, dumping unnecessary command output, or dragging a giant pile of instructions through every turn.
 
-The built-in CLI uses **Kimi Code**. The same skills and integration files can also be used from other agent ecosystems that support skills or plugins.
+Lazy Developer keeps the workflow simple: install the tools, choose the provider you actually want to use, then start Kimi Code. The provider menu is live, so the model list comes from the service instead of a stale hard-coded list.
+
+```text
+install → setup → chat
+```
 
 ## Get started
 
 ### 1. Install or update
 
-The desktop installer does the heavy lifting for you. It installs or checks **Kimi Code 0.43.1**, **RTK**, and **Lazy Developer 1.0.0** in one go — no npm required.
+On desktop, the installer handles the whole setup for you: **Kimi Code 0.43.1**, **RTK**, and **Lazy Developer 1.0.0**. It does not require npm.
 
 **macOS / Linux**
 
@@ -37,93 +40,77 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-co
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1")))
 ```
 
-Run the same installer again whenever you want to update.
+Run the same installer again whenever you want to update. It checks Kimi Code, RTK, and Lazy Developer separately, so unchanged pieces are skipped and only missing, changed, or unhealthy pieces are refreshed. Your Kimi sessions and provider configuration stay in place during updates.
 
-It checks each component separately. If Kimi Code is already at the managed version, it is skipped. If the Lazy Developer GitHub revision has not changed, Lazy Developer is skipped. RTK is checked against its current stable release. So you do not get a full reinstall just because one part changed.
-
-Updates replace the Lazy Developer installation directory, not the Kimi data directory. Existing Kimi sessions and saved configuration are kept.
-
-> **Termux / Android:** the native desktop Kimi installer is not the Termux installation path. Use the Kimi method supported by your Termux environment.
+**Termux / Android:** use the npm-supported Kimi Code route there; the desktop native installer is not intended to be the Termux installer.
 
 ### 2. Set up your provider
 
-Before the first session, run:
+Before the first chat, run:
 
 ```bash
 lazydev setup
 ```
 
-Pick a provider, add its API key, and choose a live model. The setup currently supports **Gemini, OpenRouter, NVIDIA, Anthropic, and OpenAI**.
+Pick a provider, authenticate it, and choose one of the models returned by the provider's live catalog. There are now **9 provider options** in the setup screen:
 
-Lazy Developer saves that choice, so you do not have to configure the same provider every time.
+1. **OpenRouter** — API key + live model catalog
+2. **Gemini** — API key + live model catalog
+3. **NVIDIA** — API key + live model catalog
+4. **OpenAI** — API key + live model catalog
+5. **Ollama Local** — local API URL + live models from your running Ollama instance
+6. **LLM7** — API key + live model catalog
+7. **Groq** — API key + live model catalog
+8. **CodeBuddy** — API key + live model catalog
+9. **Anthropic** — API key + live model catalog
+
+Ollama is the only provider that does not ask for an API key. Give Lazy Developer the address of the local Ollama API, it checks the endpoint, reads the models that are actually running there, and uses the selected local model. Your inference still happens on your own Ollama machine; Lazy Developer and RTK remain in the workflow around Kimi Code.
 
 ### 3. Start coding
 
-When setup is saved, start the actual Kimi session with:
+Once setup finishes, start the real coding session with:
 
 ```bash
 lazydev chat
 ```
 
-`lazydev` by itself opens the Lazy Developer command center. `lazydev chat` is the command that starts the coding session.
+Bare `lazydev` opens the Lazy Developer command center. `lazydev chat` is the entry point that launches Kimi Code.
+
+## Live models, not a frozen list
+
+Lazy Developer asks each provider for its current model catalog during setup. OpenRouter exposes a models endpoint, Gemini exposes `models.list`, Groq exposes `/openai/v1/models`, and LLM7 provides an OpenAI-compatible `/v1/models` endpoint. Ollama is handled locally through its running API instead of a cloud catalog.
+
+OpenAI setup now uses a bounded request with an explicit timeout. A slow or unreachable `/v1/models` request fails cleanly instead of leaving the terminal sitting forever on `loading live models`.
+
+CodeBuddy supports API-key authentication and model configuration through its CLI ecosystem; Lazy Developer treats it as an OpenAI-compatible provider and tries the public model catalog first, with a compatible fallback endpoint when available. Provider-side endpoints can change, so a failed CodeBuddy catalog refresh is surfaced instead of silently inventing models.
 
 ## RTK, already wired in
 
-RTK is installed automatically by the desktop installer and connected to Kimi Code.
+The desktop installer also installs **Rust Token Killer (RTK)** and connects it to Kimi Code. RTK filters noisy command output before it reaches the agent; its upstream project describes **up to 90% fewer terminal-output tokens** for supported output. That is terminal-output reduction, not a promise that every conversation or provider bill drops by the same percentage.
 
-RTK focuses on the thing agents see a lot of: shell output. Its project describes **up to 90% fewer terminal-output tokens** on supported commands. That is output reduction, not a guarantee that every conversation or provider bill will be 90% cheaper.
-
-Lazy Developer initializes the Kimi integration in the Kimi data directory rather than modifying each project you work on.
-
-For a deeper look at RTK itself, see [rtk-ai/rtk](https://github.com/rtk-ai/rtk).
+If RTK is already current, the installer skips it. If it is missing or unhealthy, it installs or repairs it.
 
 ## Skills without the bloat
 
-The bundled Lazy Developer skills are kept compact and loaded through Kimi's skill discovery instead of being copied into one giant permanent prompt.
+Lazy Developer bundles focused skills for implementation, debugging, review, and testing. Kimi Code is pointed at the bundled skill directory when a session starts, and the runtime enables the skill merge path so the skills are available without duplicating a huge instruction block into every project.
 
-The package ships focused skills for implementation, debugging, review, and testing. The runtime also adds guardrails for artifacts, shell operations, workspace context, and unnecessary rewrites.
+Local token-budget checks measure the packaged skill payload rather than billing. Current measurements are above the project's 75% reduction target on the tested hot paths; real prompt savings still depend on the task, conversation history, tools, and provider.
 
-The goal is simple: give the agent the right instructions when they matter, while keeping the default context small.
+## Use the skills with other CLIs
 
-## Use the same skills with other CLIs
-
-Lazy Developer is not locked to its own CLI.
-
-For another agent that supports the standard Skills CLI, install the skills directly into that agent/project:
+Lazy Developer is also a portable skill/plugin package. When another agent supports the standard Skills CLI, you can install the same repository into that agent or project:
 
 ```bash
 npx skills add BlizPS/lazy-developer-free-kimi-code --all
 ```
 
-That is the **universal path**. You do not need it for Lazy Developer itself; the LazyDev CLI already includes and wires its bundled skills.
+That universal path is separate from the `lazydev` CLI. You do not need it for `lazydev chat`; Lazy Developer already wires its own bundled skills.
 
-The repository also contains plugin/integration metadata for several agent ecosystems, so the skills can follow you when you switch tools.
-
-## Providers
-
-Lazy Developer keeps provider setup separate from the Kimi Code shell.
-
-| Provider | API key | Model selection |
-| --- | --- | --- |
-| **Gemini** | `GEMINI_API_KEY` | Live provider catalog |
-| **OpenRouter** | `OPENROUTER_API_KEY` | Live provider catalog |
-| **NVIDIA** | `NVIDIA_API_KEY` | Live provider catalog |
-| **Anthropic** | `ANTHROPIC_API_KEY` | Live provider catalog |
-| **OpenAI** | `OPENAI_API_KEY` | Live provider catalog |
-
-The OpenAI entry is intentionally shown as **OpenAI** in the UI.
-
-## Token efficiency
-
-Lazy Developer keeps a local token-budget gate around the bundled skill/runtime layer.
-
-The current baseline measures roughly **690 estimated skill tokens versus 4,042 baseline tokens**, which is an **82.9% reduction in skill payload size**. The static CLI hot path is roughly **942 tokens**, about **76.7% below** that stored baseline.
-
-Those are project-level measurements. They are not a promise that every prompt, task, or provider bill will use the same percentage because actual usage depends on your task, model, context, tools, and conversation history.
+The repository also includes plugin/integration metadata for other agent ecosystems, so the same skill layer can travel with you instead of being locked to one front end.
 
 ## Updating
 
-There is no separate updater command. Just run the same installer again:
+There is no separate updater command. Run the normal platform installer again:
 
 **macOS / Linux**
 
@@ -137,45 +124,38 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-co
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1")))
 ```
 
-Only changed components are refreshed. When everything is already current, the installer skips everything.
+The installer is component-aware:
+
+- Kimi Code unchanged → skipped.
+- RTK unchanged → skipped.
+- Lazy Developer at the same GitHub revision and healthy → skipped.
+- Anything changed, missing, or unhealthy → refreshed.
+
+Updating Lazy Developer does not wipe Kimi sessions or saved provider configuration.
 
 ## Uninstall everything
 
-The matching uninstallers remove the installation rather than leaving a half-installed setup behind.
+For a clean removal, use the matching uninstaller. It is deliberately broader than an update: it removes the managed Lazy Developer installation, Kimi Code, RTK, LazyDev configuration, managed caches, launchers, and related generated files.
 
-This project removes:
-- Lazy Developer
-- Kimi Code installed/managed by Lazy Developer
-- RTK installed/managed by Lazy Developer
-- LazyDev configuration and Kimi session data
-- RTK configuration
-- LazyDev launcher files
-- the default `lazydevfile` artifact directory
-- legacy npm installs of the LazyDev/Kimi packages when npm is already available
-
-Project folders outside those managed locations are left untouched.
-
-### macOS / Linux
+**macOS / Linux**
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/uninstall.sh" | sh
 ```
 
-### Windows PowerShell
+**Windows PowerShell**
 
 ```powershell
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/uninstall.ps1")))
 ```
 
-After uninstalling, the normal way back is simply to run the installer again.
+A fresh install after uninstall starts from a clean state. Project folders outside Lazy Developer's managed locations are left alone.
 
 ## Troubleshooting
 
-If `lazydev chat` says the provider is not configured, run `lazydev setup` and save a provider, API key, and model.
+If a provider refresh appears to hang, the live catalog request now has a hard timeout. Rerun `lazydev setup` and try the provider again. For a local Ollama setup, first make sure the URL you entered is reachable from the same machine and that Ollama is serving models.
 
-If `lazydev` is not found just after installation, open a new terminal so the updated user `PATH` is loaded.
-
-On Windows, Kimi Code requires Git for Windows because it uses Git Bash as its shell environment. If Git Bash is installed somewhere unusual, configure Kimi's shell path before starting a session.
+If `lazydev` starts an unexpected old build, open a new terminal so the shell forgets its cached command path. The installer also refreshes known Lazy Developer launchers.
 
 ## Project
 
@@ -185,7 +165,7 @@ Issues: https://github.com/BlizPS/lazy-developer-free-kimi-code/issues
 
 ## Development
 
-The repository keeps npm metadata for package tooling and CI, but the normal desktop install path does not require npm.
+Repository metadata is kept for package tooling and CI, but normal desktop installation does not require npm.
 
 From the repository root:
 
