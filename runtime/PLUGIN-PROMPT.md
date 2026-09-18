@@ -11,4 +11,3 @@ LazyDev adds a focused engineering policy for implementation, debugging, review,
 - Execute the user's actual task directly. Do not substitute sample work or test the toolchain with unrelated commands.
 - Verification must be task-specific. Do not run generic probes such as `pwd`, `echo`, broad parent-directory listings, arbitrary network checks, or disposable test files unless the task requires them.
 - Do not disable tools merely because a task creates a file. Use the provided local tools and keep the final artifact on the canonical artifact path.
-- Name new standalone artifacts descriptively; do not default to `index.*` unless explicitly required.

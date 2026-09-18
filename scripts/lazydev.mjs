@@ -9,7 +9,6 @@ import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { createAntigravityProxy } from '../runtime/antigravity-proxy.mjs';
 import { platformPaths } from '../runtime/platform-policy.mjs';
 import { modelIntelligenceProfile, buildIntelligenceAliasSystem } from '../runtime/intelligence-kernel.mjs';
 
@@ -128,11 +127,24 @@ function normalizeConfig(raw) {
   cfg.providers = p;
   if (!providers.some((x) => x.id === cfg.activeProvider)) cfg.activeProvider = 'gemini';
   delete cfg.apiKey; delete cfg.model;
-  return cfg;
+  return migrateDisabledModelConfig(cfg);
 }
 function writeConfig(data) { writeJsonAtomic(configFile(), data); }
 function providerConfig(cfg, id) { const x = cfg.providers?.[id]; return x && typeof x === 'object' ? x : {}; }
-function activeProvider(cfg) { return providers.find((x) => x.id === cfg.activeProvider) || providers[1]; }
+function migrateDisabledModelConfig(cfg) {
+  const active = providers.find((x) => x.id === cfg.activeProvider);
+  const activePc = active ? providerConfig(cfg, active.id) : {};
+  if (active?.id !== 'gemini' || !isAntigravityModel(activePc.model)) return cfg;
+  const fallback = providers.find((candidate) => {
+    if (candidate.id === 'gemini') return false;
+    const c = providerConfig(cfg, candidate.id);
+    return Boolean(c.apiKey && c.model) || (candidate.id === 'ollama' && Boolean(c.baseUrl && c.model));
+  });
+  if (fallback) cfg.activeProvider = fallback.id;
+  else activePc.model = '';
+  return cfg;
+}
+function activeProvider(cfg) { return providers.find((x) => x.id === cfg.activeProvider) || providers.find((x) => x.id === 'gemini') || providers[0]; }
 async function verifyLiveModel(provider, pc) {
   if (!pc?.apiKey || !pc?.model) return { status: 'not-configured' };
   try {
@@ -327,19 +339,7 @@ async function fetchModels(provider, apiKey, options = {}) {
     const models = (Array.isArray(data.models) ? data.models : [])
       .filter((x) => Array.isArray(x.supportedGenerationMethods) && x.supportedGenerationMethods.includes('generateContent'))
       .map((x) => normalizeModel(x, provider)).filter((x) => x.id);
-    if (!models.some((m) => m.id === ANTIGRAVITY_AGENT)) {
-      models.unshift({
-        id: ANTIGRAVITY_AGENT,
-        name: 'Antigravity Agent · managed',
-        inputLimit: 1048576,
-        outputLimit: 65536,
-        contextLimit: 1048576,
-        live: true,
-        toolUse: true,
-        managedAgent: true,
-      });
-    }
-    return models;
+    return models.filter((m) => !isAntigravityModel(m.id));
   }
   if (provider.kind === 'anthropic') {
     const data = await requestJson(provider.modelsUrl, { timeout, headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'user-agent': `lazydev/${version}` } });
@@ -611,7 +611,7 @@ function writeKimiAgentGuidance() {
   const dir = kimiHome();
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const agents = path.join(dir, 'AGENTS.md');
-  const block = `<!-- lazydev-runtime:start -->\n# LazyDev Runtime\n\n- Keep simple requests simple; no unnecessary architecture, files, abstractions, or prose.\n- When requirements/evidence are unclear, ask one focused question or state uncertainty; never invent assumptions.\n- Do not make unrelated or random changes; preserve working behavior and relevant scope only.\n- Always double-check the smallest meaningful result before saying the task is complete.\n- For the first user turn of a new session, respond in English unless another language is explicitly requested.\n- Repository source stays in the active workspace.\n- Standalone deliverables use ${outputDirectory()} only.\n- Name new standalone artifacts descriptively; do not default to index.* unless explicitly requested.\n- Never report a file as saved until the exact final path is verified.\n- Use the relevant LazyDev Skill when it materially applies; keep its use compact.\n- Prefer RTK for supported shell commands to reduce terminal-output tokens; use the raw command when RTK has no equivalent.\n<!-- lazydev-runtime:end -->`;
+  const block = `<!-- lazydev-runtime:start -->\n# LazyDev Runtime\n\n- Keep simple requests simple; no unnecessary architecture, files, abstractions, or prose.\n- When requirements/evidence are unclear, ask one focused question or state uncertainty; never invent assumptions.\n- Do not make unrelated or random changes; preserve working behavior and relevant scope only.\n- Always double-check the smallest meaningful result before saying the task is complete.\n- For the first user turn of a new session, respond in English unless another language is explicitly requested.\n- Repository source stays in the active workspace.\n- Standalone deliverables use ${outputDirectory()} only.\n- Use descriptive filenames, not index.* by default; if the target exists, keep it and use the lowest free numeric suffix before the extension.\n- Never report a file as saved until the exact final path is verified.\n- Use the relevant LazyDev Skill when it materially applies; keep its use compact.\n- Prefer RTK for supported shell commands to reduce terminal-output tokens; use the raw command when RTK has no equivalent.\n<!-- lazydev-runtime:end -->`;
   mergeManagedMarkdown(agents, '<!-- lazydev-runtime:start -->', '<!-- lazydev-runtime:end -->', block);
 
   const system = path.join(dir, 'SYSTEM.md');
@@ -765,8 +765,8 @@ async function setup() {
     line(`${i + 1}. ${p.label} · ${state}${c.model ? ` · ${truncate(c.model, 42)}` : ''}`);
   });
   line();
-  const n = Number((await prompt('Provider [1-9]: ')).trim());
-  if (!Number.isInteger(n) || n < 1 || n > providers.length) { line(red('Choose a provider number from 1 to 9.')); return; }
+  const n = Number((await prompt(`Provider [1-${providers.length}]: `)).trim());
+  if (!Number.isInteger(n) || n < 1 || n > providers.length) { line(red(`Choose a provider number from 1 to ${providers.length}.`)); return; }
   const provider = providers[n - 1];
   const saved = providerConfig(cfg, provider.id);
   let apiKey = String(saved.apiKey || '').trim();
@@ -1014,12 +1014,12 @@ async function chat() {
   const freeFallbacks = provider.id === 'openrouter' && (pc.model === OPENROUTER_FREE_MODEL || /:free$/i.test(pc.model))
     ? buildOpenRouterFreeFallbacks(pc.model, openRouterModels)
     : [];
-  const antigravity = provider.id === 'gemini' && isAntigravityModel(pc.model);
-  const proxy = antigravity
-    ? await createAntigravityProxy({ apiKey: pc.apiKey, model: pc.model, tokenLabel: 'lazydev-antigravity', artifactDirectory: outputDirectory() })
-    : (!['gemini','openai','anthropic'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null);
+  if (isAntigravityModel(pc.model)) {
+    line(red('That model is temporarily disabled in LazyDev. Choose another configured provider/model with `lazydev setup`.'));
+    return;
+  }
+  const proxy = !['gemini','openai','anthropic'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null;
   if (provider.id === 'ollama') assertHttpUrl(ollamaChatUrl(pc.baseUrl), 'Ollama API URL');
-  else if (provider.id === 'gemini' && antigravity) assertHttpUrl(`http://127.0.0.1:${proxy.port}/v1`, 'Antigravity proxy URL');
   else if (provider.id === 'gemini') {
     // Standard Gemini models use Kimi Code's native Google GenAI adapter.
   } else if (provider.id === 'anthropic') assertHttpUrl('https://api.anthropic.com', 'Anthropic API URL');
@@ -1027,9 +1027,6 @@ async function chat() {
   else if (proxy) assertHttpUrl(`http://127.0.0.1:${proxy.port}/v1`, 'LazyDev proxy URL');
   else assertHttpUrl(provider.chatUrl, `${provider.label} API URL`);
   fs.mkdirSync(kimiHome(), { recursive: true, mode: 0o700 });
-  if (antigravity) {
-    line(yellow(`Antigravity proxy active: ${pc.model} is routed through Gemini Interactions with stateful tool calling.`));
-  }
   const configPath = path.join(kimiHome(), 'config.toml');
   const tuiPath = path.join(kimiHome(), 'tui.toml');
   fs.writeFileSync(configPath, buildKimiConfig(provider, pc, proxy), { mode: 0o600 });

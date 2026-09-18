@@ -33,21 +33,12 @@ const upstream = http.createServer((req, res) => {
       }));
     }
     if (!body.previous_interaction_id) {
-      if (String(body.input || '') === 'Create a standalone artifact.') {
-        res.end(JSON.stringify({
-          id: 'int_artifact_1',
-          environment_id: 'env_artifact',
-          status: 'requires_action',
-          steps: [{type:'function_call', id:'fc_artifact_1', name:'lazydev_write', arguments:{file_path:'/storage/emulated/0/lazydevfile/descriptive-artifact.html', content:'<!doctype html><title>Artifact</title>', toolAction:'write', toolSummary:'Create the requested file'}}]
-        }));
-      } else {
-        res.end(JSON.stringify({
-          id: 'int_1',
-          environment_id: 'env_1',
-          status: 'requires_action',
-          steps: [{type:'function_call', id:'fc_1', name:'lazydev_bash', arguments:{command:'git status', toolAction:'run', toolSummary:'Inspect the repository'}}]
-        }));
-      }
+      res.end(JSON.stringify({
+        id: 'int_1',
+        environment_id: 'env_1',
+        status: 'requires_action',
+        steps: [{type:'function_call', id:'fc_1', name:'lazydev_bash', arguments:{command:'git status', toolAction:'run', toolSummary:'Inspect the repository'}}]
+      }));
     } else if (body.previous_interaction_id === 'int_1') {
       res.end(JSON.stringify({
         id: 'int_2',
@@ -97,8 +88,6 @@ assert.equal(seen[0].environment, 'remote');
 assert.match(String(seen[0].system_instruction || ''), /reasoning engine behind a local coding CLI/i);
 assert.match(String(seen[0].system_instruction || ''), /do not perform unrelated reconnaissance/i);
 assert.match(String(seen[0].system_instruction || ''), /tool self-test/i);
-assert.match(String(seen[0].system_instruction || ''), /descriptive filename/i);
-assert.match(String(seen[0].system_instruction || ''), /do not default to index\.\*/i);
 assert.equal(seen[0].input, 'Check the repository status.');
 assert.doesNotMatch(String(seen[0].input || ''), /LazyDev Intelligence Alias System|Keep the task boundary explicit|Execution order/i);
 
@@ -139,72 +128,14 @@ assert.deepEqual(seen[1].input[0].result, [{type:'text', text:'On branch main\nw
 
 const third = await call({
   model:'antigravity-preview-09-2026',
-  messages:[
-    {role:'assistant', content:'Prior tool output: /root/index.html'},
-    {role:'user', content:'Give me the final result.'},
-  ],
+  messages:[{role:'user', content:'Give me the final result.'}],
 });
 assert.equal(third.status, 200);
-assert.equal(seen[2].previous_interaction_id, undefined);
-assert.equal(seen[2].environment, 'remote');
-assert.equal(seen[2].tools?.length, 0);
-assert.equal(seen[2].input, 'Give me the final result.');
-assert.doesNotMatch(String(seen[2].input), /Prior tool output|\/root\/index\.html/i);
-
-const artifactProxy = await createAntigravityProxy({
-  apiKey: 'test-key',
-  model: 'antigravity-preview-09-2026',
-  endpoint: `http://127.0.0.1:${port}/v1beta/interactions`,
-});
-async function callArtifact(body) {
-  const r = await fetch(`http://127.0.0.1:${artifactProxy.port}/v1/chat/completions`, {
-    method:'POST', headers:{authorization:`Bearer ${artifactProxy.token}`, 'content-type':'application/json'}, body:JSON.stringify(body)
-  });
-  return {status:r.status, body:await r.json()};
-}
-
-const artifactTools = [
-  {type:'function', function:{name:'Read', description:'Read a file', parameters:{type:'object', additionalProperties:false, properties:{file_path:{type:'string'}}}}},
-  {type:'function', function:{name:'Write', description:'Write a file', parameters:{type:'object', additionalProperties:false, properties:{file_path:{type:'string'}, content:{type:'string'}}, required:['file_path','content']}}},
-  {type:'function', function:{name:'Edit', description:'Edit a file', parameters:{type:'object', additionalProperties:false, properties:{file_path:{type:'string'}, old_string:{type:'string'}, new_string:{type:'string'}}}}},
-  {type:'function', function:{name:'Glob', description:'Find files', parameters:{type:'object', additionalProperties:false, properties:{pattern:{type:'string'}}}}},
-  {type:'function', function:{name:'Bash', description:'Run command', parameters:{type:'object', additionalProperties:false, properties:{command:{type:'string'}}}}},
-];
-const artifactFirst = await callArtifact({
-  model:'antigravity-preview-09-2026',
-  messages:[
-    {role:'system', content:'PRIVATE FILE CONTENT THAT MUST NOT REACH THE REMOTE MODEL'},
-    {role:'assistant', content:'Prior unrelated tool output: /root/index.html'},
-    {role:'user', content:'Create a standalone artifact.'},
-  ],
-  tools:artifactTools,
-});
-assert.equal(artifactFirst.status, 200);
-assert.equal(artifactFirst.body.choices[0].finish_reason, 'tool_calls');
-assert.equal(artifactFirst.body.choices[0].message.tool_calls[0].function.name, 'Write');
-assert.deepEqual(JSON.parse(artifactFirst.body.choices[0].message.tool_calls[0].function.arguments), {
-  file_path:'/storage/emulated/0/lazydevfile/descriptive-artifact.html',
-  content:'<!doctype html><title>Artifact</title>',
-});
-const artifactSeen = seen.find((item) => item.input === 'Create a standalone artifact.');
-assert.ok(artifactSeen);
-assert.equal(artifactSeen.tools.length, 1);
-assert.equal(artifactSeen.tools[0].name, 'lazydev_write');
-assert.equal(artifactSeen.input, 'Create a standalone artifact.');
-assert.doesNotMatch(String(artifactSeen.input), /PRIVATE FILE CONTENT|Prior unrelated tool output|\/root\/index\.html/i);
-
-const artifactSecond = await callArtifact({
-  model:'antigravity-preview-09-2026',
-  messages:[
-    {role:'user', content:'Create a standalone artifact.'},
-    {role:'assistant', content:null, tool_calls:[{id:'fc_artifact_1', type:'function', function:{name:'Write', arguments:JSON.stringify({file_path:'/storage/emulated/0/lazydevfile/descriptive-artifact.html', content:'<!doctype html><title>Artifact</title>'})}}]},
-    {role:'tool', tool_call_id:'fc_artifact_1', name:'Write', content:'Wrote /storage/emulated/0/lazydevfile/descriptive-artifact.html'},
-  ],
-  tools:artifactTools,
-});
-assert.equal(artifactSecond.status, 200);
-assert.equal(seen.at(-1).environment, 'env_artifact');
-assert.deepEqual(seen.at(-1).tools.map((tool) => tool.name).sort(), ['lazydev_bash','lazydev_edit','lazydev_read','lazydev_write']);
+assert.equal(third.body.choices[0].message.content, 'Recovered from interaction retrieval.');
+assert.equal(seen[2].previous_interaction_id, 'int_2');
+assert.equal(seen[2].environment, 'env_1');
+assert.equal(seen[2].tools?.length, 1);
+assert.equal(seen[2].tools?.[0]?.name, 'lazydev_bash');
 
 const retry = await call({
   model:'antigravity-preview-09-2026',
@@ -230,7 +161,6 @@ assert.equal(noTools.status, 200);
 const noToolsSeen = seen.at(-1);
 assert.deepEqual(noToolsSeen.tools, []);
 assert.equal(noToolsSeen.environment, 'remote');
-artifactProxy.server.close();
 noToolsProxy.server.close();
 proxy.server.close();
 upstream.close();

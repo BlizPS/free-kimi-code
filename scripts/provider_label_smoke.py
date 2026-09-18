@@ -14,6 +14,6 @@ expected = [
 for pid, label in expected:
     if f"id: '{pid}'" not in text or f"label: '{label}'" not in text:
         raise SystemExit(f'FAIL: missing provider {label}')
-if "Provider [1-9]" not in text:
-    raise SystemExit('FAIL: setup menu still has old provider count')
+if "Provider [1-${providers.length}]" not in text:
+    raise SystemExit('FAIL: setup provider range is not dynamic')
 print('PASS: 9 provider menu and canonical OpenAI label are present')

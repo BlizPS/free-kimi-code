@@ -1,6 +1,5 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { classifyTask } from './intelligence-kernel.mjs';
 
 const DEFAULT_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const DEFAULT_AGENT = 'antigravity-preview-09-2026';
@@ -11,7 +10,7 @@ const TRANSIENT_RETRY_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504]);
 
 const LOCAL_TOOL_GUIDANCE = Object.freeze({
   Read: 'Read a file from the user workspace. Use only when the task requires inspecting that file.',
-  Write: 'Write a file in the user workspace. Standalone deliverables go under LAZYDEV_ARTIFACT_DIR. Use a descriptive filename; do not default to index.* unless explicitly requested. Do not create disposable test files.',
+  Write: 'Write a file in the user workspace. For a standalone deliverable, write the final file under LAZYDEV_ARTIFACT_DIR. Do not create disposable test files.',
   Edit: 'Edit an existing file in the user workspace. Keep the change scoped to the requested task.',
   Grep: 'Search file contents in the relevant workspace scope. Avoid broad filesystem reconnaissance unless required.',
   Glob: 'Find relevant workspace files. Start with the smallest useful scope; do not scan unrelated parent directories.',
@@ -25,9 +24,8 @@ const ANTIGRAVITY_BRIDGE_INSTRUCTION = [
   'The user request is authoritative. Execute the requested task directly; do not substitute a sample task, tutorial, or tool self-test.',
   'Do not perform unrelated reconnaissance, filler actions, or generic diagnostics. In particular, do not run pwd, echo, broad parent-directory listings, arbitrary network probes, or create temporary test files unless the user task explicitly needs them.',
   "For local workspace operations, use only the provided LazyDev bridge functions. Do not use the managed agent's remote sandbox filesystem or code execution as a substitute for the user workspace.",
-  'Standalone deliverables use the local bridge under LAZYDEV_ARTIFACT_DIR. Use a descriptive filename; do not default to index.* unless explicitly requested. Keep the current workspace path unchanged.',
-  'For standalone deliverable requests, act immediately: create the deliverable first and do not greet, self-test, scan unrelated files, or inspect existing artifacts unless the request requires an existing file.',
-  'Keep tool calls proportional to the task. Inspect only when needed, implement the requested result, then perform task-specific verification.',
+  'When the task creates a standalone deliverable, the final artifact must be written through the local bridge under LAZYDEV_ARTIFACT_DIR. The current repository/workspace path must not be changed.',
+  'Keep the number of tool calls proportional to the task. Inspect only what is necessary, implement the requested result, then perform a task-specific verification.',
   'Never claim a file was created, changed, or saved unless the corresponding local tool result provides evidence.',
 ].join(' ');
 
@@ -48,32 +46,9 @@ function normalizeText(value) {
   }).filter(Boolean).join('\n');
 }
 
-function isStandaloneArtifactRequest(prompt) {
-  const text = String(prompt || '').trim();
-  if (!text) return false;
-  if (/\b(edit|modify|refactor|fix|change|revise)\b/i.test(text)) return false;
-  const action = /\b(create|make|build|generate|produce|write|save|export|deliver)\b/i.test(text);
-  const artifact = /\b(html?|pdf|docx?|xlsx?|pptx?|zip|png|jpe?g|webp|gif|svg|csv|markdown|standalone|single[- ]file|deliverable)\b/i.test(text);
-  return action && artifact;
-}
-
-function toolSurfaceForTask(prompt, writeComplete) {
-  if (!isStandaloneArtifactRequest(prompt)) return new Set(LOCAL_TOOL_ALLOWLIST);
-  if (!writeComplete) {
-    const surface = new Set(['Write']);
-    if (/\b(search|research|latest|current|docs?|documentation|look up)\b/i.test(String(prompt || ''))) {
-      surface.add('WebSearch');
-      surface.add('FetchURL');
-    }
-    return surface;
-  }
-  return new Set(['Write', 'Read', 'Edit', 'Bash']);
-}
-
-function toolDeclarations(openAITools = [], allowedOriginalNames = new Set(LOCAL_TOOL_ALLOWLIST)) {
+function toolDeclarations(openAITools = []) {
   const mappings = new Map();
   const schemas = new Map();
-  const allTools = [];
   const tools = [];
   for (const item of openAITools) {
     const fn = item?.function;
@@ -90,21 +65,14 @@ function toolDeclarations(openAITools = [], allowedOriginalNames = new Set(LOCAL
     const baseDescription = String(fn.description || '').trim();
     const guidance = LOCAL_TOOL_GUIDANCE[original] || '';
     const description = [baseDescription, guidance].filter(Boolean).join(' ');
-    const declaration = {
+    tools.push({
       type: 'function',
       name: external,
       description,
       parameters,
-    };
-    allTools.push({ original, declaration });
-    if (allowedOriginalNames.has(original)) tools.push(declaration);
+    });
   }
-  return {
-    tools,
-    allTools,
-    mappings,
-    schemas,
-  };
+  return { tools, mappings, schemas };
 }
 
 function sanitizeArguments(value, schema) {
@@ -285,21 +253,19 @@ function functionCallFromStep(step, mappings, schemas = new Map()) {
   };
 }
 
-function outputSteps(data, mappings, schemas = new Map(), allowedOriginalNames = null) {
+function outputSteps(data, mappings, schemas = new Map()) {
   const steps = Array.isArray(data?.steps) ? data.steps : [];
   const calls = [];
   const texts = [];
 
   for (const step of steps) {
     const call = functionCallFromStep(step, mappings, schemas);
-    if (call && allowedOriginalNames && !allowedOriginalNames.has(call.function.name)) continue;
     if (call) { calls.push(call); continue; }
 
     if (step?.type === 'model_output') {
       const content = Array.isArray(step.content) ? step.content : [step.content];
       for (const block of content) {
         const blockCall = functionCallFromStep(block, mappings, schemas);
-        if (blockCall && allowedOriginalNames && !allowedOriginalNames.has(blockCall.function.name)) continue;
         if (blockCall) calls.push(blockCall);
         else {
           const text = blockText(block);
@@ -318,7 +284,6 @@ function outputSteps(data, mappings, schemas = new Map(), allowedOriginalNames =
   if (Array.isArray(data?.output)) {
     for (const item of data.output) {
       const call = functionCallFromStep(item, mappings, schemas);
-      if (call && allowedOriginalNames && !allowedOriginalNames.has(call.function.name)) continue;
       if (call) calls.push(call);
       else {
         const text = blockText(item);
@@ -342,8 +307,8 @@ function outputSteps(data, mappings, schemas = new Map(), allowedOriginalNames =
   return { calls: uniqueCalls, text: uniqueTexts.join('\n\n') };
 }
 
-function openAIResponse(model, data, mappings, schemas, stream = false, allowedOriginalNames = null) {
-  const { calls, text } = outputSteps(data, mappings, schemas, allowedOriginalNames);
+function openAIResponse(model, data, mappings, schemas, stream = false) {
+  const { calls, text } = outputSteps(data, mappings, schemas);
   const status = String(data?.status || '').toLowerCase();
   const safeText = text || (status === 'completed'
     ? 'Antigravity completed the turn without a text payload. Please retry the message.'
@@ -381,11 +346,6 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
     mappings: new Map(),
     schemas: new Map(),
     tools: [],
-    allTools: [],
-    activeOriginalTools: new Set(LOCAL_TOOL_ALLOWLIST),
-    currentPrompt: '',
-    artifactMode: false,
-    artifactWriteComplete: false,
     initialized: false,
   };
   const server = http.createServer((req, res) => {
@@ -423,42 +383,20 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
         // Preserve the declared tool surface across stateful turns. Kimi may
         // omit `tools` on a continuation even though the preceding function
         // call still needs the same declarations on the Antigravity side.
-        const hasToolResults = messages.at(-1)?.role === 'tool';
-        const isFunctionResultContinuation = Boolean(hasToolResults && state.interactionId);
-        if (!isFunctionResultContinuation) {
-          // Each new user turn starts a fresh Antigravity interaction. Only the
-          // current function-call loop is stateful, which prevents prior local
-          // file/tool results from becoming remote model context on later turns.
-          state.interactionId = null;
-          state.environmentId = null;
-          state.artifactWriteComplete = false;
-          state.currentPrompt = recentUserInput(messages);
-          const classified = classifyTask(state.currentPrompt, model);
-          state.artifactMode = isStandaloneArtifactRequest(state.currentPrompt) || Boolean(classified.artifact);
-          state.allTools = [];
-          state.mappings.clear();
-          state.schemas.clear();
-        }
         if (Array.isArray(body.tools)) {
-          const { allTools, mappings, schemas } = toolDeclarations(body.tools);
-          state.allTools = allTools;
+          const { tools: externalTools, mappings, schemas } = toolDeclarations(body.tools);
           for (const [k, v] of mappings) state.mappings.set(k, v);
           for (const [k, v] of schemas) state.schemas.set(k, v);
+          state.tools = externalTools;
         }
-        if (hasToolResults) {
-          const lastTool = String(messages.at(-1)?.name || '');
-          if (lastTool === 'Write') state.artifactWriteComplete = true;
-        }
-        state.activeOriginalTools = toolSurfaceForTask(state.currentPrompt, state.artifactWriteComplete);
-        state.tools = state.allTools
-          .filter(({ original }) => state.activeOriginalTools.has(original))
-          .map(({ declaration }) => declaration);
+        const hasToolResults = messages.at(-1)?.role === 'tool';
+        const isFunctionResultContinuation = Boolean(hasToolResults && state.interactionId);
         let input;
         const payload = {
           agent: model,
           agent_config: { type: 'antigravity', model: 'gemini-3.8-flash', max_total_tokens: 50000 },
           environment: state.environmentId || 'remote',
-          system_instruction: buildSystemInstruction(artifactDirectory),
+          system_instruction: buildSystemInstruction(messages, artifactDirectory),
           store: true,
         };
         if (isFunctionResultContinuation) {
@@ -473,7 +411,7 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
           input = recentUserInput(messages);
           state.initialized = true;
         }
-        if (!input) input = 'Continue the requested task directly.';
+        if (!input) input = 'Continue.';
         // Explicitly provide the tool list on every interaction. An empty list
         // prevents Antigravity from silently enabling its default remote tools;
         // non-empty lists contain only the local LazyDev bridge functions.
@@ -508,7 +446,7 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
           }
         }
 
-        const response = openAIResponse(model, upstream, state.mappings, state.schemas, Boolean(body.stream), state.activeOriginalTools);
+        const response = openAIResponse(model, upstream, state.mappings, state.schemas, Boolean(body.stream));
         if (Array.isArray(response)) {
           res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
           for (const chunk of response) res.write(`data: ${JSON.stringify(chunk)}\n\n`);

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { platformPaths } from '../runtime/platform-policy.mjs';
+import { nextAvailableArtifactName } from '../runtime/artifact-naming.mjs';
 
 function norm(p) { return path.resolve(String(p || '')); }
 function inside(target, root) {
@@ -34,10 +35,16 @@ async function main() {
   if (inside(resolved,out)) process.exit(0);
   const ctx=loadContext();
   const implied=Boolean(ctx.task?.artifact) || explicitArtifactPrompt(ctx.prompt || '');
-  const standaloneExt=/\.(?:html?|pdf|docx?|xlsx?|pptx?|zip|png|jpe?g|webp|gif|svg|csv|md|txt)$/iu.test(resolved);
+  const standaloneExt=/\.(?:html?|pdf|docx?|xlsx?|pptx?|zip|ahk|png|jpe?g|webp|gif|svg|csv|md|txt)$/iu.test(resolved);
   const workspaceRootFile=path.dirname(resolved) === cwd;
+  const toolName=String(event.tool_name || '');
   if (implied && standaloneExt && workspaceRootFile) {
     process.stderr.write(`BLOCKED by LazyDev: standalone deliverables must be written under ${out}. Target was ${resolved}. Use ${path.join(out, path.basename(resolved))}. Do not claim the file is saved until that exact path is verified.\n`);
+    process.exit(2);
+  }
+  if (implied && toolName === 'WriteFile' && inside(resolved, out) && fs.existsSync(resolved)) {
+    const nextName = nextAvailableArtifactName(out, path.basename(resolved));
+    process.stderr.write(`BLOCKED by LazyDev: the artifact already exists at ${resolved}. Do not overwrite an existing standalone deliverable. Use ${path.join(out, nextName)} instead.\n`);
     process.exit(2);
   }
   process.exit(0);
