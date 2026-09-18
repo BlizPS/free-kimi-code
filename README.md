@@ -1,12 +1,10 @@
 <div align="center">
-  <h1>Free Kimi Code</h1>
-  <h3>🦥 Lazy Developer</h3>
-  <p><strong>A calm, capable developer layer for Kimi Code.</strong><br/>Live models, portable skills, safe artifact handling, provider routing, and a cleaner terminal workflow — without replacing the Kimi Code experience.</p>
-
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/free-kimi-code-dark.svg">
     <img src="assets/free-kimi-code-light.svg" alt="Lazy Developer" width="720" />
   </picture>
+  <h3>🦥 Lazy Developer</h3>
+  <p><strong>A calm, capable developer layer for Kimi Code.</strong><br/>Live models, portable skills, safe artifact handling, provider routing, and a cleaner terminal workflow — without replacing the Kimi Code experience.</p>
 
   <br/>
   <br/>

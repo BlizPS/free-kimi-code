@@ -79,7 +79,7 @@ for s in ["lazy-developer", "lazy-debug", "lazy-review", "lazy-test"]:
 for rel in [
     "package.json", "plugin.yaml", "scripts/lazydev.mjs", "scripts/intelligence_smoke.mjs", "commands/lazydev.toml",
     "README.md", "LICENSE", "AGENTS.md", "CLAUDE.md", "GEMINI.md", "install.sh", "install.ps1", "uninstall.sh", "uninstall.ps1",
-    "SECURITY.md", "COMPATIBILITY.md", "assets/image.jpg",
+    "SECURITY.md", "COMPATIBILITY.md", "assets/free-kimi-code-light.svg", "assets/free-kimi-code-dark.svg",
 ]:
     if not (ROOT / rel).is_file(): errors.append(f"missing {rel}")
 

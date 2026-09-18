@@ -5,7 +5,7 @@ import json,re,sys
 ROOT=Path(__file__).resolve().parents[1]; errors=[]
 def need(rel):
     if not (ROOT/rel).exists(): errors.append(f'missing {rel}')
-for rel in ['plugin.json','package.json','plugin.yaml','opencode.json','openclaw.plugin.json','gemini-extension.json','.claude-plugin/plugin.json','.claude-plugin/marketplace.json','.codex-plugin/plugin.json','.cursor-plugin/plugin.json','.qoder-plugin/plugin.json','.github/plugin/plugin.json','.github/plugin/marketplace.json','.agents/plugins/marketplace.json','.devin-plugin/plugin.json','.grok-plugin/marketplace.json','scripts/lazydev.mjs','scripts/intelligence_smoke.mjs','runtime/intelligence-kernel.mjs','commands/lazydev.toml','skills','assets/image.jpg','GEMINI.md','AGENTS.md','CLAUDE.md','README.md','LICENSE']:
+for rel in ['plugin.json','package.json','plugin.yaml','opencode.json','openclaw.plugin.json','gemini-extension.json','.claude-plugin/plugin.json','.claude-plugin/marketplace.json','.codex-plugin/plugin.json','.cursor-plugin/plugin.json','.qoder-plugin/plugin.json','.github/plugin/plugin.json','.github/plugin/marketplace.json','.agents/plugins/marketplace.json','.devin-plugin/plugin.json','.grok-plugin/marketplace.json','scripts/lazydev.mjs','scripts/intelligence_smoke.mjs','runtime/intelligence-kernel.mjs','commands/lazydev.toml','skills','assets/free-kimi-code-light.svg','assets/free-kimi-code-dark.svg','GEMINI.md','AGENTS.md','CLAUDE.md','README.md','LICENSE']:
     need(rel)
 for s in ['lazy-developer','lazy-debug','lazy-review','lazy-test']:
     need(f'skills/{s}/SKILL.md'); need(f'skills/{s}/agents/openai.yaml')
