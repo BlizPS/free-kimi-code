@@ -37,7 +37,7 @@ const upstream = http.createServer((req, res) => {
         id: 'int_1',
         environment_id: 'env_1',
         status: 'requires_action',
-        steps: [{type:'function_call', id:'fc_1', name:'lazydev_bash', arguments:{command:'git status'}}]
+        steps: [{type:'function_call', id:'fc_1', name:'lazydev_bash', arguments:{command:'git status', toolAction:'run', toolSummary:'Inspect the repository'}}]
       }));
     } else if (body.previous_interaction_id === 'int_1') {
       res.end(JSON.stringify({
@@ -75,11 +75,14 @@ const first = await call({
   model:'antigravity-preview-09-2026',
   stream:false,
   messages:[{role:'user', content:'Check the repository status.'}],
-  tools:[{type:'function', function:{name:'Bash', description:'Run a command', parameters:{type:'object',properties:{command:{type:'string'}}}}}]
+  tools:[{type:'function', function:{name:'Bash', description:'Run a command', parameters:{type:'object',additionalProperties:false,properties:{command:{type:'string'}}}}}]
 });
 assert.equal(first.status, 200);
 assert.equal(first.body.choices[0].finish_reason, 'tool_calls');
 assert.equal(first.body.choices[0].message.tool_calls[0].function.name, 'Bash');
+assert.deepEqual(JSON.parse(first.body.choices[0].message.tool_calls[0].function.arguments), {command:'git status'});
+assert.equal(JSON.parse(first.body.choices[0].message.tool_calls[0].function.arguments).toolAction, undefined);
+assert.equal(JSON.parse(first.body.choices[0].message.tool_calls[0].function.arguments).toolSummary, undefined);
 assert.equal(seen[0].agent, 'antigravity-preview-09-2026');
 assert.equal(seen[0].environment, 'remote');
 assert.ok(Array.isArray(seen[0].tools));

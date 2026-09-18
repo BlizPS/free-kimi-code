@@ -22,6 +22,7 @@ function normalizeText(value) {
 
 function toolDeclarations(openAITools = []) {
   const mappings = new Map();
+  const schemas = new Map();
   const tools = [];
   for (const item of openAITools) {
     const fn = item?.function;
@@ -30,15 +31,46 @@ function toolDeclarations(openAITools = []) {
     const original = String(fn.name);
     const safeName = original.replace(/[^A-Za-z0-9_]/g, '_').replace(/^[^A-Za-z_]/, '_$&').toLowerCase();
     const external = `lazydev_${safeName}`;
+    const parameters = fn.parameters && typeof fn.parameters === 'object'
+      ? fn.parameters
+      : { type: 'object', properties: {} };
     mappings.set(original, external);
+    schemas.set(original, parameters);
     tools.push({
       type: 'function',
       name: external,
       description: String(fn.description || ''),
-      parameters: fn.parameters && typeof fn.parameters === 'object' ? fn.parameters : { type: 'object', properties: {} },
+      parameters,
     });
   }
-  return { tools, mappings };
+  return { tools, mappings, schemas };
+}
+
+function sanitizeArguments(value, schema) {
+  if (!schema || typeof schema !== 'object' || !value || typeof value !== 'object' || Array.isArray(value)) {
+    return value && typeof value === 'object' ? value : {};
+  }
+
+  const properties = schema.properties && typeof schema.properties === 'object'
+    ? schema.properties
+    : null;
+  const allowAdditional = schema.additionalProperties !== false;
+
+  if (!properties || allowAdditional) {
+    return value;
+  }
+
+  const output = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (!(key in properties)) continue;
+    const childSchema = properties[key];
+    if (childSchema && typeof childSchema === 'object' && val && typeof val === 'object' && !Array.isArray(val)) {
+      output[key] = sanitizeArguments(val, childSchema);
+    } else {
+      output[key] = val;
+    }
+  }
+  return output;
 }
 
 function transcriptInput(messages = []) {
@@ -168,7 +200,7 @@ function blockText(value) {
   return '';
 }
 
-function functionCallFromStep(step, mappings) {
+function functionCallFromStep(step, mappings, schemas = new Map()) {
   if (!step || typeof step !== 'object') return null;
   const type = String(step.type || '');
   const isCall = type === 'function_call' || type === 'tool_call';
@@ -181,29 +213,30 @@ function functionCallFromStep(step, mappings) {
     : typeof step.arguments === 'string'
       ? (() => { try { return JSON.parse(step.arguments); } catch { return {}; } })()
       : {};
+  const cleanArgs = sanitizeArguments(args, schemas.get(original));
   return {
     id: String(step.id || step.call_id || crypto.randomUUID()),
     type: 'function',
     function: {
       name: original,
-      arguments: JSON.stringify(args),
+      arguments: JSON.stringify(cleanArgs),
     },
   };
 }
 
-function outputSteps(data, mappings) {
+function outputSteps(data, mappings, schemas = new Map()) {
   const steps = Array.isArray(data?.steps) ? data.steps : [];
   const calls = [];
   const texts = [];
 
   for (const step of steps) {
-    const call = functionCallFromStep(step, mappings);
+    const call = functionCallFromStep(step, mappings, schemas);
     if (call) { calls.push(call); continue; }
 
     if (step?.type === 'model_output') {
       const content = Array.isArray(step.content) ? step.content : [step.content];
       for (const block of content) {
-        const blockCall = functionCallFromStep(block, mappings);
+        const blockCall = functionCallFromStep(block, mappings, schemas);
         if (blockCall) calls.push(blockCall);
         else {
           const text = blockText(block);
@@ -221,7 +254,7 @@ function outputSteps(data, mappings) {
   if (typeof data?.output === 'string' && data.output.trim()) texts.unshift(data.output);
   if (Array.isArray(data?.output)) {
     for (const item of data.output) {
-      const call = functionCallFromStep(item, mappings);
+      const call = functionCallFromStep(item, mappings, schemas);
       if (call) calls.push(call);
       else {
         const text = blockText(item);
@@ -245,8 +278,8 @@ function outputSteps(data, mappings) {
   return { calls: uniqueCalls, text: uniqueTexts.join('\n\n') };
 }
 
-function openAIResponse(model, data, mappings, stream = false) {
-  const { calls, text } = outputSteps(data, mappings);
+function openAIResponse(model, data, mappings, schemas, stream = false) {
+  const { calls, text } = outputSteps(data, mappings, schemas);
   const status = String(data?.status || '').toLowerCase();
   const safeText = text || (status === 'completed'
     ? 'Antigravity completed the turn without a text payload. Please retry the message.'
@@ -282,6 +315,7 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
     interactionId: null,
     environmentId: null,
     mappings: new Map(),
+    schemas: new Map(),
     tools: [],
     initialized: false,
   };
@@ -321,8 +355,9 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
         // omit `tools` on a continuation even though the preceding function
         // call still needs the same declarations on the Antigravity side.
         if (Array.isArray(body.tools)) {
-          const { tools: externalTools, mappings } = toolDeclarations(body.tools);
+          const { tools: externalTools, mappings, schemas } = toolDeclarations(body.tools);
           for (const [k, v] of mappings) state.mappings.set(k, v);
+          for (const [k, v] of schemas) state.schemas.set(k, v);
           state.tools = externalTools;
         }
         const hasToolResults = messages.at(-1)?.role === 'tool';
@@ -380,7 +415,7 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
           }
         }
 
-        const response = openAIResponse(model, upstream, state.mappings, Boolean(body.stream));
+        const response = openAIResponse(model, upstream, state.mappings, state.schemas, Boolean(body.stream));
         if (Array.isArray(response)) {
           res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
           for (const chunk of response) res.write(`data: ${JSON.stringify(chunk)}\n\n`);
