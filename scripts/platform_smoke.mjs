@@ -24,4 +24,19 @@ const termux = platformPaths({ platform: 'linux', home: '/data/data/com.termux/f
 assert.equal(termux.termux, true);
 assert.equal(termux.artifactDirectory, '/storage/emulated/0/lazydevfile');
 
-console.log('PASS: Linux/macOS/Windows/Termux path matrix');
+// PRoot-Distro strips the host environment but binds Android/Termux paths into
+// a normal Linux guest. Confirm the guest is still classified as Termux.
+const prootFs = {
+  existsSync(target) {
+    return new Set(['/system', '/data/app', '/storage/emulated/0', '/data/data/com.termux/files/usr']).has(target);
+  },
+};
+const proot = platformPaths({ platform: 'linux', home: '/root', env: { PREFIX: '/usr', HOME: '/root' }, fsApi: prootFs });
+assert.equal(proot.termux, true);
+assert.equal(proot.artifactDirectory, '/storage/emulated/0/lazydevfile');
+
+const regularLinuxWithAndroidPathOnly = platformPaths({ platform: 'linux', home: '/home/alice', env: {}, fsApi: { existsSync(target) { return target === '/system'; } } });
+assert.equal(regularLinuxWithAndroidPathOnly.termux, false);
+assert.equal(regularLinuxWithAndroidPathOnly.artifactDirectory, '/home/alice/lazydevfile');
+
+console.log('PASS: Linux/macOS/Windows/Termux/proot path matrix');

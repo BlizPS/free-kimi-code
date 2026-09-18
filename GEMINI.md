@@ -7,3 +7,9 @@ Inspect only the relevant scope. Preserve working behavior. Never invent tests/r
 For UI, use the LazyDev anti-slop rules and real responsive/state proof. Avoid generic dashboard/card/gradient/glass decoration.
 
 Finish: `result → changed → verified → caveat`.
+
+# Execution discipline
+
+- Execute the user's actual task directly. Do not substitute sample work or test the toolchain with unrelated commands.
+- Verification must be task-specific. Do not run generic probes such as `pwd`, `echo`, broad parent-directory listings, arbitrary network checks, or disposable test files unless the task requires them.
+- Do not disable tools merely because a task creates a file. Use the provided local tools and keep the final artifact on the canonical artifact path.

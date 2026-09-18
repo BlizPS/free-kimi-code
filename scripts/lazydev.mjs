@@ -58,7 +58,8 @@ const platform = platformPaths();
 const isTermux = platform.termux;
 const localRequire = createRequire(import.meta.url);
 function outputDirectory() {
-  return platform.artifactDirectory;
+  const configured = String(process.env.LAZYDEV_ARTIFACT_DIR || '').trim();
+  return configured || platform.artifactDirectory;
 }
 function ensureOutputDirectory() {
   const dir = outputDirectory();
@@ -610,7 +611,7 @@ function writeKimiAgentGuidance() {
   const dir = kimiHome();
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const agents = path.join(dir, 'AGENTS.md');
-  const block = `<!-- lazydev-runtime:start -->\n# LazyDev Runtime\n\n- Keep simple requests simple; no unnecessary architecture, files, abstractions, or prose.\n- When requirements/evidence are unclear, ask one focused question or state uncertainty; never invent assumptions.\n- Do not make unrelated or random changes; preserve working behavior and relevant scope only.\n- Always double-check the smallest meaningful result before saying the task is complete.\n- For the first user turn of a new session, respond in English unless another language is explicitly requested.\n- Repository source stays in the active workspace.\n- Standalone deliverables use ${outputDirectory()} only.\n- Never report a file as saved until the exact final path is verified.\n- Use the relevant LazyDev Skill when it materially applies; keep its use compact.\n- Prefer RTK for supported shell commands to reduce terminal-output tokens; use the raw command when RTK has no equivalent.\n<!-- lazydev-runtime:end -->`;
+  const block = `<!-- lazydev-runtime:start -->\n# LazyDev Runtime\n\n- Keep simple requests simple; no unnecessary architecture, files, abstractions, or prose.\n- When requirements/evidence are unclear, ask one focused question or state uncertainty; never invent assumptions.\n- Do not make unrelated or random changes; preserve working behavior and relevant scope only.\n- Always double-check the smallest meaningful result before saying the task is complete.\n- For the first user turn of a new session, respond in English unless another language is explicitly requested.\n- Repository source stays in the active workspace.\n- Standalone deliverables use ${outputDirectory()} only.\n- Name new standalone artifacts descriptively; do not default to index.* unless explicitly requested.\n- Never report a file as saved until the exact final path is verified.\n- Use the relevant LazyDev Skill when it materially applies; keep its use compact.\n- Prefer RTK for supported shell commands to reduce terminal-output tokens; use the raw command when RTK has no equivalent.\n<!-- lazydev-runtime:end -->`;
   mergeManagedMarkdown(agents, '<!-- lazydev-runtime:start -->', '<!-- lazydev-runtime:end -->', block);
 
   const system = path.join(dir, 'SYSTEM.md');
@@ -1015,7 +1016,7 @@ async function chat() {
     : [];
   const antigravity = provider.id === 'gemini' && isAntigravityModel(pc.model);
   const proxy = antigravity
-    ? await createAntigravityProxy({ apiKey: pc.apiKey, model: pc.model, tokenLabel: 'lazydev-antigravity' })
+    ? await createAntigravityProxy({ apiKey: pc.apiKey, model: pc.model, tokenLabel: 'lazydev-antigravity', artifactDirectory: outputDirectory() })
     : (!['gemini','openai','anthropic'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null);
   if (provider.id === 'ollama') assertHttpUrl(ollamaChatUrl(pc.baseUrl), 'Ollama API URL');
   else if (provider.id === 'gemini' && antigravity) assertHttpUrl(`http://127.0.0.1:${proxy.port}/v1`, 'Antigravity proxy URL');

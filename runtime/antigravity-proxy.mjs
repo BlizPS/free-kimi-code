@@ -8,6 +8,32 @@ const LOCAL_TOOL_ALLOWLIST = new Set([
 ]);
 const TRANSIENT_RETRY_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504]);
 
+const LOCAL_TOOL_GUIDANCE = Object.freeze({
+  Read: 'Read a file from the user workspace. Use only when the task requires inspecting that file.',
+  Write: 'Write a file in the user workspace. Standalone deliverables go under LAZYDEV_ARTIFACT_DIR. Use a descriptive filename; do not default to index.* unless explicitly requested. Do not create disposable test files.',
+  Edit: 'Edit an existing file in the user workspace. Keep the change scoped to the requested task.',
+  Grep: 'Search file contents in the relevant workspace scope. Avoid broad filesystem reconnaissance unless required.',
+  Glob: 'Find relevant workspace files. Start with the smallest useful scope; do not scan unrelated parent directories.',
+  Bash: 'Run a shell command in the user workspace. Do not run generic probes such as pwd, echo, root-directory listings, or network smoke tests unless the task specifically requires them. Do not create test artifacts just to validate tool access.',
+  WebSearch: 'Search the public web only when the task needs current or external information. Do not search merely to validate that web access works.',
+  FetchURL: 'Fetch a specific URL when the task requires its contents. Do not probe arbitrary URLs merely to test connectivity.',
+});
+
+const ANTIGRAVITY_BRIDGE_INSTRUCTION = [
+  'You are the reasoning engine behind a local coding CLI.',
+  'The user request is authoritative. Execute the requested task directly; do not substitute a sample task, tutorial, or tool self-test.',
+  'Do not perform unrelated reconnaissance, filler actions, or generic diagnostics. In particular, do not run pwd, echo, broad parent-directory listings, arbitrary network probes, or create temporary test files unless the user task explicitly needs them.',
+  "For local workspace operations, use only the provided LazyDev bridge functions. Do not use the managed agent's remote sandbox filesystem or code execution as a substitute for the user workspace.",
+  'Standalone deliverables use the local bridge under LAZYDEV_ARTIFACT_DIR. Use a descriptive filename; do not default to index.* unless explicitly requested. Keep the current workspace path unchanged.',
+  'Keep the number of tool calls proportional to the task. Inspect only what is necessary, implement the requested result, then perform a task-specific verification.',
+  'Never claim a file was created, changed, or saved unless the corresponding local tool result provides evidence.',
+].join(' ');
+
+function buildSystemInstruction(artifactDirectory) {
+  const artifact = String(artifactDirectory || '/storage/emulated/0/lazydevfile');
+  return `${ANTIGRAVITY_BRIDGE_INSTRUCTION} LAZYDEV_ARTIFACT_DIR=${artifact}.`;
+}
+
 function normalizeText(value) {
   if (typeof value === 'string') return value;
   if (!Array.isArray(value)) return '';
@@ -36,10 +62,13 @@ function toolDeclarations(openAITools = []) {
       : { type: 'object', properties: {} };
     mappings.set(original, external);
     schemas.set(original, parameters);
+    const baseDescription = String(fn.description || '').trim();
+    const guidance = LOCAL_TOOL_GUIDANCE[original] || '';
+    const description = [baseDescription, guidance].filter(Boolean).join(' ');
     tools.push({
       type: 'function',
       name: external,
-      description: String(fn.description || ''),
+      description,
       parameters,
     });
   }
@@ -308,7 +337,7 @@ function openAIResponse(model, data, mappings, schemas, stream = false) {
   return response;
 }
 
-export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, tokenLabel = 'lazydev-antigravity', endpoint = DEFAULT_ENDPOINT } = {}) {
+export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, tokenLabel = 'lazydev-antigravity', endpoint = DEFAULT_ENDPOINT, artifactDirectory = process.env.LAZYDEV_ARTIFACT_DIR || '' } = {}) {
   if (!apiKey) throw new Error('Gemini API key is required for the Antigravity proxy.');
   const token = crypto.randomBytes(24).toString('hex');
   const state = {
@@ -365,19 +394,21 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
         let input;
         const payload = {
           agent: model,
-          // Antigravity requires an environment for every interaction. We keep
-          // the sandbox lifecycle stateful, while local file edits continue to
-          // flow through LazyDev's explicitly declared local tool functions.
           agent_config: { type: 'antigravity', model: 'gemini-3.8-flash', max_total_tokens: 50000 },
           environment: state.environmentId || 'remote',
+          system_instruction: buildSystemInstruction(artifactDirectory),
           store: true,
         };
         if (isFunctionResultContinuation) {
           input = toolResultInputs(messages, state.mappings);
         } else {
-          input = state.interactionId
-            ? (recentUserInput(messages) || transcriptInput(messages))
-            : transcriptInput(messages);
+          // The Interactions API already stores prior turns. Host instructions
+          // and selected skills are sent via system_instruction; only the user's
+          // current request belongs in input. This prevents system policy from
+          // being interpreted as a task or a request to run self-tests.
+          // Send only the current user request and keep host policy in the real
+          // system_instruction field instead.
+          input = recentUserInput(messages);
           state.initialized = true;
         }
         if (!input) input = 'Continue.';

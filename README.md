@@ -51,7 +51,7 @@ proot-distro install debian
 proot-distro login debian
 ```
 
-Run the normal Lazy Developer installer from that Linux shell. The installer detects glibc Linux inside Termux and places the `lazydev` launcher in the active Termux PATH when appropriate. This also repairs an older broken `lazydev` symlink in `$PREFIX/bin`, so `lazydev setup` resolves to the current build instead of a missing old target.
+Run the normal Lazy Developer installer from that Linux shell. The runtime also recognizes the Android/Termux host bindings that remain visible inside proot-distro even though the guest environment is rebuilt, so standalone artifacts still go to `/storage/emulated/0/lazydevfile`. Native Linux keeps its normal `$HOME/lazydevfile` path unchanged. The installer detects glibc Linux inside Termux and places the `lazydev` launcher in the active Termux PATH when appropriate. This also repairs an older broken `lazydev` symlink in `$PREFIX/bin`, so `lazydev setup` resolves to the current build instead of a missing old target.
 
 ### 2. Set up your provider
 

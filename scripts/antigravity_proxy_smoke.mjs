@@ -85,6 +85,14 @@ assert.equal(JSON.parse(first.body.choices[0].message.tool_calls[0].function.arg
 assert.equal(JSON.parse(first.body.choices[0].message.tool_calls[0].function.arguments).toolSummary, undefined);
 assert.equal(seen[0].agent, 'antigravity-preview-09-2026');
 assert.equal(seen[0].environment, 'remote');
+assert.match(String(seen[0].system_instruction || ''), /reasoning engine behind a local coding CLI/i);
+assert.match(String(seen[0].system_instruction || ''), /do not perform unrelated reconnaissance/i);
+assert.match(String(seen[0].system_instruction || ''), /tool self-test/i);
+assert.match(String(seen[0].system_instruction || ''), /descriptive filename/i);
+assert.match(String(seen[0].system_instruction || ''), /do not default to index\.\*/i);
+assert.equal(seen[0].input, 'Check the repository status.');
+assert.doesNotMatch(String(seen[0].input || ''), /LazyDev Intelligence Alias System|Keep the task boundary explicit|Execution order/i);
+
 assert.ok(Array.isArray(seen[0].tools));
 assert.ok(seen[0].tools.some((t) => t.type === 'function' && t.name === 'lazydev_bash'));
 assert.equal(seen[0].agent_config.type, 'antigravity');
@@ -114,6 +122,7 @@ assert.equal(seen[1].previous_interaction_id, 'int_1');
 assert.equal(seen[1].environment, 'env_1');
 assert.equal(seen[1].tools?.length, 1);
 assert.equal(seen[1].tools?.[0]?.name, 'lazydev_bash');
+assert.match(String(seen[1].system_instruction || ''), /tool self-test/i);
 assert.equal(seen[1].input[0].type, 'function_result');
 assert.equal(seen[1].input[0].name, 'lazydev_bash');
 assert.equal(seen[1].input[0].call_id, 'fc_1');
