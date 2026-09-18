@@ -22,7 +22,7 @@ const KIMI_VERSION = '0.43.1';
 const OPENROUTER_FREE_MODEL = 'openrouter/free';
 const OPENROUTER_MODEL_FALLBACK_LIMIT = 3;
 const GEMINI_NO_TOOL_MODELS = [];
-const ANTIGRAVITY_AGENT = 'antigravity-preview-05-2026';
+const ANTIGRAVITY_AGENT = 'antigravity-preview-09-2026';
 const KIMI_BUILTIN_TOOLS = [
   'Read','Write','Edit','Grep','Glob','ReadMediaFile','Bash',
   'WebSearch','FetchURL','EnterPlanMode','ExitPlanMode','TodoList',
@@ -610,7 +610,7 @@ function writeKimiAgentGuidance() {
   const dir = kimiHome();
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const agents = path.join(dir, 'AGENTS.md');
-  const block = `<!-- lazydev-runtime:start -->\n# LazyDev Runtime\n\n- Repository source stays in the active workspace.\n- Standalone deliverables use ${outputDirectory()} only.\n- On Termux that path is exactly /storage/emulated/0/lazydevfile.\n- Never report a file as saved until the final path is verified.\n- Use the smallest relevant evidence set and the relevant LazyDev Skill.\n- Avoid filler, generic UI decoration, fake data, unnecessary rewrites, and repeated context.\n<!-- lazydev-runtime:end -->`;
+  const block = `<!-- lazydev-runtime:start -->\n# LazyDev Runtime\n\n- Keep simple requests simple; no unnecessary architecture, files, abstractions, or prose.\n- When requirements/evidence are unclear, ask one focused question or state uncertainty; never invent assumptions.\n- Do not make unrelated or random changes; preserve working behavior and relevant scope only.\n- Always double-check the smallest meaningful result before saying the task is complete.\n- Repository source stays in the active workspace.\n- Standalone deliverables use ${outputDirectory()} only.\n- Never report a file as saved until the exact final path is verified.\n- Use the relevant LazyDev Skill when it materially applies; keep its use compact.\n- Prefer RTK for supported shell commands to reduce terminal-output tokens; use the raw command when RTK has no equivalent.\n<!-- lazydev-runtime:end -->`;
   mergeManagedMarkdown(agents, '<!-- lazydev-runtime:start -->', '<!-- lazydev-runtime:end -->', block);
 
   const system = path.join(dir, 'SYSTEM.md');
@@ -709,6 +709,11 @@ function buildKimiConfig(provider, pc, proxy = null) {
     ``,
     `[[hooks]]`,
     `event = ${tomlQuote('TurnStarted')}`,
+    `command = ${tomlQuote(promptCommand)}`,
+    `timeout = 3`,
+    ``,
+    `[[hooks]]`,
+    `event = ${tomlQuote('UserPromptSubmit')}`,
     `command = ${tomlQuote(promptCommand)}`,
     `timeout = 3`,
     ``,

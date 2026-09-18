@@ -8,7 +8,7 @@ const errors = [];
 
 if (!src.includes("function isAntigravityModel(modelId)")) { errors.push('Antigravity model classifier missing'); }
 if (src.includes(".filter((x) => !isAntigravityModel(x.name))")) { errors.push('Antigravity models must remain selectable'); }
-if (!src.includes("ANTIGRAVITY_AGENT = 'antigravity-preview-05-2026'")) { errors.push('Antigravity agent id missing'); }
+if (!src.includes("ANTIGRAVITY_AGENT = 'antigravity-preview-09-2026'")) { errors.push('Antigravity agent id missing'); }
 if (!src.includes('createAntigravityProxy')) { errors.push('Antigravity proxy integration missing'); }
 if (src.includes('recoverUnsupportedGeminiModel')) { errors.push('Legacy Antigravity fallback still disables the model'); }
 if (!src.includes("const antigravity = provider.id === 'gemini' && isAntigravityModel(pc.model);")) { errors.push('Antigravity session routing missing'); }

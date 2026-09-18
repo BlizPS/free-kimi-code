@@ -168,6 +168,12 @@ If Kimi Code reports `[provider.api_error] Error: Invalid URL`, this is usually 
 
 The desktop installer prefers a writable directory that is already on the current `PATH`, so a one-line `curl | sh` install can use `lazydev` immediately. It also repairs stale LazyDev launchers and broken symlinks left by older installs. If no writable `PATH` directory exists, it falls back to `~/.local/bin` and prints the exact `export PATH=...` command needed for the current shell.
 
+## Antigravity reference
+
+Lazy Developer uses the stateful Interactions API flow documented by Google for Antigravity agents. The current managed agent is exposed as `antigravity-preview-09-2026`; older preview IDs may still work when the upstream catalog exposes them.
+
+Docs: https://ai.google.dev/gemini-api/docs/antigravity-agent
+
 ## Project
 
 Source: https://github.com/BlizPS/lazy-developer-free-kimi-code
@@ -188,6 +194,8 @@ npm test
 
 MIT
 
- > **Gemini + Antigravity:** `antigravity-preview-05-2026` stays selectable. Because Antigravity is a managed agent on Google's Interactions API, Lazy Developer routes that model through a small local compatibility bridge instead of Kimi Code's regular Gemini transport. The bridge keeps `environment_id` + `previous_interaction_id` across turns and translates Kimi's OpenAI-style tool calls into Interactions function calls, so local Kimi tools can round-trip without the `Function calling is not enabled` error. Google documents function calling for Antigravity as stateful and requires the Interactions API for it.
+ > **Gemini + Antigravity:** Antigravity models such as `antigravity-preview-09-2026` remain selectable. Lazy Developer routes them through a small local compatibility bridge instead of Kimi Code's regular Gemini transport. The bridge follows the stateful Interactions API flow, keeps `environment_id` + `previous_interaction_id`, declares custom tools on fresh turns, and translates Kimi's OpenAI-style tool calls into Interactions function calls. This keeps Antigravity usable with Kimi's local tool loop instead of disabling tools.
+
+> **Antigravity response handling:** The bridge reads `model_output` content directly, ignores tool steps owned by the remote Antigravity environment, and can re-fetch a completed interaction when an intermediary returns only status metadata. It also avoids pinning an obsolete Interactions API revision by default, so current Antigravity releases use the current endpoint behavior.
 
 > **Version note:** Lazy Developer stays at **1.0.0**. Kimi Code's own version is controlled by the Kimi Code release you install; Lazy Developer does not rewrite or spoof Kimi's binary version. The managed installer pins the compatible Kimi release and disables Kimi's automatic self-upgrade so it does not silently move to a different upstream version.

@@ -33,8 +33,16 @@ if (/OPENROUTER_FREE_FALLBACK_LIMIT/.test(source)) {
   console.error('FAIL: stale OpenRouter fallback limit constant remains.');
   process.exit(1);
 }
-if (/console\.log|process\.stdout\.write|process\.stdout\.end/.test(hook)) {
-  console.error('FAIL: LazyDev turn hook must remain silent.');
+if (!hook.includes("hook_event_name || 'TurnStarted'")) {
+  console.error('FAIL: LazyDev hook event handling is missing.');
   process.exit(1);
 }
-console.log('PASS: OpenRouter free router, fallback routing, 404/429 handling, and silent turn hook wiring');
+if (!hook.includes("=== 'UserPromptSubmit'")) {
+  console.error('FAIL: compact UserPromptSubmit context hook is missing.');
+  process.exit(1);
+}
+if (!hook.includes('TurnStarted remains silent')) {
+  console.error('FAIL: TurnStarted hook must remain silent.');
+  process.exit(1);
+}
+console.log('PASS: OpenRouter free router, fallback routing, 404/429 handling, and compact prompt-context hook wiring');

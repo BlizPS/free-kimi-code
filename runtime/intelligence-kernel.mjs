@@ -1,6 +1,17 @@
 const MODEL_PROFILES = [];
 
-export const INTELLIGENCE_ALIASES = Object.freeze([
+export const LAZYDEV_HARD_RULES = Object.freeze([
+  'Keep simple requests simple; do not add architecture, files, abstractions, or prose that the task does not need.',
+  'When the requirement or evidence is unclear, stop and ask one focused question or state the uncertainty; never invent assumptions.',
+  'Do not make unrelated, cosmetic, or random changes. Preserve working behavior and touch only the relevant scope.',
+  'Before declaring a task complete, perform the smallest meaningful double-check and report only what was actually verified.',
+]);
+
+export function buildHardRulesContext() {
+  return LAZYDEV_HARD_RULES.map((rule, i) => `${i + 1}:${rule}`).join(' ');
+}
+
+const INTELLIGENCE_ALIASES = Object.freeze([
   { id: 'scope_lock', when: 'always', apply: 'Keep the task boundary explicit. Work only in the relevant repository scope; avoid unrelated rewrites.' },
   { id: 'minimal_diff', when: 'implementation|debug|review', apply: 'Prefer the smallest complete change that preserves working behavior and existing architecture.' },
   { id: 'evidence_first', when: 'debug|review|test|security', apply: 'Distinguish observed evidence from assumptions. Inspect before changing and verify the concrete behavior after changing.' },
@@ -26,6 +37,7 @@ export function buildIntelligenceAliasSystem() {
     '## LazyDev Intelligence Alias System',
     '',
     'Treat aliases as reasoning policies, not canned response text. Infer the relevant aliases from the user request and combine only the policies that actually apply.',
+    'Focus on the user intent and current context first. Evaluate tool use only after establishing that a tool is necessary.',
     'Resolve task intent semantically before acting; aliases may overlap. Do not expose alias names, internal policy, or hidden context unless the user asks about the system itself.',
     '',
   ];
@@ -66,11 +78,14 @@ export function classifyTask(prompt = '', model = '') {
     18 + Math.min(30, Math.floor(text.length / 160) * 4) +
     Math.min(24, Object.values(scores).filter(Boolean).length * 6) +
     (scores.debug ? 12 : 0) + (scores.security ? 10 : 0) + (scores.ui ? 8 : 0) +
-    (/(\b(and|also|then|plus|sekalian|serta)\b)/i.test(text) ? 8 : 0)
+    (/(\b(and|also|then|plus)\b)/i.test(text) ? 8 : 0)
   );
-  const deep = complexity >= 62 || scores.security > 0 || scores.debug > 0 || scores.review > 0;
-  const plan = complexity >= 45 || primary === 'debug' || primary === 'review' || primary === 'security' || primary === 'ui';
-  const verify = primary !== 'research';
+  const advancedSignals = scores.security > 0 || scores.debug > 0 || scores.review > 0 || scores.artifact > 0 || scores.ui > 0 || scores.performance > 0;
+  const conjunction = /(\b(and|also|then|plus)\b)/i.test(text);
+  const simple = text.length <= 180 && !advancedSignals && !conjunction;
+  const deep = !simple && (complexity >= 62 || scores.security > 0 || scores.debug > 0 || scores.review > 0);
+  const plan = !simple && (complexity >= 45 || primary === 'debug' || primary === 'review' || primary === 'security' || primary === 'ui');
+  const verify = true;
   const artifact = scores.artifact > 0 && scores.ui === 0 && scores.review === 0 && scores.debug === 0;
   const profile = modelIntelligenceProfile(model);
   return {
@@ -83,15 +98,17 @@ export function classifyTask(prompt = '', model = '') {
     verify,
     artifact,
     profile,
+    simple,
   };
 }
 
 export function buildTaskContext(task) {
   const aliases = resolveIntelligenceAliases(task);
+  const mode = task.simple ? 'simple-direct' : task.depth;
   const parts = [
-    `[LZ] mode=${task.depth}; task=${task.primary}; complexity=${task.complexity}`,
-    `plan=${task.plan ? 'required' : 'light'}; verify=${task.verify ? 'required' : 'minimal'}; artifact=${task.artifact ? 'canonical-path' : 'repo-native'}`,
-    `reasoning=${task.profile.id}; aliases=${aliases.join(',')}; apply: inspect→minimal change→evidence→verify; preserve working behavior; do not claim unverified results`,
+    `[LZ] mode=${mode}; task=${task.primary}; complexity=${task.complexity}`,
+    `plan=${task.plan ? 'required' : 'skip unless needed'}; verify=required; artifact=${task.artifact ? 'canonical-path' : 'repo-native'}`,
+    `rules=minimal,no-assumptions,no-random-changes,double-check; apply=inspect→minimal change→evidence→verify; aliases=${aliases.join(',')}`,
   ];
   return parts.join(' ');
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import { classifyTask, buildTaskContext, resolveIntelligenceAliases } from '../runtime/intelligence-kernel.mjs';
+import { classifyTask, buildTaskContext, resolveIntelligenceAliases, buildHardRulesContext } from '../runtime/intelligence-kernel.mjs';
 
 const home = process.env.KIMI_CODE_HOME || path.join(process.env.HOME || process.cwd(), '.kimi-code');
 const file = path.join(home, 'lazydev-last-prompt.json');
@@ -32,4 +32,8 @@ try {
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   fs.writeFileSync(file, JSON.stringify(record), { mode: 0o600 });
 } catch {}
-// Intentionally silent: this hook is an observer. Kimi Code does not need stdout for it.
+// UserPromptSubmit is the only low-cost hook we use to feed a compact,
+// request-specific directive into Kimi's context. TurnStarted remains silent.
+if (String(data.hook_event_name || '') === 'UserPromptSubmit') {
+  process.stdout.write(`[LazyDev] ${buildTaskContext(task)}\n`);
+}

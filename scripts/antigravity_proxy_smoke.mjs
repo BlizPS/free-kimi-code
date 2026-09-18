@@ -4,11 +4,21 @@ import { createAntigravityProxy } from '../runtime/antigravity-proxy.mjs';
 
 let seen = [];
 const upstream = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/v1beta/interactions/int_3') {
+    res.writeHead(200, {'content-type':'application/json'});
+    return res.end(JSON.stringify({
+      id: 'int_3',
+      environment_id: 'env_1',
+      status: 'completed',
+      steps: [{type:'model_output', content:[{type:'text', text:'Recovered from interaction retrieval.'}]}]
+    }));
+  }
   let raw = '';
   req.setEncoding('utf8');
   req.on('data', c => raw += c);
   req.on('end', () => {
     const body = JSON.parse(raw || '{}');
+    body.__revision_header = req.headers['api-revision'];
     seen.push(body);
     res.writeHead(200, {'content-type':'application/json'});
     if (!body.previous_interaction_id) {
@@ -18,12 +28,19 @@ const upstream = http.createServer((req, res) => {
         status: 'requires_action',
         steps: [{type:'function_call', id:'fc_1', name:'external_run_command', arguments:{command:'git status'}}]
       }));
-    } else {
+    } else if (body.previous_interaction_id === 'int_1') {
       res.end(JSON.stringify({
         id: 'int_2',
         environment_id: 'env_1',
         status: 'completed',
-        output_text: 'Done — the tool result was received.'
+        steps: [{type:'model_output', content:[{type:'text', text:'Done — the tool result was received from the model_output step.'}]}]
+      }));
+    } else {
+      res.end(JSON.stringify({
+        id: 'int_3',
+        environment_id: 'env_1',
+        status: 'completed',
+        steps: [{type:'function_call', id:'builtin_1', name:'code_execution', arguments:{command:'echo ok'}}]
       }));
     }
   });
@@ -32,7 +49,7 @@ await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
 const port = upstream.address().port;
 const proxy = await createAntigravityProxy({
   apiKey: 'test-key',
-  model: 'antigravity-preview-05-2026',
+  model: 'antigravity-preview-09-2026',
   endpoint: `http://127.0.0.1:${port}/v1beta/interactions`,
 });
 
@@ -44,7 +61,7 @@ async function call(body) {
 }
 
 const first = await call({
-  model:'antigravity-preview-05-2026',
+  model:'antigravity-preview-09-2026',
   stream:false,
   messages:[{role:'user', content:'Check the repository status.'}],
   tools:[{type:'function', function:{name:'run_command', description:'Run a command', parameters:{type:'object',properties:{command:{type:'string'}}}}}]
@@ -52,12 +69,17 @@ const first = await call({
 assert.equal(first.status, 200);
 assert.equal(first.body.choices[0].finish_reason, 'tool_calls');
 assert.equal(first.body.choices[0].message.tool_calls[0].function.name, 'run_command');
-assert.equal(seen[0].agent, 'antigravity-preview-05-2026');
+assert.equal(seen[0].agent, 'antigravity-preview-09-2026');
 assert.equal(seen[0].environment, 'remote');
+assert.ok(Array.isArray(seen[0].tools));
 assert.ok(seen[0].tools.some((t) => t.type === 'function' && t.name === 'external_run_command'));
+assert.equal(seen[0].agent_config.type, 'antigravity');
+assert.equal(seen[0].agent_config.max_total_tokens, 50000);
+assert.equal(seen[0].tools?.find((t) => t.name === 'external_run_command')?.type, 'function');
+assert.equal(seen[0].__revision_header, undefined);
 
 const second = await call({
-  model:'antigravity-preview-05-2026',
+  model:'antigravity-preview-09-2026',
   messages:[
     {role:'user', content:'Check the repository status.'},
     {role:'assistant', content:null, tool_calls:[{id:'fc_1', type:'function', function:{name:'run_command', arguments:'{"command":"git status"}'}}]},
@@ -65,12 +87,22 @@ const second = await call({
   ],
 });
 assert.equal(second.status, 200);
-assert.equal(second.body.choices[0].message.content, 'Done — the tool result was received.');
+assert.equal(second.body.choices[0].message.content, 'Done — the tool result was received from the model_output step.');
 assert.equal(seen[1].previous_interaction_id, 'int_1');
 assert.equal(seen[1].environment, 'env_1');
+assert.equal(seen[1].tools, undefined);
 assert.equal(seen[1].input[0].type, 'function_result');
 assert.equal(seen[1].input[0].name, 'external_run_command');
 assert.equal(seen[1].input[0].call_id, 'fc_1');
+
+const third = await call({
+  model:'antigravity-preview-09-2026',
+  messages:[{role:'user', content:'Give me the final result.'}],
+});
+assert.equal(third.status, 200);
+assert.equal(third.body.choices[0].message.content, 'Recovered from interaction retrieval.');
+assert.equal(seen[2].previous_interaction_id, 'int_2');
+assert.ok(Array.isArray(seen[2].tools));
 
 proxy.server.close();
 upstream.close();
