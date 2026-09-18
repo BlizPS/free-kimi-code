@@ -22,7 +22,7 @@
   </p>
 </div>
 
-> ⭐ **Like the project?** A GitHub star helps other developers discover it. If Lazy Developer saves you time, consider starring or sharing it.
+  <p><strong>A calm, capable developer layer for Kimi Code.</strong><br/>Live models, portable skills, safe artifact handling, provider routing, and a cleaner terminal workflow — without replacing the Kimi Code experience.</p>
 
 ## What is Lazy Developer?
 
