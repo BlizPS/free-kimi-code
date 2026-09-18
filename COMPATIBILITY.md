@@ -30,4 +30,4 @@ Native integration metadata is included for compatible coding-agent ecosystems. 
 
 ## Platforms
 
-Lazy Developer targets Windows, Linux, macOS, and Termux.
+Lazy Developer runtime paths include Windows, Linux, macOS, and Termux. The one-line desktop installer targets macOS/Linux/Windows because Kimi Code's current native installer does not provide an Android/Termux path.

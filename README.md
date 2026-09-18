@@ -15,15 +15,15 @@
 
 </div>
 
-Lazy Developer is the part of your coding setup that quietly makes everything feel more put together. It bundles engineering skills, project-aware guidance, guardrails, provider routing, and a simple CLI entrypoint — without forcing you to rebuild your workflow around another giant framework.
+Lazy Developer is a small layer that makes coding agents feel more intentional: focused skills, sensible guardrails, provider setup, and a CLI that gets out of the way when you just want to build.
 
-Use the built-in LazyDev flow when you want the full experience, or take the same skills and integrations into another compatible coding agent.
+The built-in workflow runs through **Kimi Code**, while the same skills can also be used with other compatible coding agents and plugin systems.
 
-## Quick start
+## Get started
 
-### 1. Install
+### 1. Install or update
 
-The installer handles the setup in one go. You do **not** need to install LazyDev with npm.
+Use the installer for your platform. You can run the same command again later; it checks what is already installed and only updates what actually changed.
 
 **macOS / Linux**
 
@@ -37,85 +37,61 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-skill-cli/ma
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-skill-cli/main/install.ps1")))
 ```
 
-The installer installs or repairs both **Kimi Code 0.43.1** and **Lazy Developer 1.0.0**. Kimi Code is installed through Moonshot's native installer, while LazyDev is installed directly from this GitHub repository. No npm global install is involved in this flow. Kimi Code's official installer is also designed as a native, no-Node prerequisite installation path.
+The installer uses Kimi Code's native installer, so the desktop setup does not require npm. The managed Kimi Code floor is **0.43.1**, and Lazy Developer is **1.0.0**.
 
-The desktop installer also bootstraps a private Node.js runtime for LazyDev when a compatible Node.js installation is not already available. This keeps the setup self-contained without turning npm into a prerequisite.
+On a repeat run, an unchanged Kimi Code installation is skipped. Lazy Developer is checked against the current GitHub revision; when the revision is unchanged, Lazy Developer is skipped too. When only Lazy Developer changed, only Lazy Developer is refreshed. When only Kimi Code changed, only Kimi Code is refreshed. When both changed, both are updated.
 
-> **Termux / Android:** Kimi Code's native installer does not currently publish an Android/Termux build; upstream has an open request for Termux support. The native one-line installer is therefore intended for supported desktop Linux and macOS environments rather than pretending Android is already supported.
+Your Kimi configuration and sessions live outside the Lazy Developer installation directory, so updating Lazy Developer does not wipe your existing session history.
+
+> **Termux / Android:** the desktop native Kimi Code installer is not currently an Android/Termux install path. Use the Kimi Code method that is supported by your Termux environment rather than expecting the desktop installer to work there.
 
 ### 2. Set up your provider, API key, and model
 
-After installation, configure the AI service LazyDev should use:
+Before the first coding session, run:
 
 ```bash
 lazydev setup
 ```
 
-This is the only setup step you need before your first session. Pick a provider, enter its API key, and choose a live model from the provider catalog. Current managed providers include **Gemini, OpenRouter, NVIDIA, Anthropic, and OpenAI**.
+Choose a provider, enter its API key, and select a live model. The built-in provider list includes **Gemini, OpenRouter, NVIDIA, Anthropic, and OpenAI**. Your chosen model is saved so the next session starts from the same setup.
 
 ### 3. Start coding
 
-Once setup is saved, open the actual coding session with:
+Then start the actual coding session with:
 
 ```bash
 lazydev chat
 ```
 
-Running `lazydev` on its own opens the Lazy Developer command center. It does **not** start Kimi Code. The normal flow is simply:
+That is the main flow. Running `lazydev` by itself opens the Lazy Developer command center; it does not jump straight into Kimi Code.
 
-```text
-Install
-  ↓
-lazydev setup
-  ↓
-Provider + API key + model
-  ↓
-lazydev chat
-```
+## What Lazy Developer brings
 
-## Why Lazy Developer?
+LazyDev keeps the useful parts close to the work. The bundled skills cover implementation, debugging, review, and verification, with extra attention to repository context, evidence, UI/UX consistency, and avoiding unnecessary rewrites.
 
-LazyDev is meant to feel like a useful layer on top of your coding tools, not another project-management ceremony.
+Skills are deliberately compact. The runtime points Kimi Code at the bundled `skills/` directory and enables merged skill discovery, so the relevant `SKILL.md` files are available to the agent instead of being copied into a huge permanent prompt.
 
-**Build.** Move from a request to real project changes with a focused engineering workflow.
+## Skills beyond LazyDev
 
-**Debug.** Follow the evidence, fix the actual path that failed, and verify the result.
-
-**Review.** Look for bugs, regressions, security problems, and the changes that genuinely matter.
-
-**Test.** Run the checks that prove the work, then keep the process moving.
-
-Skills are loaded when they matter, while project guidance and hooks keep the agent grounded in the repository instead of drifting into generic advice.
-
-## Use the skills with other coding CLIs
-
-LazyDev's own CLI is optional. The skills can travel to other compatible agents through the standard Skills CLI:
+Lazy Developer can also travel with the coding agent you already use. For a compatible agent, use the standard Skills CLI from your project or agent environment:
 
 ```bash
 npx skills add BlizPS/lazy-developer-skill-cli --all
 ```
 
-You can also target a supported agent directly:
+That universal path is **not required for LazyDev itself**. LazyDev already ships its bundled skills. It is there for other agents that support the Skills CLI.
 
-```bash
-npx skills add BlizPS/lazy-developer-skill-cli --agent claude-code
-```
+## Plugins and agent integrations
 
-That universal route is separate from `lazydev chat`. LazyDev already ships its bundled skills, so you do not need the Skills CLI just to use LazyDev itself.
+The repository includes native integration metadata for several agent ecosystems, including Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Qoder, Devin, Grok, Kiro, and OpenClaw.
 
-## Plugins and native integrations
+So the idea is simple: use `lazydev chat` for the built-in Lazy Developer flow, or bring the skills into another compatible agent through that agent's normal plugin/skills mechanism.
 
-Where an agent supports native plugins or extensions, LazyDev ships the corresponding integration metadata so you can follow that host's normal installation flow.
+## Providers
 
-The repository includes integration surfaces for environments such as **Claude Code, Codex, Cursor, Gemini CLI, OpenCode, Qoder, Devin, Grok, Kiro, and OpenClaw**.
+Lazy Developer keeps the model provider separate from the coding-agent shell. The `lazydev setup` flow currently exposes:
 
-In other words: keep the coding CLI you already like, and bring LazyDev's skills and integrations with it.
-
-## Providers and models
-
-LazyDev keeps the agent shell separate from the model provider. The built-in `lazydev chat` flow is powered by Kimi Code, while the model endpoint is selected during `lazydev setup`.
-
-| Provider | Credential | Model selection |
+| Provider | API key | Model selection |
 | --- | --- | --- |
 | **Gemini** | `GEMINI_API_KEY` | Live provider catalog |
 | **OpenRouter** | `OPENROUTER_API_KEY` | Live provider catalog |
@@ -123,11 +99,17 @@ LazyDev keeps the agent shell separate from the model provider. The built-in `la
 | **Anthropic** | `ANTHROPIC_API_KEY` | Live provider catalog |
 | **OpenAI** | `OPENAI_API_KEY` | Live provider catalog |
 
-For other coding CLIs, continue using that CLI's own authentication and model-selection flow. LazyDev's skills are independent of that choice.
+The OpenAI integration uses the standard OpenAI provider configuration exposed by Kimi Code; the UI simply calls it **OpenAI**.
+
+## Token efficiency
+
+LazyDev includes a static token-budget gate so the skill layer stays small. In the current bundled baseline, the four skills use about **690 estimated tokens** versus a **4,042-token** baseline, which is an **82.9% reduction in skill payload size**. The combined static CLI hot path is about **942 tokens**, or **76.7% below** the stored baseline.
+
+Those numbers measure the project's stored skill/runtime hot path. They are **not a promise that every conversation or provider bill will use 75% fewer tokens**; actual usage depends on the task, model, context, tool calls, and conversation history.
 
 ## Updating
 
-The same installer is both the installer and the updater. Run the command for your platform again:
+There is no separate updater command. Run the installer for your platform again:
 
 **macOS / Linux**
 
@@ -141,33 +123,33 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-skill-cli/ma
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-skill-cli/main/install.ps1")))
 ```
 
-It re-applies the pinned Kimi Code version **0.43.1** and refreshes LazyDev from the repository. Kimi Code 0.43.1 is a real upstream release dated September 15, 2026.
+The updater compares the installed Kimi Code version and the current GitHub revision of Lazy Developer before replacing anything. If nothing changed, both components are skipped.
+
+Updates do not delete the Kimi data directory used by LazyDev, so existing sessions remain available.
 
 ## Troubleshooting
 
-If `lazydev chat` says no provider is configured, run `lazydev setup` and save a provider, API key, and model first.
+If `lazydev chat` says a provider is not configured, run `lazydev setup` and save a provider, API key, and model.
 
-If `lazydev chat` says Kimi Code is missing, rerun the platform installer. The installer checks the native `kimi` launcher instead of relying on npm.
+If Kimi Code is missing, rerun the platform installer. The installer checks for the native `kimi` launcher before deciding whether Kimi needs an update.
 
-If `lazydev` is installed but the shell cannot find it immediately, open a new terminal or reload your shell profile so the user-level bin directory is picked up.
+If `lazydev` is not found immediately after installation, start a new terminal so your user-level `PATH` changes are loaded.
 
 ## Project
 
 Source: https://github.com/BlizPS/lazy-developer-skill-cli
 
-Issues and feature requests: https://github.com/BlizPS/lazy-developer-skill-cli/issues
+Issues: https://github.com/BlizPS/lazy-developer-skill-cli/issues
 
 ## Development
 
-The packaged CLI is still a normal Node.js project for contributors, and the repository keeps its npm metadata for publishing/CI compatibility. The **end-user installers do not depend on npm**.
+The repository keeps npm metadata for contributors, package tooling, and CI, but the end-user desktop installers do not require npm.
 
 Run the test suite from the repository root:
 
 ```bash
 npm test
 ```
-
-The validation suite checks package structure, skills, integrations, runtime behavior, provider routing, platform behavior, and installer consistency.
 
 ## License
 
