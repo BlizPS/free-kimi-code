@@ -1,34 +1,26 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/free-kimi-code-dark.svg">
-    <img src="assets/free-kimi-code-light.svg" alt="Lazy Developer" width="720" />
+    <img src="assets/free-kimi-code-light.svg" alt="Lazy Developer" width="720">
   </picture>
 
-  <br/>
-  <br/>
-
-  [![Version](https://img.shields.io/badge/version-1.0.0-6f42c1)](https://github.com/BlizPS/lazy-developer-free-kimi-code)
-  [![Kimi Code](https://img.shields.io/badge/Kimi%20Code-2.0.0-111111)](https://github.com/MoonshotAI/kimi-code)
-  [![CI](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/ci.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/ci.yml)
-  [![Validate](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/validate.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/validate.yml)
-  [![Stars](https://img.shields.io/github/stars/BlizPS/lazy-developer-free-kimi-code?style=flat)](https://github.com/BlizPS/lazy-developer-free-kimi-code/stargazers)
-  [![Forks](https://img.shields.io/github/forks/BlizPS/lazy-developer-free-kimi-code?style=flat)](https://github.com/BlizPS/lazy-developer-free-kimi-code/network/members)
-  [![Issues](https://img.shields.io/github/issues/BlizPS/lazy-developer-free-kimi-code?style=flat)](https://github.com/BlizPS/lazy-developer-free-kimi-code/issues)
-  [![License](https://img.shields.io/badge/license-MIT-111111)](LICENSE)
+  <br>
+  <br>
 
   <p>
     <a href="https://github.com/BlizPS/lazy-developer-free-kimi-code/issues">Issues</a> ·
     <a href="https://github.com/BlizPS/lazy-developer-free-kimi-code/discussions">Discussions</a>
   </p>
-</div>
 
-  <p align="center">
-  <em>A calm, capable developer layer for Kimi Code.</strong><br/>Live models, portable skills, safe artifact handling, provider routing, and a cleaner terminal workflow — without replacing the Kimi Code experience.</em>
-</p>
+  <p>
+    <em>A calm, capable developer layer for Kimi Code.</em><br>
+    <em>Live models, portable skills, safe artifact handling, provider routing, and a cleaner terminal workflow — without replacing the Kimi Code experience.</em>
+  </p>
+</div>
 
 ## What is Lazy Developer?
 
-Lazy Developer is a free, open-source developer layer for **Kimi Code CLI**. It keeps Kimi Code's normal workflow and adds portable skills, model routing, safer artifacts, web-search fallback, and a quieter terminal.
+Lazy Developer is a free, open-source developer layer for the Kimi Code CLI. It keeps Kimi Code's normal workflow while adding portable skills, model routing, safer artifacts, web-search fallback, and a quieter terminal.
 
 ```text
 Lazy Developer
@@ -50,17 +42,17 @@ Lazy Developer
 - `lazy-review` — actionable findings without the usual essay
 - `lazy-test` — focused testing and verification
 
-They work through the normal skills system, so they can travel with compatible agent CLIs instead of being glued to LazyDev itself.
+They work through the normal skills system, so they can travel with compatible agent CLIs instead of being glued to Lazy Developer itself.
 
 ### 🪶 Real response economy
 
-Lazy Developer includes an active runtime response-economy layer targeting **~75% less avoidable prose**. It is applied across the supported CLI/plugin paths, not just written as a suggestion inside the skill.
+Lazy Developer includes an active runtime response-economy layer targeting ~75% less avoidable prose. It is applied across the supported CLI/plugin paths, not just written as a suggestion inside a skill.
 
 The goal is simple: keep the code, commands, decisions, and useful evidence while cutting filler.
 
 ### ⚡ RTK integration
 
-**Rust Token Killer (RTK)** trims noisy terminal output before it reaches the model, reducing one of the more pointless ways an agent can burn context.
+Rust Token Killer (RTK) trims noisy terminal output before it reaches the model, reducing one of the more pointless ways an agent can burn context.
 
 ### 🔌 Live model routing
 
@@ -76,7 +68,7 @@ Model changes can use compatibility aliases for older LazyDev model names withou
 
 ### 📁 Safe artifacts
 
-Standalone files use the canonical `lazydevfile` directory and never overwrite an existing artifact. A collision gets the lowest free numeric suffix instead.
+Standalone files use the canonical `lazydevfile` directory and never overwrite an existing artifact. When a filename already exists, Lazy Developer uses the lowest free numeric suffix instead.
 
 ```text
 report.html
@@ -88,66 +80,97 @@ report2.html
 
 When the host search service is unavailable, the bundled `lazydev-search` MCP service can provide web search without forcing a provider switch.
 
-## Install / Updating
+## 📦 Installation
 
 ### Lazy Developer CLI
 
-**macOS / Linux**
+#### macOS / Linux
 
-```bash
+```sh
 curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.sh" | sh
 ```
 
-**Windows PowerShell**
+#### Windows PowerShell
 
 ```powershell
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1")))
 ```
 
-Then:
+After installation:
 
-```bash
+```sh
 lazydev setup
 lazydev chat
-```
-## Uninstalling
-
-**macOS / Linux**
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/uninstall.sh" | sh
-```
-
-**Windows PowerShell**
-
-```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/uninstall.ps1")))
 ```
 
 ### Universal Skills CLI
 
-The skills can also be installed independently for compatible agent CLIs:
+The bundled skills can also be installed independently for compatible agent CLIs:
 
-```bash
+```sh
 npx skills add BlizPS/lazy-developer-free-kimi-code --all
 ```
 
 This installs the same bundled skills without requiring the `lazydev` CLI.
 
+## 🔄 Updating
+
+### macOS / Linux
+
+Run the installer again to refresh the current installation:
+
+```sh
+curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.sh" | sh
+```
+
+### Windows PowerShell
+
+Run the PowerShell installer again:
+
+```powershell
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1")))
+```
+
+Then verify the installed version:
+
+```sh
+lazydev version
+```
+
+## 🗑️ Uninstalling
+
+### macOS / Linux
+
+```sh
+curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/uninstall.sh" | sh
+```
+
+### Windows PowerShell
+
+```powershell
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/uninstall.ps1")))
+```
+
+> Uninstalling the Lazy Developer CLI does not imply removing skills installed separately through a compatible skills manager.
+
 ## 🐢 Termux / Android
 
-Kimi Code's Linux binary needs a glibc Linux userland. On Termux, use a Debian or Ubuntu guest:
+Kimi Code's Linux binary needs a glibc-based Linux userland. On Termux, use a Debian or Ubuntu guest:
 
-```bash
+```sh
 pkg update
 pkg install proot-distro
 proot-distro install debian
 proot-distro login debian
 ```
 
-Run the normal Lazy Developer installer inside the guest.
+Run the normal Lazy Developer installer inside the guest:
 
-## Useful commands
+```sh
+curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.sh" | sh
+```
+
+## 🧰 Useful commands
 
 ```text
 lazydev help
@@ -168,11 +191,9 @@ lazydev version
 - Strict proxy routes can repair incomplete tool-call history.
 - Never commit API keys, OAuth tokens, or provider credentials.
 
-## License
+## 📄 License
 
 MIT — see [LICENSE](LICENSE).
-
----
 
 <div align="center">
   <sub>Built by <strong>BlizPS</strong> · Lazy Developer 1.0.0</sub>
