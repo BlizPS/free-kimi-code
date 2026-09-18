@@ -7,7 +7,6 @@ const LOCAL_TOOL_ALLOWLIST = new Set([
   'Read', 'Write', 'Edit', 'Grep', 'Glob', 'Bash', 'WebSearch', 'FetchURL',
 ]);
 const TRANSIENT_RETRY_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504]);
-const USE_REMOTE_ENVIRONMENT = /^(1|true|yes)$/i.test(String(process.env.LAZYDEV_ANTIGRAVITY_REMOTE_ENVIRONMENT || '').trim());
 
 function normalizeText(value) {
   if (typeof value === 'string') return value;
@@ -75,7 +74,7 @@ function toolResultInputs(messages, mappings) {
       type: 'function_result',
       name: mappedName || 'external_tool',
       call_id: originalId || crypto.randomUUID(),
-      result: result || '',
+      result: [{ type: 'text', text: result || '' }],
     });
   }
   return results;
@@ -318,38 +317,44 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
       try {
         const body = JSON.parse(raw || '{}');
         const messages = Array.isArray(body.messages) ? body.messages : [];
-        const { tools: externalTools, mappings } = toolDeclarations(body.tools);
-        for (const [k, v] of mappings) state.mappings.set(k, v);
-        state.tools = externalTools;
+        // Preserve the declared tool surface across stateful turns. Kimi may
+        // omit `tools` on a continuation even though the preceding function
+        // call still needs the same declarations on the Antigravity side.
+        if (Array.isArray(body.tools)) {
+          const { tools: externalTools, mappings } = toolDeclarations(body.tools);
+          for (const [k, v] of mappings) state.mappings.set(k, v);
+          state.tools = externalTools;
+        }
         const hasToolResults = messages.at(-1)?.role === 'tool';
         const isFunctionResultContinuation = Boolean(hasToolResults && state.interactionId);
         let input;
         const payload = {
           agent: model,
-          // Keep execution in the local Kimi tool loop by default. The remote
-          // sandbox is opt-in because its filesystem is separate from the
-          // existing workspace used by Kimi's local Read/Write tools.
+          // Antigravity requires an environment for every interaction. We keep
+          // the sandbox lifecycle stateful, while local file edits continue to
+          // flow through LazyDev's explicitly declared local tool functions.
           agent_config: { type: 'antigravity', model: 'gemini-3.8-flash', max_total_tokens: 50000 },
+          environment: state.environmentId || 'remote',
           store: true,
         };
-        if (USE_REMOTE_ENVIRONMENT) payload.environment = state.environmentId || 'remote';
         if (isFunctionResultContinuation) {
           input = toolResultInputs(messages, state.mappings);
         } else {
           input = state.interactionId
             ? (recentUserInput(messages) || transcriptInput(messages))
             : transcriptInput(messages);
-          // Declare only the small local tool surface on each new interaction;
-          // function-result continuations send only results.
-          if (state.tools.length) payload.tools = state.tools;
           state.initialized = true;
         }
         if (!input) input = 'Continue.';
+        // Explicitly provide the tool list on every interaction. An empty list
+        // prevents Antigravity from silently enabling its default remote tools;
+        // non-empty lists contain only the local LazyDev bridge functions.
+        payload.tools = state.tools;
         payload.input = input;
         if (state.interactionId) payload.previous_interaction_id = state.interactionId;
         let upstream = await postInteraction(endpoint, apiKey, payload);
         state.interactionId = String(upstream?.id || state.interactionId || '');
-        if (USE_REMOTE_ENVIRONMENT) state.environmentId = String(upstream?.environment_id || state.environmentId || '');
+        state.environmentId = String(upstream?.environment_id || state.environmentId || '');
         if (String(upstream?.status || '').toLowerCase() === 'failed') {
           const diagnostic = Array.isArray(upstream?.errors)
             ? upstream.errors.map((e) => e?.message).filter(Boolean).join('; ')
@@ -367,7 +372,7 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
             const retrieved = await getInteraction(endpoint, apiKey, state.interactionId);
             if (retrieved && typeof retrieved === 'object') {
               upstream = { ...upstream, ...retrieved, steps: Array.isArray(retrieved.steps) ? retrieved.steps : upstream.steps };
-              if (USE_REMOTE_ENVIRONMENT) state.environmentId = String(retrieved?.environment_id || state.environmentId || '');
+              state.environmentId = String(retrieved?.environment_id || state.environmentId || '');
             }
           } catch {
             // Keep the original completed interaction; the caller can still

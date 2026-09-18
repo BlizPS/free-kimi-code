@@ -81,17 +81,21 @@ assert.equal(first.status, 200);
 assert.equal(first.body.choices[0].finish_reason, 'tool_calls');
 assert.equal(first.body.choices[0].message.tool_calls[0].function.name, 'Bash');
 assert.equal(seen[0].agent, 'antigravity-preview-09-2026');
-assert.equal(seen[0].environment, undefined);
+assert.equal(seen[0].environment, 'remote');
 assert.ok(Array.isArray(seen[0].tools));
 assert.ok(seen[0].tools.some((t) => t.type === 'function' && t.name === 'lazydev_bash'));
 assert.equal(seen[0].agent_config.type, 'antigravity');
 assert.equal(seen[0].agent_config.max_total_tokens, 50000);
 assert.equal(seen[0].tools?.find((t) => t.name === 'lazydev_bash')?.type, 'function');
+assert.equal(seen[0].tools?.length, 1);
 assert.equal(seen[0].tools?.some((t) => t.name === 'lazydev_todolist'), false);
 assert.equal(seen[0].tools?.some((t) => t.type === 'code_execution'), false);
 assert.equal(seen[0].tools?.some((t) => t.type === 'google_search'), false);
 assert.equal(seen[0].tools?.some((t) => t.type === 'url_context'), false);
 assert.equal(seen[0].__revision_header, undefined);
+
+// Antigravity Interactions requires environment on every interaction.
+assert.ok(seen[0].environment);
 
 const second = await call({
   model:'antigravity-preview-09-2026',
@@ -104,11 +108,13 @@ const second = await call({
 assert.equal(second.status, 200);
 assert.equal(second.body.choices[0].message.content, 'Done — the tool result was received from the model_output step.');
 assert.equal(seen[1].previous_interaction_id, 'int_1');
-assert.equal(seen[1].environment, undefined);
-assert.equal(seen[1].tools, undefined);
+assert.equal(seen[1].environment, 'env_1');
+assert.equal(seen[1].tools?.length, 1);
+assert.equal(seen[1].tools?.[0]?.name, 'lazydev_bash');
 assert.equal(seen[1].input[0].type, 'function_result');
 assert.equal(seen[1].input[0].name, 'lazydev_bash');
 assert.equal(seen[1].input[0].call_id, 'fc_1');
+assert.deepEqual(seen[1].input[0].result, [{type:'text', text:'On branch main\nworking tree clean'}]);
 
 const third = await call({
   model:'antigravity-preview-09-2026',
@@ -117,7 +123,9 @@ const third = await call({
 assert.equal(third.status, 200);
 assert.equal(third.body.choices[0].message.content, 'Recovered from interaction retrieval.');
 assert.equal(seen[2].previous_interaction_id, 'int_2');
-assert.equal(seen[2].tools, undefined);
+assert.equal(seen[2].environment, 'env_1');
+assert.equal(seen[2].tools?.length, 1);
+assert.equal(seen[2].tools?.[0]?.name, 'lazydev_bash');
 
 const retry = await call({
   model:'antigravity-preview-09-2026',
@@ -127,6 +135,23 @@ assert.equal(retry.status, 200);
 assert.equal(retry.body.choices[0].message.content, 'Retry succeeded.');
 assert.equal(retryAttempts, 2);
 
+// A fresh proxy with no local tools must explicitly send tools: [] so the
+// Antigravity defaults (code_execution/google_search/url_context) are not
+// silently re-enabled.
+const noToolsProxy = await createAntigravityProxy({
+  apiKey: 'test-key',
+  model: 'antigravity-preview-09-2026',
+  endpoint: `http://127.0.0.1:${port}/v1beta/interactions`,
+});
+const noTools = await fetch(`http://127.0.0.1:${noToolsProxy.port}/v1/chat/completions`, {
+  method:'POST', headers:{authorization:`Bearer ${noToolsProxy.token}`, 'content-type':'application/json'},
+  body:JSON.stringify({ model:'antigravity-preview-09-2026', messages:[{role:'user', content:'Hello'}] })
+});
+assert.equal(noTools.status, 200);
+const noToolsSeen = seen.at(-1);
+assert.deepEqual(noToolsSeen.tools, []);
+assert.equal(noToolsSeen.environment, 'remote');
+noToolsProxy.server.close();
 proxy.server.close();
 upstream.close();
 console.log('PASS: Antigravity proxy stateful function-call round trip');
