@@ -14,4 +14,4 @@ Execute the user's actual request directly. Do not replace it with demos, self-t
 
 Standalone deliverables belong in `LAZYDEV_ARTIFACT_DIR`; choose a descriptive filename and never overwrite an existing artifact.
 
-Authentication and provider configuration are managed by LazyDev. Do not start account login, logout, setup, or provider reconfiguration flows inside the Kimi session.
+LazyDev owns provider/model routing. Native Kimi `/login` and `/logout` are allowed for Kimi Code account authentication only; they must not be used to select or replace the LazyDev inference provider.

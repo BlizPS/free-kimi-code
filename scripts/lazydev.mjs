@@ -577,7 +577,114 @@ function activeProviderEnvKeys(provider) {
 function sanitizeKimiChildEnv(provider) {
   const env = { ...process.env };
   for (const key of activeProviderEnvKeys(provider)) delete env[key];
+  // LazyDev owns KIMI_MODEL_* for the lifetime of the child process. Keeping a
+  // stale shell override here could bypass the selected provider/proxy.
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('KIMI_MODEL_')) delete env[key];
+  }
   return env;
+}
+function buildKimiModelEnv(provider, pc, proxy, budget) {
+  const env = {};
+  // Kimi Code's KIMI_MODEL_* family is an in-memory model override with higher
+  // priority than default_model. This keeps the LazyDev inference route stable
+  // even when native /login or /logout reloads the on-disk configuration.
+  env.KIMI_MODEL_NAME = String(pc.model);
+  env.KIMI_MODEL_API_KEY = String(proxy?.token || pc.apiKey || '');
+  env.KIMI_MODEL_MAX_CONTEXT_SIZE = String(Math.max(32768, budget.max));
+  env.KIMI_MODEL_DISPLAY_NAME = `${provider.label} · ${pc.model}`;
+  const capabilities = [];
+  if (modelSupportsKimiTools(provider, pc)) capabilities.push('tool_use');
+  if (provider.id === 'gemini' && !isAntigravityModel(pc.model)) capabilities.push('thinking');
+  if (capabilities.length) env.KIMI_MODEL_CAPABILITIES = capabilities.join(',');
+  if (budget.output) env.KIMI_MODEL_MAX_OUTPUT_SIZE = String(Math.max(256, budget.output));
+  if (provider.id === 'gemini' && !isAntigravityModel(pc.model)) env.KIMI_MODEL_THINKING_EFFORT = 'low';
+
+  if (proxy) {
+    env.KIMI_MODEL_PROVIDER_TYPE = 'openai';
+    env.KIMI_MODEL_BASE_URL = `http://127.0.0.1:${proxy.port}/v1`;
+  } else if (provider.id === 'gemini') {
+    // Google exposes Gemini through an OpenAI-compatible endpoint. This keeps
+    // the model override stable across native Kimi config reloads.
+    env.KIMI_MODEL_PROVIDER_TYPE = 'openai';
+    env.KIMI_MODEL_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+  } else if (provider.id === 'anthropic') {
+    env.KIMI_MODEL_PROVIDER_TYPE = 'anthropic';
+    env.KIMI_MODEL_BASE_URL = 'https://api.anthropic.com';
+  } else {
+    env.KIMI_MODEL_PROVIDER_TYPE = 'openai';
+    env.KIMI_MODEL_BASE_URL = 'https://api.openai.com/v1';
+  }
+  return env;
+}
+
+function extractExternalKimiSections(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const sections = [];
+  let currentName = null;
+  let buffer = [];
+  const flush = () => {
+    if (!currentName || !buffer.length) return;
+    const normalized = currentName.replace(/^\[+|\]+$/g, '').trim();
+    const isConfigNamespace = /^(providers|models|services)\./.test(normalized);
+    const isLazyDevNamespace = normalized.includes('providers.lazydev') || normalized.includes('models.\"lazydev/') || normalized.includes('models.lazydev/');
+    if (isConfigNamespace && !isLazyDevNamespace) sections.push(buffer.join('\n').trim());
+    buffer = [];
+  };
+  for (const line of lines) {
+    const header = line.match(/^\s*(\[\[?)([^\]]+?)(\]\]?)\s*$/);
+    if (header) {
+      flush();
+      currentName = header[2].trim();
+      buffer = [line];
+      continue;
+    }
+    if (buffer.length) buffer.push(line);
+  }
+  flush();
+  return sections.filter(Boolean);
+}
+
+function composeLazyDevConfig(provider, pc, proxy, sessionAliases, currentText = '') {
+  const canonical = buildKimiConfig(provider, pc, proxy, sessionAliases).trimEnd();
+  const preserved = extractExternalKimiSections(currentText);
+  return preserved.length ? `${canonical}\n\n${preserved.join('\n\n')}\n` : `${canonical}\n`;
+}
+
+function startKimiAuthBridge({ configPath, provider, pc, proxy, sessionAliases }) {
+  let repairTimer = null;
+  let stopped = false;
+  const repair = () => {
+    if (stopped) return;
+    try {
+      const current = fs.readFileSync(configPath, 'utf8');
+      const next = composeLazyDevConfig(provider, pc, proxy, sessionAliases, current);
+      if (current !== next) fs.writeFileSync(configPath, next, { mode: 0o600 });
+    } catch {}
+  };
+  const schedule = () => {
+    if (stopped) return;
+    if (repairTimer) clearTimeout(repairTimer);
+    repairTimer = setTimeout(repair, 80);
+    repairTimer.unref?.();
+  };
+  let previousMtime = 0;
+  const poll = setInterval(() => {
+    if (stopped) return;
+    try {
+      const mtime = fs.statSync(configPath).mtimeMs;
+      if (mtime !== previousMtime) {
+        previousMtime = mtime;
+        schedule();
+      }
+    } catch {}
+  }, 75);
+  poll.unref?.();
+  return () => {
+    stopped = true;
+    clearInterval(poll);
+    if (repairTimer) clearTimeout(repairTimer);
+  };
 }
 function hasKimiSessions() {
   const index = path.join(kimiHome(), 'session_index.jsonl');
@@ -1128,7 +1235,7 @@ async function chat() {
   fs.mkdirSync(kimiHome(), { recursive: true, mode: 0o700 });
   const configPath = path.join(kimiHome(), 'config.toml');
   const tuiPath = path.join(kimiHome(), 'tui.toml');
-  fs.writeFileSync(configPath, buildKimiConfig(provider, pc, proxy, sessionAliases), { mode: 0o600 });
+  fs.writeFileSync(configPath, composeLazyDevConfig(provider, pc, proxy, sessionAliases), { mode: 0o600 });
   fs.writeFileSync(tuiPath, buildTuiConfig(), { mode: 0o600 });
   writeKimiAgentGuidance();
   writeLazyDevMcpConfig();
@@ -1145,21 +1252,26 @@ async function chat() {
   if (mode === 'sessions') launchArgs.push('--session');
   else if (mode === 'continue') launchArgs.push('--continue');
   else launchArgs.push('--agent', 'default');
+  const budget = contextBudget(pc.modelInfo);
+  const authBridgeStop = startKimiAuthBridge({ configPath, provider, pc, proxy, sessionAliases });
+  const modelEnv = buildKimiModelEnv(provider, pc, proxy, budget);
+  const childEnv = {
+    ...sanitizeKimiChildEnv(provider),
+    ...modelEnv,
+    KIMI_CODE_HOME: kimiHome(),
+    KIMI_CODE_NO_AUTO_UPDATE: '1',
+    KIMI_LOOP_MAX_STEPS_PER_TURN: '0',
+    LAZYDEV_ARTIFACT_DIR: outputDirectory(),
+    LAZYDEV_VERSION: version,
+    LAZYDEV_MODEL: pc.model,
+  };
   const child = spawn(invocation.command, launchArgs, {
     cwd: process.cwd(),
     stdio: 'inherit',
-    env: {
-      ...sanitizeKimiChildEnv(provider),
-      KIMI_CODE_HOME: kimiHome(),
-      KIMI_CODE_NO_AUTO_UPDATE: '1',
-      KIMI_LOOP_MAX_STEPS_PER_TURN: '0',
-      LAZYDEV_ARTIFACT_DIR: outputDirectory(),
-      LAZYDEV_VERSION: version,
-      LAZYDEV_MODEL: pc.model,
-    },
+    env: childEnv,
     windowsHide: false,
   });
-  const shutdown = () => { try { proxy?.server.close(); } catch {} };
+  const shutdown = () => { try { authBridgeStop(); } catch {} try { proxy?.server.close(); } catch {} };
   child.on('exit', (code, signal) => { shutdown(); if (signal) process.exitCode = 1; else process.exitCode = code ?? 0; });
   child.on('error', (error) => { shutdown(); line(red(`Kimi Code failed to start: ${error.message}`)); process.exitCode = 1; });
   process.on('exit', shutdown);

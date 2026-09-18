@@ -16,4 +16,4 @@ LazyDev adds a focused engineering policy for implementation, debugging, review,
 
 # Proxy boundary
 
-Authentication and provider configuration are managed by LazyDev setup. Do not invoke account login, logout, setup, or provider-management flows from the Kimi session.
+LazyDev owns provider/model routing. Native Kimi `/login` and `/logout` remain available for Kimi Code account authentication, while LazyDev keeps the selected inference route pinned independently.

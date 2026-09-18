@@ -87,6 +87,16 @@ lazydev chat
 
 Bare `lazydev` opens the Lazy Developer command center. `lazydev chat` is the entry point that launches Kimi Code.
 
+## Kimi Code login/logout without losing LazyDev routing
+
+Native Kimi Code `/login` and `/logout` remain available inside the TUI. Lazy Developer does not fake these commands and does not replace Kimi Code's authentication flow. Each session gets a `KIMI_MODEL_*` runtime override that pins inference to the provider/model selected in `lazydev setup`, so an OAuth login or logout cannot leave the session at `Model: not set` or silently switch inference to the managed Kimi account. Google Gemini uses its documented OpenAI-compatible endpoint for this runtime override.
+
+Lazy Developer also runs a small auth bridge while the Kimi session is alive. When `/login` or `/logout` reloads `config.toml`, the bridge restores the LazyDev provider/model aliases and `default_model` while preserving unrelated Kimi authentication sections that the native flow just wrote. This keeps both sides independent: Kimi can authenticate or disconnect its own account, while LazyDev keeps the selected inference route.
+
+The OAuth credentials still live in Kimi Code's normal `KIMI_CODE_HOME` credential store. Kimi Code documents `KIMI_CODE_HOME` as the root for configuration, sessions, OAuth credentials, and other runtime data.
+
+This is an inference-routing safeguard, not a claim that Kimi Code authentication grants access to any third-party provider or model. Provider API keys and model selection remain controlled by LazyDev setup.
+
 ## Switching models without breaking old sessions
 
 Lazy Developer keeps the conversation history in Kimi Code's session store and refreshes the active model mapping each time `lazydev chat` starts. When an older session refers to a previous LazyDev model alias, the runtime adds a compatibility alias that points to the currently selected provider/model instead of editing or deleting the saved session. That keeps old conversation context while letting the session continue on the model you selected now. Kimi Code stores session context and runtime state separately from `config.toml`, so this compatibility layer only changes the launch-time model mapping.
