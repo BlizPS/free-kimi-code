@@ -22,7 +22,9 @@
   </p>
 </div>
 
-  <p><strong>A calm, capable developer layer for Kimi Code.</strong><br/>Live models, portable skills, safe artifact handling, provider routing, and a cleaner terminal workflow — without replacing the Kimi Code experience.</p>
+  <p align="center">
+  <em>A calm, capable developer layer for Kimi Code.</strong><br/>Live models, portable skills, safe artifact handling, provider routing, and a cleaner terminal workflow — without replacing the Kimi Code experience.</em>
+</p>
 
 ## What is Lazy Developer?
 
