@@ -1,35 +1,20 @@
 {
-  "name": "blizps",
+  "name": "lazy-developer-marketplace",
   "owner": {
     "name": "BlizPS"
   },
   "plugins": [
     {
       "name": "lazy-developer",
-      "source": ".",
-      "description": "Token-efficient engineering skills with verification, security awareness, and intelligent UI/UX + 3D design-system generation.",
+      "source": "./",
+      "description": "Portable engineering skills and commands for coding, debugging, review, testing, and verification.",
       "version": "1.0.0",
       "author": {
         "name": "BlizPS"
       },
       "license": "MIT",
-      "keywords": [
-        "agent-skill",
-        "coding",
-        "debugging",
-        "code-review",
-        "testing",
-        "verification",
-        "security",
-        "ui-ux",
-        "design-system",
-        "responsive-design",
-        "animation",
-        "3d",
-        "threejs",
-        "webgl",
-        "anti-slop"
-      ]
+      "skills": "skills/",
+      "commands": "commands/"
     }
   ],
   "version": null

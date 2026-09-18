@@ -35,6 +35,13 @@ checks += [
     ('uninstall.ps1', 'Remove-CommandShims', (ROOT/'uninstall.ps1').read_text(encoding='utf-8')),
 ]
 checks += [
+    ('install.sh', 'TERMUX_LINUX=0', sh),
+    ('install.sh', 'glibc Linux userland', sh),
+    ('install.sh', 'LAZYDEV_BIN_DIR=\"${LAZYDEV_BIN_DIR:-${PREFIX:-$HOME/.local}/bin}\"', sh),
+    ('install.sh', 'if [ -L \"$LAZYDEV_LAUNCHER\" ]; then rm -f \"$LAZYDEV_LAUNCHER\"; fi', sh),
+    ('uninstall.sh', '/storage/emulated/0/lazydevfile', (ROOT/'uninstall.sh').read_text(encoding='utf-8')),
+]
+checks += [
     ('install.sh', 'RTK_INSTALL_URL=', sh),
     ('install.sh', 'RTK_NEEDS_UPDATE=0', sh),
     ('install.sh', 'init --agent kimi', sh),

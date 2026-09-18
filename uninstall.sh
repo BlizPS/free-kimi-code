@@ -2,6 +2,17 @@
 set -eu
 
 LAZYDEV_HOME="${LAZYDEV_HOME:-$HOME/.local/share/lazydev}"
+LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-}"
+TERMUX_LINUX=0
+case "${PREFIX:-}" in
+  */com.termux/files/usr|*/com.termux/files/usr/) TERMUX_LINUX=1 ;;
+esac
+if [ "${TERMUX_VERSION:-}" != "" ]; then TERMUX_LINUX=1; fi
+if [ "$TERMUX_LINUX" -eq 1 ]; then
+  if command -v getconf >/dev/null 2>&1 && getconf GNU_LIBC_VERSION >/dev/null 2>&1; then
+    LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-${PREFIX:-$HOME/.local}/bin}"
+  fi
+fi
 LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-$HOME/.local/bin}"
 if [ "$(uname -s)" = "Darwin" ]; then
   LAZYDEV_CONFIG_DIR="${LAZYDEV_CONFIG_DIR:-$HOME/Library/Application Support/lazydev}"
@@ -13,7 +24,11 @@ fi
 KIMI_NATIVE_HOME="$HOME/.kimi-code"
 KIMI_LEGACY_HOME="$HOME/.kimi"
 KIMI_CONFIG_DIRS="${XDG_CONFIG_HOME:-$HOME/.config}/kimi ${XDG_CONFIG_HOME:-$HOME/.config}/kimi-code $HOME/.config/kimi $HOME/.config/kimi-code"
-ARTIFACT_DIR="$HOME/lazydevfile"
+if [ "$TERMUX_LINUX" -eq 1 ]; then
+  ARTIFACT_DIR="${LAZYDEV_ARTIFACT_DIR:-/storage/emulated/0/lazydevfile}"
+else
+  ARTIFACT_DIR="${LAZYDEV_ARTIFACT_DIR:-$HOME/lazydevfile}"
+fi
 RTK_DATA_DIR="$HOME/.local/share/rtk"
 RTK_CACHE_DIR="$HOME/.cache/rtk"
 
@@ -42,10 +57,14 @@ remove_managed_launchers_from_path() {
     [ -n "$dir" ] || { IFS=':'; continue; }
     for name in lazydev kimi rtk; do
       candidate="$dir/$name"
-      [ -e "$candidate" ] || { continue; }
+      if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then continue; fi
       case "$name" in
         lazydev)
-          if is_managed_file "$candidate" 'Lazy Developer managed launcher|scripts/lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code'; then rm -f "$candidate" 2>/dev/null || true; fi
+          if is_managed_file "$candidate" 'Lazy Developer managed launcher|scripts/lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code'; then rm -f "$candidate" 2>/dev/null || true;
+          elif [ -L "$candidate" ]; then
+            link_target="$(readlink "$candidate" 2>/dev/null || true)"
+            if printf '%s\n' "$link_target" | grep -Eq 'lazydev|lazy-developer-free-kimi-code|scripts/lazydev'; then rm -f "$candidate" 2>/dev/null || true; fi
+          fi
           ;;
         kimi)
           if is_managed_file "$candidate" '\.kimi-code|kimi-code|@moonshot-ai/kimi-code'; then rm -f "$candidate" 2>/dev/null || true; fi

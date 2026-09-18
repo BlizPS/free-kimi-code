@@ -12,7 +12,30 @@ REPO_ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz
 GITHUB_API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"
 
 LAZYDEV_HOME="${LAZYDEV_HOME:-$HOME/.local/share/lazydev}"
-LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-$HOME/.local/bin}"
+LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-}"
+
+# Termux is supported only when it is running a real glibc Linux userland
+# (for example through proot-distro). Native Android/bionic Termux is not a
+# compatible host for the official Linux Kimi/RTK binaries.
+TERMUX_LINUX=0
+case "${PREFIX:-}" in
+  */com.termux/files/usr) TERMUX_LINUX=1 ;;
+  */com.termux/files/usr/) TERMUX_LINUX=1 ;;
+esac
+if [ "${TERMUX_VERSION:-}" != "" ]; then TERMUX_LINUX=1; fi
+
+if [ "$TERMUX_LINUX" -eq 1 ]; then
+  if command -v getconf >/dev/null 2>&1 && getconf GNU_LIBC_VERSION >/dev/null 2>&1; then
+    LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-${PREFIX:-$HOME/.local}/bin}"
+  elif command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qiE 'gnu libc|glibc'; then
+    LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-${PREFIX:-$HOME/.local}/bin}"
+  else
+    fatal "Termux/Android detected, but no glibc Linux userland was found. Install a Linux userland first (for example: pkg install proot-distro && proot-distro install debian && proot-distro login debian), then run this installer inside Linux."
+  fi
+else
+  LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-$HOME/.local/bin}"
+fi
+
 if [ "$(uname -s)" = "Darwin" ]; then
   LAZYDEV_CONFIG_DIR="${LAZYDEV_CONFIG_DIR:-$HOME/Library/Application Support/lazydev}"
 else
@@ -23,11 +46,6 @@ KIMI_RUNTIME_HOME="${LAZYDEV_CONFIG_DIR}/kimi-code"
 say() { printf '%s\n' "$*"; }
 step() { printf '\n==> %s\n' "$*"; }
 fatal() { printf 'error: %s\n' "$*" >&2; exit 1; }
-
-case "${TERMUX_VERSION:-}" in
-  '') ;;
-  *) fatal "Termux/Android is intentionally not handled by the desktop installer. Use the supported Termux installation path." ;;
-esac
 
 case "$(uname -s)" in
   Darwin|Linux) ;;
@@ -81,9 +99,17 @@ is_lazydev_launcher() {
   file="$1"
   [ -f "$file" ] || [ -L "$file" ] || return 1
   target="$file"
-  if [ -L "$target" ] && command -v readlink >/dev/null 2>&1; then
-    resolved="$(readlink -f "$target" 2>/dev/null || true)"
-    [ -n "$resolved" ] && target="$resolved"
+  if [ -L "$target" ]; then
+    link_target="$(readlink "$target" 2>/dev/null || true)"
+    if printf '%s\n' "$link_target" | grep -Eq 'lazydev|scripts/lazydev\.mjs|lazy-developer-free-kimi-code'; then
+      # A stale/broken managed symlink is still ours.
+      if [ ! -e "$target" ]; then return 0; fi
+      return 0
+    fi
+    if command -v readlink >/dev/null 2>&1; then
+      resolved="$(readlink -f "$target" 2>/dev/null || true)"
+      [ -n "$resolved" ] && target="$resolved"
+    fi
   fi
   [ -f "$target" ] || return 1
   grep -Eq 'Lazy Developer managed launcher|scripts/lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code' "$target" 2>/dev/null
@@ -99,10 +125,19 @@ replace_legacy_lazydev_launchers() {
     IFS="$old_ifs"
     [ -n "$dir" ] || { IFS=':'; continue; }
     candidate="$dir/lazydev"
-    if [ "$candidate" != "$canonical" ] && is_lazydev_launcher "$candidate" && [ -w "$candidate" ]; then
-      cp "$canonical" "$candidate"
-      chmod 755 "$candidate" 2>/dev/null || true
-      say "✓ Refreshed existing LazyDev launcher: $candidate"
+    if [ "$candidate" != "$canonical" ] && is_lazydev_launcher "$candidate"; then
+      if [ -L "$candidate" ] && [ ! -e "$candidate" ]; then
+        rm -f "$candidate" 2>/dev/null || true
+        if [ -w "$dir" ]; then
+          cp "$canonical" "$candidate"
+          chmod 755 "$candidate" 2>/dev/null || true
+          say "✓ Repaired stale LazyDev launcher: $candidate"
+        fi
+      elif [ -w "$candidate" ]; then
+        cp "$canonical" "$candidate"
+        chmod 755 "$candidate" 2>/dev/null || true
+        say "✓ Refreshed existing LazyDev launcher: $candidate"
+      fi
     fi
     IFS=':'
   done
@@ -332,6 +367,7 @@ if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
 
   if [ -x "$LAZYDEV_HOME/runtime-node/node" ]; then RUN_NODE="$LAZYDEV_HOME/runtime-node/node"; else RUN_NODE="$NODE_BIN"; fi
   LAZYDEV_LAUNCHER="$LAZYDEV_BIN_DIR/lazydev"
+  if [ -L "$LAZYDEV_LAUNCHER" ]; then rm -f "$LAZYDEV_LAUNCHER"; fi
   cat > "$LAZYDEV_LAUNCHER" <<EOF
 #!/bin/sh
 # Lazy Developer managed launcher
@@ -376,6 +412,7 @@ say "Lazy Developer installer finished."
 say "Kimi Code: ${KIMI_CURRENT_VERSION:-unknown}"
 say "RTK: ${RTK_CURRENT_VERSION:-unknown}"
 say "Lazy Developer: $LAZYDEV_VERSION"
+say "LazyDev launcher: $LAZYDEV_BIN_DIR/lazydev"
 say "Existing Kimi sessions and configuration were left in place."
 say ""
 say "If this terminal still resolves an older lazydev, run: hash -r 2>/dev/null || true"

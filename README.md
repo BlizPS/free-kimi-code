@@ -42,7 +42,16 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-co
 
 Run the same installer again whenever you want to update. It checks Kimi Code, RTK, and Lazy Developer separately, so unchanged pieces are skipped and only missing, changed, or unhealthy pieces are refreshed. Your Kimi sessions and provider configuration stay in place during updates.
 
-**Termux / Android:** use the npm-supported Kimi Code route there; the desktop native installer is not intended to be the Termux installer.
+**Termux / Android:** use a Linux userland first. Native Android/bionic Termux is not a supported host for the Linux Kimi/RTK binaries. A minimal setup is:
+
+```bash
+pkg update
+pkg install proot-distro
+proot-distro install debian
+proot-distro login debian
+```
+
+Run the normal Lazy Developer installer from that Linux shell. The installer detects glibc Linux inside Termux and places the `lazydev` launcher in the active Termux PATH when appropriate. This also repairs an older broken `lazydev` symlink in `$PREFIX/bin`, so `lazydev setup` resolves to the current build instead of a missing old target.
 
 ### 2. Set up your provider
 
@@ -155,7 +164,7 @@ A fresh install after uninstall starts from a clean state. Project folders outsi
 
 If a provider refresh appears to hang, the live catalog request now has a hard timeout. Rerun `lazydev setup` and try the provider again. For a local Ollama setup, first make sure the URL you entered is reachable from the same machine and that Ollama is serving models.
 
-If `lazydev` starts an unexpected old build, open a new terminal so the shell forgets its cached command path. The installer also refreshes known Lazy Developer launchers.
+If `lazydev` resolves to an old or missing path, run `hash -r 2>/dev/null || true` and run the installer again. The installer now repairs stale LazyDev symlinks, refreshes known launchers, and prints the exact launcher path it installed.
 
 ## Project
 
