@@ -1,0 +1,13 @@
+{
+  "target_hot_path_reduction": 0.75,
+  "preferred_hot_path_reduction": 0.8,
+  "max_skill_fraction": 0.24,
+  "reserved_context_size_min": 12000,
+  "reserved_context_size_max": 49152,
+  "compaction_trigger_ratio": 0.88,
+  "max_steps_per_turn": 18,
+  "max_attempts_per_step": 2,
+  "strategy": "compact skills; keep total CLI static hot-path under 25% of the stored baseline; keep model context adaptive; put intelligence in runtime code",
+  "max_cli_hot_path_fraction": 0.25,
+  "max_cli_hot_path_tokens": 1010
+}

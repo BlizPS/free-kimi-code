@@ -101,9 +101,12 @@ is_lazydev_launcher() {
   target="$file"
   if [ -L "$target" ]; then
     link_target="$(readlink "$target" 2>/dev/null || true)"
+    if [ ! -e "$target" ]; then
+      # A broken launcher named lazydev is stale. Repair it in place so shells
+      # that cached the old path with `hash` immediately resolve the new file.
+      return 0
+    fi
     if printf '%s\n' "$link_target" | grep -Eq 'lazydev|scripts/lazydev\.mjs|lazy-developer-free-kimi-code'; then
-      # A stale/broken managed symlink is still ours.
-      if [ ! -e "$target" ]; then return 0; fi
       return 0
     fi
     if command -v readlink >/dev/null 2>&1; then
@@ -114,6 +117,31 @@ is_lazydev_launcher() {
   [ -f "$target" ] || return 1
   grep -Eq 'Lazy Developer managed launcher|scripts/lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code' "$target" 2>/dev/null
 }
+
+# If a previous install left a lazydev command in an earlier PATH entry,
+# prefer that exact directory. This fixes Bash's command hash cache (including
+# Termux/proot paths such as /data/data/com.termux/files/usr/bin/lazydev) without
+# requiring the user to restart the shell.
+if [ -z "${LAZYDEV_BIN_DIR:-}" ] || [ "$LAZYDEV_BIN_DIR" = "$HOME/.local/bin" ]; then
+  old_ifs="$IFS"
+  IFS=':'
+  for dir in ${PATH:-}; do
+    IFS="$old_ifs"
+    [ -n "$dir" ] || { IFS=':'; continue; }
+    candidate="$dir/lazydev"
+    if [ -L "$candidate" ] && [ ! -e "$candidate" ]; then
+      if [ -w "$dir" ]; then
+        LAZYDEV_BIN_DIR="$dir"
+        break
+      fi
+    elif [ -f "$candidate" ] && is_lazydev_launcher "$candidate"; then
+      LAZYDEV_BIN_DIR="$dir"
+      break
+    fi
+    IFS=':'
+  done
+  IFS="$old_ifs"
+fi
 
 replace_legacy_lazydev_launchers() {
   canonical="$LAZYDEV_BIN_DIR/lazydev"
