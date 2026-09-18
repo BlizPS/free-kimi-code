@@ -1,2 +1,0 @@
-description = "Use Lazy Developer: compact engineering mode with UI/UX + 3D design intelligence"
-prompt = "Apply the bundled Lazy Developer skill. Inspect first; build the smallest complete repo-native change. For UI/UX, generate a coherent design system before styling. For 3D, use spatial reasoning, animation, responsive behavior, accessibility, fallback, and performance checks. Verify real behavior. No request restatement, tool diary, filler, alternatives, or theory dump."
