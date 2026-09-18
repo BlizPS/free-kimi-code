@@ -4,8 +4,8 @@
   <p><strong>A calm, capable developer layer for Kimi Code.</strong><br/>Live models, portable skills, safe artifact handling, provider routing, and a cleaner terminal workflow — without replacing the Kimi Code experience.</p>
 
   <picture>
-    <source media="(prefers-color-scheme: light)" srcset="assets/free-kimi-code-light.svg">
-    <img src="assets/free-kimi-code-dark.svg" alt="Lazy Developer" width="720" />
+    <source media="(prefers-color-scheme: dark)" srcset="assets/free-kimi-code-dark.svg">
+    <img src="assets/free-kimi-code-light.svg" alt="Lazy Developer" width="720" />
   </picture>
 
   <br/>
