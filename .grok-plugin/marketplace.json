@@ -1,0 +1,15 @@
+{
+  "name": "lazy-developer",
+  "owner": {
+    "name": "BlizPS"
+  },
+  "plugins": [
+    {
+      "name": "lazy-developer",
+      "source": ".",
+      "description": "Token-efficient engineering skills with verification, security awareness, and intelligent UI/UX + 3D design-system generation.",
+      "version": "1.0.0"
+    }
+  ],
+  "version": null
+}

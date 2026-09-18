@@ -1,0 +1,49 @@
+{
+  "name": "lazy-developer",
+  "version": "1.0.0",
+  "description": "Token-efficient engineering skills with verification, security awareness, and intelligent UI/UX + 3D design-system generation.",
+  "author": {
+    "name": "BlizPS"
+  },
+  "homepage": "https://github.com/BlizPS/lazy-developer-free-kimi-code",
+  "repository": "https://github.com/BlizPS/lazy-developer-free-kimi-code",
+  "license": "MIT",
+  "keywords": [
+    "agent-skill",
+    "coding",
+    "debugging",
+    "code-review",
+    "testing",
+    "verification",
+    "security",
+    "ui-ux",
+    "design-system",
+    "responsive-design",
+    "animation",
+    "3d",
+    "threejs",
+    "webgl",
+    "anti-slop"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Lazy Developer",
+    "shortDescription": "Token-efficient engineering + UI/UX",
+    "longDescription": "Compact implementation, debugging, review, and verification. UI tasks get intelligent design-system generation; 3D tasks get spatial and performance reasoning.",
+    "developerName": "BlizPS",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Instructions",
+      "Skills"
+    ],
+    "websiteURL": "https://github.com/BlizPS/lazy-developer-free-kimi-code",
+    "defaultPrompt": [
+      "Use Lazy Developer for this task.",
+      "Build the smallest complete repo-native change.",
+      "For UI, generate the design system before styling.",
+      "For 3D, use spatial reasoning only when it adds value."
+    ],
+    "brandColor": "#6f42c1",
+    "logo": "./assets/image.jpg"
+  }
+}

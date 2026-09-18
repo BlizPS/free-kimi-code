@@ -5,7 +5,8 @@
   "author": {
     "name": "BlizPS"
   },
+  "homepage": "https://github.com/BlizPS/lazy-developer-free-kimi-code",
   "repository": "https://github.com/BlizPS/lazy-developer-free-kimi-code",
   "license": "MIT",
-  "contextFileName": "GEMINI.md"
+  "skills": "./skills/"
 }

@@ -13,13 +13,13 @@ Supported managed providers: Gemini, OpenRouter, NVIDIA, Anthropic, and OpenAI.
 Use the universal Skills CLI when you want Lazy Developer's skills inside another compatible agent:
 
 ```bash
-npx skills add BlizPS/lazy-developer-skill-cli --all
+npx skills add BlizPS/lazy-developer-free-kimi-code --all
 ```
 
 For a specific target supported by the Skills CLI:
 
 ```bash
-npx skills add BlizPS/lazy-developer-skill-cli --agent claude-code
+npx skills add BlizPS/lazy-developer-free-kimi-code --agent claude-code
 ```
 
 LazyDev itself already bundles its own skills, so this universal install is for other agents, not for `lazydev chat`.

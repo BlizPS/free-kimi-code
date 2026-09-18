@@ -5,7 +5,7 @@
   "author": {
     "name": "BlizPS"
   },
-  "repository": "https://github.com/BlizPS/lazy-developer-skill-cli",
+  "repository": "https://github.com/BlizPS/lazy-developer-free-kimi-code",
   "license": "MIT",
   "keywords": [
     "coding",
@@ -47,7 +47,7 @@
     "shortDescription": "Compact coding + anti-slop workflow",
     "longDescription": "Evidence-first implementation, strict artifact routing, focused verification, and intentional UI/UX.",
     "developerName": "BlizPS",
-    "websiteURL": "https://github.com/BlizPS/lazy-developer-skill-cli"
+    "websiteURL": "https://github.com/BlizPS/lazy-developer-free-kimi-code"
   },
   "sessionStart": {
     "skill": "lazy-developer"

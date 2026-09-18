@@ -1,0 +1,24 @@
+{
+  "name": "blizps",
+  "interface": {
+    "displayName": "BlizPS plugins"
+  },
+  "plugins": [
+    {
+      "name": "lazy-developer",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/BlizPS/lazy-developer-free-kimi-code.git",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "NOT_REQUIRED"
+      },
+      "category": "Developer Tools",
+      "description": "Token-efficient engineering skills with verification, security awareness, and intelligent UI/UX + 3D design-system generation.",
+      "version": "1.0.0"
+    }
+  ],
+  "version": null
+}

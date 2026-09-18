@@ -16,13 +16,13 @@
   "author": {
     "name": "BlizPS"
   },
-  "homepage": "https://github.com/BlizPS/lazy-developer-skill-cli",
+  "homepage": "https://github.com/BlizPS/lazy-developer-free-kimi-code",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BlizPS/lazy-developer-skill-cli.git"
+    "url": "git+https://github.com/BlizPS/lazy-developer-free-kimi-code.git"
   },
   "bugs": {
-    "url": "https://github.com/BlizPS/lazy-developer-skill-cli/issues"
+    "url": "https://github.com/BlizPS/lazy-developer-free-kimi-code/issues"
   },
   "bin": {
     "lazydev": "./cli/bin/lazydev.cjs"
@@ -62,7 +62,9 @@
     "hooks/",
     "kimi.plugin.json",
     "install.sh",
-    "install.ps1"
+    "install.ps1",
+    "uninstall.sh",
+    "uninstall.ps1"
   ],
   "scripts": {
     "test": "node scripts/lazydev.mjs doctor && node scripts/command_smoke.mjs && python3 scripts/doctor.py && python3 scripts/check_skills.py && python3 scripts/eval_skills.py && python3 scripts/token_budget.py && python3 scripts/validate.py && python3 scripts/compat_smoke.py && python3 scripts/safety_scan.py && python3 scripts/installer_smoke.py && python3 scripts/skill_runtime_smoke.py && node scripts/platform_smoke.mjs && node scripts/intelligence_smoke.mjs && node scripts/openrouter_smoke.mjs && python3 scripts/intelligence_smoke.py"

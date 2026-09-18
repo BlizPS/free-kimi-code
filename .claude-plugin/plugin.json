@@ -1,8 +1,7 @@
 {
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "lazy-developer",
   "version": "1.0.0",
-  "description": "Token-efficient engineering, anti-slop UI/UX, artifact routing, and verification.",
+  "description": "Focused engineering skills for building, debugging, reviewing, testing, and shipping with Claude Code.",
   "author": {
     "name": "BlizPS"
   },
@@ -17,12 +16,10 @@
     "verification",
     "security",
     "ui-ux",
-    "design-system",
-    "responsive-design",
-    "animation",
-    "3d",
-    "threejs",
-    "webgl",
     "anti-slop"
-  ]
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "agents": "./agents/",
+  "hooks": "./hooks/hooks.json"
 }

@@ -1,11 +1,11 @@
 {
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "lazy-developer",
+  "description": "Token-efficient engineering skills with verification, security awareness, and intelligent UI/UX + 3D design-system generation.",
   "version": "1.0.0",
-  "description": "Token-efficient engineering, anti-slop UI/UX, artifact routing, and verification.",
   "author": {
     "name": "BlizPS"
   },
+  "homepage": "https://github.com/BlizPS/lazy-developer-free-kimi-code",
   "repository": "https://github.com/BlizPS/lazy-developer-free-kimi-code",
   "license": "MIT",
   "keywords": [
@@ -24,5 +24,7 @@
     "threejs",
     "webgl",
     "anti-slop"
-  ]
+  ],
+  "commands": "commands/",
+  "skills": "skills/"
 }
