@@ -47,7 +47,7 @@ export function buildIntelligenceAliasSystem() {
 }
 
 const SIGNALS = {
-  artifact: [/\b(save|simpan|export|download|deliverable|artifact|generate)\b/i, /\b(html|pdf|docx|xlsx|pptx|zip|png|jpg|webp|svg|csv)\b/i],
+  artifact: [/\b(save|export|download|deliverable|artifact|generate|create|write|produce)\b/i, /\b(html|pdf|docx|xlsx|pptx|zip|png|jpg|webp|svg|csv)\b/i],
   debug: [/\b(error|bug|crash|fail|failing|broken|hang|timeout|regression|wrong output)\b/i],
   review: [/\b(review|audit|diff|security review|code review|inspect)\b/i],
   test: [/\b(test|verify|validation|coverage|smoke|regression proof)\b/i],

@@ -16,8 +16,8 @@ function loadContext() {
 }
 function explicitArtifactPrompt(prompt) {
   const p = String(prompt || '').toLowerCase();
-  return /(save|simpan|export|download|generate|buat(?:kan)?|create|produce|hasil(?:kan)?|file|artifact|deliverable)/u.test(p)
-    && !/(edit|modify|refactor|fix|implement|source|repo|repository|module|component|inside project|in the project|di repo|di project)/u.test(p);
+  return /(save|export|download|generate|create|produce|write|file|artifact|deliverable)/u.test(p)
+    && !/(edit|modify|refactor|fix|implement|source|repository|module|component|inside project|in the project)/u.test(p);
 }
 function getPath(input) {
   return String(input?.file_path || input?.path || input?.filename || '');

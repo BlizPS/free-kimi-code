@@ -10,7 +10,7 @@ function loadPrompt() {
   const home = process.env.KIMI_CODE_HOME || path.join(process.env.HOME || process.cwd(), '.kimi-code');
   try { return JSON.parse(fs.readFileSync(path.join(home, 'lazydev-last-prompt.json'), 'utf8')); } catch { return {}; }
 }
-function artifactIntent(p) { return /(save|simpan|export|download|generate|buat(?:kan)?|create|produce|file|artifact|deliverable)/iu.test(p) && !/(edit|modify|refactor|fix|implement|source|repo|repository|module|component|inside project|in the project|di repo|di project)/iu.test(p); }
+function artifactIntent(p) { return /(save|export|download|generate|create|produce|write|file|artifact|deliverable)/iu.test(p) && !/(edit|modify|refactor|fix|implement|source|repository|module|component|inside project|in the project)/iu.test(p); }
 function hasWorkspaceWrite(command, cwd) {
   const q=String(command||'');
   if (!q) return false;

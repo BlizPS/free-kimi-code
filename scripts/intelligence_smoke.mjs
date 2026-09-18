@@ -22,4 +22,5 @@ assert.ok(resolveIntelligenceAliases(debug).includes('evidence_first'));
 assert.match(buildIntelligenceAliasSystem(), /LazyDev Intelligence Alias System/);
 assert.doesNotMatch(buildIntelligenceAliasSystem(), /(?:respond|reply|answer|write) (?:in|using) [a-z]+/i);
 assert.doesNotMatch(fs.readFileSync(new URL('../runtime/SYSTEM.md', import.meta.url), 'utf8'), /(?:respond|reply|answer|write) (?:in|using) [a-z]+/i);
+assert.match(fs.readFileSync(new URL('../runtime/PLUGIN-PROMPT.md', import.meta.url), 'utf8'), /first user turn of a new session[\s\S]*respond in English unless the user explicitly requests another language/i);
 console.log('PASS: adaptive intelligence routing and generic model profile');

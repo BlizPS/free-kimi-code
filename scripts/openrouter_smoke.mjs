@@ -37,12 +37,16 @@ if (!hook.includes("hook_event_name || 'TurnStarted'")) {
   console.error('FAIL: LazyDev hook event handling is missing.');
   process.exit(1);
 }
-if (!hook.includes("=== 'UserPromptSubmit'")) {
-  console.error('FAIL: compact UserPromptSubmit context hook is missing.');
+if (!hook.includes("hook_event_name || 'TurnStarted'")) {
+  console.error('FAIL: UserPromptSubmit hook event handling is missing.');
   process.exit(1);
 }
-if (!hook.includes('TurnStarted remains silent')) {
-  console.error('FAIL: TurnStarted hook must remain silent.');
+if (!hook.includes('never write prompt directives to stdout')) {
+  console.error('FAIL: UserPromptSubmit hook must keep internal directives out of stdout.');
   process.exit(1);
 }
-console.log('PASS: OpenRouter free router, fallback routing, 404/429 handling, and compact prompt-context hook wiring');
+if (hook.includes('process.stdout.write(`[LazyDev]')) {
+  console.error('FAIL: UserPromptSubmit hook still renders internal LazyDev policy into the chat UI.');
+  process.exit(1);
+}
+console.log('PASS: OpenRouter free router, fallback routing, 404/429 handling, and transcript-silent prompt hook');
