@@ -971,7 +971,7 @@ function buildTuiConfig() {
     `notification_condition = "unfocused"`,
     ``,
     `[status_line]`,
-    `items = ["mode", "goal", "model", "tasks", "cwd", "git", "tips"]`,
+    `items = ["mode", "model", "tasks", "cwd", "git", "tips"]`,
   ].join('\n') + '\n';
 }
 

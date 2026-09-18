@@ -3,13 +3,16 @@
   <h3>🦥 Lazy Developer</h3>
   <p><strong>A calm, capable developer layer for Kimi Code.</strong><br/>Live models, portable skills, safe artifact handling, provider routing, and a cleaner terminal workflow — without replacing the Kimi Code experience.</p>
 
-  <img src="assets/image.jpg" alt="Lazy Developer" width="720" />
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="assets/free-kimi-code-light.svg">
+    <img src="assets/free-kimi-code-dark.svg" alt="Lazy Developer" width="720" />
+  </picture>
 
   <br/>
   <br/>
 
-  [![Version](https://img.shields.io/badge/version-1.0.0-6f42c1)](https://github.com/BlizPS/lazy-developer-free-kimi-code/releases)
-  [![Kimi Code](https://img.shields.io/badge/Kimi%20Code-2.0.0-111111)](https://github.com/MoonshotAI/kimi-code/releases)
+  [![Version](https://img.shields.io/badge/version-1.0.0-6f42c1)](https://github.com/BlizPS/lazy-developer-free-kimi-code)
+  [![Kimi Code](https://img.shields.io/badge/Kimi%20Code-2.0.0-111111)](https://github.com/MoonshotAI/kimi-code)
   [![CI](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/ci.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/ci.yml)
   [![Validate](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/validate.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/validate.yml)
   [![Stars](https://img.shields.io/github/stars/BlizPS/lazy-developer-free-kimi-code?style=flat)](https://github.com/BlizPS/lazy-developer-free-kimi-code/stargazers)
@@ -18,7 +21,6 @@
   [![License](https://img.shields.io/badge/license-MIT-111111)](LICENSE)
 
   <p>
-    <a href="https://github.com/BlizPS/lazy-developer-free-kimi-code/releases">Releases</a> ·
     <a href="https://github.com/BlizPS/lazy-developer-free-kimi-code/issues">Issues</a> ·
     <a href="https://github.com/BlizPS/lazy-developer-free-kimi-code/discussions">Discussions</a>
   </p>
@@ -297,7 +299,7 @@ The project keeps native Linux artifact behavior intact while making the Termux/
 
 ## Quality gates
 
-The repository is intentionally test-heavy for a small CLI layer. The default test suite covers configuration, provider boundaries, authentication routing, session compatibility, MCP startup, artifact collision safety, path guards, installer behavior, platform detection, skills, token budgets, and release metadata.
+The repository is intentionally test-heavy for a small CLI layer. The default test suite covers configuration, provider boundaries, authentication routing, session compatibility, MCP startup, artifact collision safety, path guards, installer behavior, platform detection, skills, token budgets, and repository metadata.
 
 Run it locally with:
 
@@ -337,11 +339,11 @@ Read `SECURITY.md` before reporting sensitive issues.
 
 ### `Model: not set` after `/login` or `/logout`
 
-Start a fresh `lazydev chat` process after updating to this release. The auth bridge restores the LazyDev provider/model after native auth reloads, while Kimi Code's own OAuth flow remains intact.
+Start a fresh `lazydev chat` process after updating to version 1.0.0. The auth bridge restores the LazyDev provider/model after native auth reloads, while Kimi Code's own OAuth flow remains intact.
 
 ### `[provider.api_error] 400`
 
-For proxy-backed providers, the release now repairs incomplete OpenAI tool-call history before forwarding it. For direct providers, inspect the active provider/model first with `lazydev doctor` and retry in a new session if the previous turn was interrupted.
+For proxy-backed providers, version 1.0.0 repairs incomplete OpenAI tool-call history before forwarding it. For direct providers, inspect the active provider/model first with `lazydev doctor` and retry in a new session if the previous turn was interrupted.
 
 Kimi Code documents session data and replay as a persistent subsystem; interrupted tool exchanges have been a known source of strict-provider 400 failures.
 
@@ -391,7 +393,6 @@ This project grows fastest when people share real compatibility findings. Issues
 
 - 💬 [Open a Discussion](https://github.com/BlizPS/lazy-developer-free-kimi-code/discussions)
 - 🐛 [Report a Bug](https://github.com/BlizPS/lazy-developer-free-kimi-code/issues/new)
-- 🚀 [Browse Releases](https://github.com/BlizPS/lazy-developer-free-kimi-code/releases)
 - ⭐ [Star the Repository](https://github.com/BlizPS/lazy-developer-free-kimi-code/stargazers)
 
 ## License
