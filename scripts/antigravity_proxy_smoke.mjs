@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createAntigravityProxy } from '../runtime/antigravity-proxy.mjs';
 
 let seen = [];
+let retryAttempts = 0;
 const upstream = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/v1beta/interactions/int_3') {
     res.writeHead(200, {'content-type':'application/json'});
@@ -20,13 +21,23 @@ const upstream = http.createServer((req, res) => {
     const body = JSON.parse(raw || '{}');
     body.__revision_header = req.headers['api-revision'];
     seen.push(body);
+    if (String(body.input || '') === 'retry-me' && retryAttempts++ === 0) {
+      res.writeHead(500, {'content-type':'application/json'});
+      return res.end(JSON.stringify({error:{code:'api_error',message:'Internal error encountered.'}}));
+    }
     res.writeHead(200, {'content-type':'application/json'});
+    if (String(body.input || '') === 'retry-me') {
+      return res.end(JSON.stringify({
+        id: 'int_retry', environment_id: 'env_retry', status: 'completed',
+        steps: [{type:'model_output', content:[{type:'text', text:'Retry succeeded.'}]}]
+      }));
+    }
     if (!body.previous_interaction_id) {
       res.end(JSON.stringify({
         id: 'int_1',
         environment_id: 'env_1',
         status: 'requires_action',
-        steps: [{type:'function_call', id:'fc_1', name:'external_run_command', arguments:{command:'git status'}}]
+        steps: [{type:'function_call', id:'fc_1', name:'lazydev_bash', arguments:{command:'git status'}}]
       }));
     } else if (body.previous_interaction_id === 'int_1') {
       res.end(JSON.stringify({
@@ -64,35 +75,39 @@ const first = await call({
   model:'antigravity-preview-09-2026',
   stream:false,
   messages:[{role:'user', content:'Check the repository status.'}],
-  tools:[{type:'function', function:{name:'run_command', description:'Run a command', parameters:{type:'object',properties:{command:{type:'string'}}}}}]
+  tools:[{type:'function', function:{name:'Bash', description:'Run a command', parameters:{type:'object',properties:{command:{type:'string'}}}}}]
 });
 assert.equal(first.status, 200);
 assert.equal(first.body.choices[0].finish_reason, 'tool_calls');
-assert.equal(first.body.choices[0].message.tool_calls[0].function.name, 'run_command');
+assert.equal(first.body.choices[0].message.tool_calls[0].function.name, 'Bash');
 assert.equal(seen[0].agent, 'antigravity-preview-09-2026');
-assert.equal(seen[0].environment, 'remote');
+assert.equal(seen[0].environment, undefined);
 assert.ok(Array.isArray(seen[0].tools));
-assert.ok(seen[0].tools.some((t) => t.type === 'function' && t.name === 'external_run_command'));
+assert.ok(seen[0].tools.some((t) => t.type === 'function' && t.name === 'lazydev_bash'));
 assert.equal(seen[0].agent_config.type, 'antigravity');
 assert.equal(seen[0].agent_config.max_total_tokens, 50000);
-assert.equal(seen[0].tools?.find((t) => t.name === 'external_run_command')?.type, 'function');
+assert.equal(seen[0].tools?.find((t) => t.name === 'lazydev_bash')?.type, 'function');
+assert.equal(seen[0].tools?.some((t) => t.name === 'lazydev_todolist'), false);
+assert.equal(seen[0].tools?.some((t) => t.type === 'code_execution'), false);
+assert.equal(seen[0].tools?.some((t) => t.type === 'google_search'), false);
+assert.equal(seen[0].tools?.some((t) => t.type === 'url_context'), false);
 assert.equal(seen[0].__revision_header, undefined);
 
 const second = await call({
   model:'antigravity-preview-09-2026',
   messages:[
     {role:'user', content:'Check the repository status.'},
-    {role:'assistant', content:null, tool_calls:[{id:'fc_1', type:'function', function:{name:'run_command', arguments:'{"command":"git status"}'}}]},
-    {role:'tool', tool_call_id:'fc_1', name:'run_command', content:'On branch main\nworking tree clean'},
+    {role:'assistant', content:null, tool_calls:[{id:'fc_1', type:'function', function:{name:'Bash', arguments:'{"command":"git status"}'}}]},
+    {role:'tool', tool_call_id:'fc_1', name:'Bash', content:'On branch main\nworking tree clean'},
   ],
 });
 assert.equal(second.status, 200);
 assert.equal(second.body.choices[0].message.content, 'Done — the tool result was received from the model_output step.');
 assert.equal(seen[1].previous_interaction_id, 'int_1');
-assert.equal(seen[1].environment, 'env_1');
+assert.equal(seen[1].environment, undefined);
 assert.equal(seen[1].tools, undefined);
 assert.equal(seen[1].input[0].type, 'function_result');
-assert.equal(seen[1].input[0].name, 'external_run_command');
+assert.equal(seen[1].input[0].name, 'lazydev_bash');
 assert.equal(seen[1].input[0].call_id, 'fc_1');
 
 const third = await call({
@@ -102,7 +117,15 @@ const third = await call({
 assert.equal(third.status, 200);
 assert.equal(third.body.choices[0].message.content, 'Recovered from interaction retrieval.');
 assert.equal(seen[2].previous_interaction_id, 'int_2');
-assert.ok(Array.isArray(seen[2].tools));
+assert.equal(seen[2].tools, undefined);
+
+const retry = await call({
+  model:'antigravity-preview-09-2026',
+  messages:[{role:'user', content:'retry-me'}],
+});
+assert.equal(retry.status, 200);
+assert.equal(retry.body.choices[0].message.content, 'Retry succeeded.');
+assert.equal(retryAttempts, 2);
 
 proxy.server.close();
 upstream.close();

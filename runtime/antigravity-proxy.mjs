@@ -3,11 +3,11 @@ import crypto from 'node:crypto';
 
 const DEFAULT_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const DEFAULT_AGENT = 'antigravity-preview-09-2026';
-const BUILTIN_TOOLS = [
-  { type: 'code_execution' },
-  { type: 'google_search' },
-  { type: 'url_context' },
-];
+const LOCAL_TOOL_ALLOWLIST = new Set([
+  'Read', 'Write', 'Edit', 'Grep', 'Glob', 'Bash', 'WebSearch', 'FetchURL',
+]);
+const TRANSIENT_RETRY_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504]);
+const USE_REMOTE_ENVIRONMENT = /^(1|true|yes)$/i.test(String(process.env.LAZYDEV_ANTIGRAVITY_REMOTE_ENVIRONMENT || '').trim());
 
 function normalizeText(value) {
   if (typeof value === 'string') return value;
@@ -27,8 +27,10 @@ function toolDeclarations(openAITools = []) {
   for (const item of openAITools) {
     const fn = item?.function;
     if (item?.type !== 'function' || !fn?.name) continue;
+    if (!LOCAL_TOOL_ALLOWLIST.has(String(fn.name))) continue;
     const original = String(fn.name);
-    const external = `external_${original}`;
+    const safeName = original.replace(/[^A-Za-z0-9_]/g, '_').replace(/^[^A-Za-z_]/, '_$&').toLowerCase();
+    const external = `lazydev_${safeName}`;
     mappings.set(original, external);
     tools.push({
       type: 'function',
@@ -80,35 +82,47 @@ function toolResultInputs(messages, mappings) {
 }
 
 async function postInteraction(endpoint, apiKey, payload, timeout = 300000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'accept': 'application/json',
-        'x-goog-api-key': apiKey,
-              },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    let data = {};
-    try { data = text ? JSON.parse(text) : {}; } catch { data = { error: { message: text } }; }
-    if (!response.ok) {
-      const message = data?.error?.message || data?.message || text || `HTTP ${response.status}`;
-      const error = new Error(String(message));
-      error.status = response.status;
-      error.data = data;
+  const maxRetries = 3;
+  for (let attempt = 0; ; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'accept': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch { data = { error: { message: text } }; }
+      if (!response.ok) {
+        const message = data?.error?.message || data?.message || text || `HTTP ${response.status}`;
+        const error = new Error(String(message));
+        error.status = response.status;
+        error.data = data;
+        if (TRANSIENT_RETRY_STATUSES.has(response.status) && attempt < maxRetries) {
+          const retryAfter = Number(response.headers.get('retry-after'));
+          const delay = Number.isFinite(retryAfter) && retryAfter > 0
+            ? Math.min(8000, retryAfter * 1000)
+            : Math.min(8000, 1000 * (2 ** attempt));
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+        throw error;
+      }
+      return data;
+    } catch (error) {
+      if (error?.name === 'AbortError') throw new Error(`Antigravity request timed out after ${timeout}ms.`);
+      if (TRANSIENT_RETRY_STATUSES.has(Number(error?.status)) && attempt < maxRetries) continue;
       throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    return data;
-  } catch (error) {
-    if (error?.name === 'AbortError') throw new Error(`Antigravity request timed out after ${timeout}ms.`);
-    throw error;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -269,7 +283,7 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
     interactionId: null,
     environmentId: null,
     mappings: new Map(),
-    tools: BUILTIN_TOOLS.slice(),
+    tools: [],
     initialized: false,
   };
   const server = http.createServer((req, res) => {
@@ -306,29 +320,28 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
         const messages = Array.isArray(body.messages) ? body.messages : [];
         const { tools: externalTools, mappings } = toolDeclarations(body.tools);
         for (const [k, v] of mappings) state.mappings.set(k, v);
-        state.tools = [...BUILTIN_TOOLS, ...externalTools];
+        state.tools = externalTools;
         const hasToolResults = messages.at(-1)?.role === 'tool';
         const isFunctionResultContinuation = Boolean(hasToolResults && state.interactionId);
         let input;
-        let payload = {
+        const payload = {
           agent: model,
-          environment: state.environmentId || 'remote',
-          // Antigravity's managed-agent function calling is stateful.
-          // A function-result continuation references the previous interaction
-          // and sends only the result; a fresh user turn declares tools again
-          // because tools are interaction-scoped.
-          agent_config: { type: 'antigravity', max_total_tokens: 50000 },
+          // Keep execution in the local Kimi tool loop by default. The remote
+          // sandbox is opt-in because its filesystem is separate from the
+          // existing workspace used by Kimi's local Read/Write tools.
+          agent_config: { type: 'antigravity', model: 'gemini-3.8-flash', max_total_tokens: 50000 },
           store: true,
         };
+        if (USE_REMOTE_ENVIRONMENT) payload.environment = state.environmentId || 'remote';
         if (isFunctionResultContinuation) {
           input = toolResultInputs(messages, state.mappings);
         } else {
           input = state.interactionId
             ? (recentUserInput(messages) || transcriptInput(messages))
             : transcriptInput(messages);
-          // Declare custom tools on every new interaction, but never on the
-          // function-result continuation. This follows the official API flow.
-          payload.tools = state.tools;
+          // Declare only the small local tool surface on each new interaction;
+          // function-result continuations send only results.
+          if (state.tools.length) payload.tools = state.tools;
           state.initialized = true;
         }
         if (!input) input = 'Continue.';
@@ -336,7 +349,13 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
         if (state.interactionId) payload.previous_interaction_id = state.interactionId;
         let upstream = await postInteraction(endpoint, apiKey, payload);
         state.interactionId = String(upstream?.id || state.interactionId || '');
-        state.environmentId = String(upstream?.environment_id || state.environmentId || '');
+        if (USE_REMOTE_ENVIRONMENT) state.environmentId = String(upstream?.environment_id || state.environmentId || '');
+        if (String(upstream?.status || '').toLowerCase() === 'failed') {
+          const diagnostic = Array.isArray(upstream?.errors)
+            ? upstream.errors.map((e) => e?.message).filter(Boolean).join('; ')
+            : '';
+          throw new Error(diagnostic || 'Antigravity interaction failed.');
+        }
 
         // The raw REST Interactions response carries assistant text in
         // steps[].content[].text (model_output). Some proxy/CLI layers expose
@@ -348,7 +367,7 @@ export async function createAntigravityProxy({ apiKey, model = DEFAULT_AGENT, to
             const retrieved = await getInteraction(endpoint, apiKey, state.interactionId);
             if (retrieved && typeof retrieved === 'object') {
               upstream = { ...upstream, ...retrieved, steps: Array.isArray(retrieved.steps) ? retrieved.steps : upstream.steps };
-              state.environmentId = String(retrieved?.environment_id || state.environmentId || '');
+              if (USE_REMOTE_ENVIRONMENT) state.environmentId = String(retrieved?.environment_id || state.environmentId || '');
             }
           } catch {
             // Keep the original completed interaction; the caller can still
