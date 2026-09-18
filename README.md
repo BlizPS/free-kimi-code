@@ -1,48 +1,129 @@
 <div align="center">
+  <h1>Free Kimi Code</h1>
+  <h3>🦥 Lazy Developer</h3>
+  <p><strong>A calm, capable developer layer for Kimi Code.</strong><br/>Live models, portable skills, safe artifact handling, provider routing, and a cleaner terminal workflow — without replacing the Kimi Code experience.</p>
 
-# 🦥 Lazy Developer
+  <img src="assets/image.jpg" alt="Lazy Developer" width="720" />
 
-<img src="assets/image.jpg" alt="Lazy Developer" />
+  <br/>
+  <br/>
 
-[![Version](https://img.shields.io/badge/version-1.0.0-6f42c1)](https://github.com/BlizPS/lazy-developer-free-kimi-code/releases)
-[![CI](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/ci.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/ci.yml)
-[![Validate](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/validate.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/validate.yml)
-[![Stars](https://img.shields.io/github/stars/BlizPS/lazy-developer-free-kimi-code?style=flat)](https://github.com/BlizPS/lazy-developer-free-kimi-code/stargazers)
-[![Forks](https://img.shields.io/github/forks/BlizPS/lazy-developer-free-kimi-code?style=flat)](https://github.com/BlizPS/lazy-developer-free-kimi-code/network/members)
-[![License](https://img.shields.io/badge/license-MIT-111111)](LICENSE)
+  [![Version](https://img.shields.io/badge/version-1.0.0-6f42c1)](https://github.com/BlizPS/lazy-developer-free-kimi-code/releases)
+  [![Kimi Code](https://img.shields.io/badge/Kimi%20Code-2.0.0-111111)](https://github.com/MoonshotAI/kimi-code/releases)
+  [![CI](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/ci.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/ci.yml)
+  [![Validate](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/validate.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-free-kimi-code/actions/workflows/validate.yml)
+  [![Stars](https://img.shields.io/github/stars/BlizPS/lazy-developer-free-kimi-code?style=flat)](https://github.com/BlizPS/lazy-developer-free-kimi-code/stargazers)
+  [![Forks](https://img.shields.io/github/forks/BlizPS/lazy-developer-free-kimi-code?style=flat)](https://github.com/BlizPS/lazy-developer-free-kimi-code/network/members)
+  [![Issues](https://img.shields.io/github/issues/BlizPS/lazy-developer-free-kimi-code?style=flat)](https://github.com/BlizPS/lazy-developer-free-kimi-code/issues)
+  [![License](https://img.shields.io/badge/license-MIT-111111)](LICENSE)
 
-**A relaxed coding setup for Kimi Code — with better skills, smarter defaults, and less terminal noise.**
-
+  <p>
+    <a href="https://github.com/BlizPS/lazy-developer-free-kimi-code/releases">Releases</a> ·
+    <a href="https://github.com/BlizPS/lazy-developer-free-kimi-code/issues">Issues</a> ·
+    <a href="https://github.com/BlizPS/lazy-developer-free-kimi-code/discussions">Discussions</a>
+  </p>
 </div>
 
+> ⭐ **Like the project?** A GitHub star helps other developers discover it. If Lazy Developer saves you time, consider starring or sharing it.
 
-Lazy Developer keeps the workflow simple: install the tools, choose the provider you actually want to use, then start Kimi Code. The provider menu is live, so the model list comes from the service instead of a stale hard-coded list.
+## What is Lazy Developer?
+
+Lazy Developer is a free, open-source developer layer built around **Kimi Code CLI**. It keeps the part developers actually care about — the coding agent — while adding a practical workflow around it.
+
+Think of it as:
 
 ```text
-install → setup → chat
+Lazy Developer
+     │
+     ├── Kimi Code CLI
+     ├── provider + model routing
+     ├── portable skills
+     ├── safe artifact handling
+     ├── web-search fallback
+     ├── session compatibility
+     └── terminal cleanup via RTK
 ```
 
-## Get started
+The project does **not** provide free API credits, bypass provider billing, or grant access to models you are not entitled to use. You bring the provider credentials you already have, and Lazy Developer routes Kimi Code through the model you select.
 
-### 1. Install or update
+## Why people use it
 
-On desktop, the installer handles the whole setup for you: **Kimi Code 2.0.0**, **RTK**, and **Lazy Developer 1.0.0**. It does not require npm.
+### ⚡ One setup, live models
 
-**macOS / Linux**
+Run `lazydev setup`, choose a provider, and pick from the provider's live model catalog instead of relying on a frozen list.
+
+### 🧠 Skills that stay useful
+
+Bundled skills cover implementation, debugging, review, and testing. They are loaded through Kimi Code's normal skill system rather than pasted as a giant prompt on every turn.
+
+### 🔌 Provider routing without rebuilding your workflow
+
+Lazy Developer can route Kimi Code through several providers while keeping the same terminal experience. Compatibility providers can run through a local loopback proxy; direct providers use their native Kimi Code protocol.
+
+### 🔐 Native Kimi login and logout stay native
+
+`/login` and `/logout` remain Kimi Code commands with their normal interactive selectors. Lazy Developer keeps its own provider/model route separate, so authenticating a Kimi account does not silently replace your selected LazyDev model.
+
+### 🧩 Old sessions are treated as history, not disposable config
+
+When you change the active model, Lazy Developer can add compatibility aliases for older LazyDev model names. The saved conversation is left in place while the launch-time mapping points it at the current model.
+
+### 📁 Safer standalone artifacts
+
+Standalone files are written to the canonical `lazydevfile` directory. Existing files are never overwritten by the artifact router:
+
+```text
+report.html
+report1.html
+report2.html
+...
+```
+
+### 🌐 Web search when the host search service is unavailable
+
+Kimi Code's managed search is preferred when available. Lazy Developer also ships a local `lazydev-search` MCP service so third-party model routes can still perform web search without switching providers.
+
+### 🪶 Less terminal noise
+
+The desktop installer wires **Rust Token Killer (RTK)** into the workflow. RTK reduces noisy command output before it reaches the model; its upstream project reports up to 90% fewer terminal-output tokens on supported commands. That is output reduction, not a promise about total API cost.
+
+## Supported providers
+
+Lazy Developer currently exposes these provider choices in `lazydev setup`:
+
+| Provider | Discovery | Key required | Routing |
+| --- | --- | ---: | --- |
+| OpenRouter | Live catalog | Yes | Local compatibility proxy |
+| Gemini | Live catalog | Yes | Native Google GenAI |
+| NVIDIA | Live catalog | Yes | Local compatibility proxy |
+| OpenAI | Live catalog | Yes | Native OpenAI |
+| Ollama Local | Local running models | No | Local compatibility proxy |
+| LLM7 | Live catalog | Yes | Local compatibility proxy |
+| Groq | Live catalog | Yes | Local compatibility proxy |
+| CodeBuddy | Live catalog / fallback endpoints | Yes | Local compatibility proxy |
+| Anthropic | Live catalog | Yes | Native Anthropic |
+
+Provider APIs and model availability change over time, so the setup screen intentionally prefers live discovery over hard-coded model catalogs.
+
+## Install
+
+### macOS / Linux
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.sh" | sh
 ```
 
-**Windows PowerShell**
+### Windows PowerShell
 
 ```powershell
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1")))
 ```
 
-Run the same installer again whenever you want to update. It checks Kimi Code, RTK, and Lazy Developer separately, so unchanged pieces are skipped. A newer compatible Kimi Code installation is also left alone instead of being downloaded again. Lazy Developer updates are keyed to the GitHub revision, so the project can stay at version 1.0.0 while its source changes. Your Kimi sessions and provider configuration stay in place during updates.
+The managed installer targets **Lazy Developer 1.0.0** and **Kimi Code 2.0.0**, while keeping updates component-aware. Re-running the installer does not intentionally wipe your saved Kimi sessions or LazyDev provider configuration.
 
-**Termux / Android:** use a Linux userland first. Native Android/bionic Termux is not a supported host for the Linux Kimi/RTK binaries. A minimal setup is:
+### Termux / Android
+
+Kimi Code's Linux binary expects a glibc Linux userland, so a practical Termux setup is a Debian or Ubuntu guest through `proot-distro`:
 
 ```bash
 pkg update
@@ -51,95 +132,230 @@ proot-distro install debian
 proot-distro login debian
 ```
 
-Run the normal Lazy Developer installer from that Linux shell. The runtime also recognizes the Android/Termux host bindings that remain visible inside proot-distro even though the guest environment is rebuilt, so standalone artifacts still go to `/storage/emulated/0/lazydevfile`. Native Linux keeps its normal `$HOME/lazydevfile` path unchanged. The installer detects glibc Linux inside Termux and places the `lazydev` launcher in the active Termux PATH when appropriate. This also repairs an older broken `lazydev` symlink in `$PREFIX/bin`, so `lazydev setup` resolves to the current build instead of a missing old target.
+Then run the normal Lazy Developer installer inside the Linux guest.
 
-### 2. Set up your provider
+For standalone artifacts, the runtime keeps the platform-specific path:
 
-Before the first chat, run:
+```text
+Native Linux    → $HOME/lazydevfile
+Termux + proot  → /storage/emulated/0/lazydevfile
+```
+
+## Quick start
 
 ```bash
 lazydev setup
-```
-
-Pick a provider, authenticate it, and choose one of the models returned by the provider's live catalog. There are now **9 provider options** in the setup screen:
-
-1. **OpenRouter** — API key + live model catalog
-2. **Gemini** — API key + live model catalog
-3. **NVIDIA** — API key + live model catalog
-4. **OpenAI** — API key + live model catalog
-5. **Ollama Local** — local API URL + live models from your running Ollama instance
-6. **LLM7** — API key + live model catalog
-7. **Groq** — API key + live model catalog
-8. **CodeBuddy** — API key + live model catalog
-9. **Anthropic** — API key + live model catalog
-
-Standalone artifacts use the platform-specific `lazydevfile` directory. Native Linux keeps `$HOME/lazydevfile`; Termux, including Debian/Ubuntu guests launched through proot-distro, uses `/storage/emulated/0/lazydevfile`. File creation never overwrites an existing standalone artifact: a collision such as `report.html` becomes `report1.html`, then `report2.html`, and so on.
-
-Ollama is the only provider that does not ask for an API key. Give Lazy Developer the address of the local Ollama API, it checks the endpoint, reads the models that are actually running there, and uses the selected local model. Your inference still happens on your own Ollama machine; Lazy Developer and RTK remain in the workflow around Kimi Code.
-
-### 3. Start coding
-
-Once setup finishes, start the real coding session with:
-
-```bash
 lazydev chat
 ```
 
-Bare `lazydev` opens the Lazy Developer command center. `lazydev chat` is the entry point that launches Kimi Code.
+That is the whole basic workflow:
 
-## Kimi Code login/logout without losing LazyDev routing
-
-Native Kimi Code `/login` and `/logout` remain available inside the TUI. Lazy Developer does not fake these commands and does not replace Kimi Code's authentication flow. Each session gets a `KIMI_MODEL_*` runtime override that pins inference to the provider/model selected in `lazydev setup`, so an OAuth login or logout cannot leave the session at `Model: not set` or silently switch inference to the managed Kimi account. Google Gemini uses its documented OpenAI-compatible endpoint for this runtime override.
-
-Lazy Developer also runs a small auth bridge while the Kimi session is alive. When `/login` or `/logout` reloads `config.toml`, the bridge restores the LazyDev provider/model aliases and `default_model` while preserving unrelated Kimi authentication sections that the native flow just wrote. This keeps both sides independent: Kimi can authenticate or disconnect its own account, while LazyDev keeps the selected inference route.
-
-The OAuth credentials still live in Kimi Code's normal `KIMI_CODE_HOME` credential store. Kimi Code documents `KIMI_CODE_HOME` as the root for configuration, sessions, OAuth credentials, and other runtime data.
-
-This is an inference-routing safeguard, not a claim that Kimi Code authentication grants access to any third-party provider or model. Provider API keys and model selection remain controlled by LazyDev setup.
-
-## Switching models without breaking old sessions
-
-Lazy Developer keeps the conversation history in Kimi Code's session store and refreshes the active model mapping each time `lazydev chat` starts. When an older session refers to a previous LazyDev model alias, the runtime adds a compatibility alias that points to the currently selected provider/model instead of editing or deleting the saved session. That keeps old conversation context while letting the session continue on the model you selected now. Kimi Code stores session context and runtime state separately from `config.toml`, so this compatibility layer only changes the launch-time model mapping.
-
-## Web search with third-party models
-
-Kimi Code's built-in `WebSearch` is host-provided and is only available when its search service is configured. Lazy Developer therefore adds a small local `search_web` MCP server for providers that do not expose Kimi's managed search service. If native `WebSearch` is available, it is preferred; otherwise the model can use the LazyDev search tool without changing providers.
-
-## Live models, not a frozen list
-
-Lazy Developer asks each provider for its current model catalog during setup. OpenRouter exposes a models endpoint, Gemini exposes `models.list`, Groq exposes `/openai/v1/models`, and LLM7 provides an OpenAI-compatible `/v1/models` endpoint. Ollama is handled locally through its running API instead of a cloud catalog.
-
-OpenAI setup now uses a bounded request with an explicit timeout. A slow or unreachable `/v1/models` request fails cleanly instead of leaving the terminal sitting forever on `loading live models`.
-
-CodeBuddy supports API-key authentication and model configuration through its CLI ecosystem; Lazy Developer treats it as an OpenAI-compatible provider and tries the public model catalog first, with a compatible fallback endpoint when available. Provider-side endpoints can change, so a failed CodeBuddy catalog refresh is surfaced instead of silently inventing models.
-
-## RTK, already wired in
-
-The desktop installer also installs **Rust Token Killer (RTK)** and connects it to Kimi Code. RTK filters noisy command output before it reaches the agent; its upstream project describes **up to 90% fewer terminal-output tokens** for supported output. That is terminal-output reduction, not a promise that every conversation or provider bill drops by the same percentage.
-
-If RTK is already current, the installer skips it. If it is missing or unhealthy, it installs or repairs it.
-
-## Skills without the bloat
-
-Lazy Developer bundles focused skills for implementation, debugging, review, and testing. Kimi Code is pointed at the bundled skill directory when a session starts, and the runtime enables the skill merge path so the skills are available without duplicating a huge instruction block into every project.
-
-Local token-budget checks measure the packaged skill payload rather than billing. Current measurements are above the project's 75% reduction target on the tested hot paths; real prompt savings still depend on the task, conversation history, tools, and provider.
-
-## Use the skills with other CLIs
-
-Lazy Developer is also a portable skill/plugin package. When another agent supports the standard Skills CLI, you can install the same repository into that agent or project:
-
-```bash
-npx skills add BlizPS/lazy-developer-free-kimi-code --all
+```text
+install → setup → chat
 ```
 
-That universal path is separate from the `lazydev` CLI. You do not need it for `lazydev chat`; Lazy Developer already wires its own bundled skills.
+Useful commands:
 
-The repository also includes plugin/integration metadata for other agent ecosystems, so the same skill layer can travel with you instead of being locked to one front end.
+```text
+lazydev help
+lazydev setup
+lazydev chat
+lazydev sessions
+lazydev skills
+lazydev artifact <filename>
+lazydev env
+lazydev doctor
+lazydev version
+```
+
+## Login & logout
+
+Lazy Developer deliberately keeps the native Kimi Code authentication flow visible.
+
+Inside the Kimi Code TUI:
+
+```text
+/login
+```
+
+opens the native platform/account selector.
+
+```text
+/logout
+```
+
+opens the native logout selector.
+
+The important separation is that **Kimi authentication and LazyDev inference routing are different state machines**. Kimi Code stores OAuth credentials in its own data area, while Lazy Developer writes its selected provider and model into the LazyDev runtime configuration. A small auth bridge watches for the native config reload triggered by login/logout and restores only the LazyDev-owned routing state.
+
+The bridge writes the restored config atomically, so Kimi Code does not have to read a half-written TOML file during a reload.
+
+This design follows Kimi Code's current configuration model: providers and models are stored in `KIMI_CODE_HOME/config.toml`, while native login/logout manages the provider authentication state.
+
+## Session compatibility
+
+Kimi Code persists sessions under `KIMI_CODE_HOME/sessions/`, including session metadata and the main agent's wire history.
+
+Lazy Developer does not rewrite those session files during normal model switching. Instead, launch-time compatibility aliases can map an older LazyDev model alias such as:
+
+```text
+lazydev/old-model-name
+```
+
+to the currently configured provider/model.
+
+That matters because model changes should not turn old conversations into dead ends.
+
+## Recovering strict-provider 400 errors
+
+A particularly annoying class of errors looks like:
+
+```text
+[provider.api_error] 400
+```
+
+followed by a message about missing `tool_call_id` responses or an invalid assistant message.
+
+Kimi Code has documented several session-recovery bugs in this area, especially after an interrupted tool call or an aborted turn.
+
+Lazy Developer adds an extra boundary for its OpenAI-compatible proxy routes: before a request is forwarded, the proxy removes orphan tool results and incomplete assistant tool calls while preserving completed tool-call/tool-result pairs. This gives strict upstream providers a valid message sequence even when an interrupted session left a damaged tail in the projected history.
+
+The proxy also preserves upstream error bodies where available and produces an explicit diagnostic when an upstream server returns a bare HTTP error with no body.
+
+Kimi Code itself has continued shipping fixes for interrupted sessions, tool-call pairing, and context reconstruction, so the bundled Kimi version remains an important part of the overall behavior.
+
+## Why `KIMI_MODEL_*` is not forced everywhere
+
+Kimi Code supports the `KIMI_MODEL_*` environment-variable family as a temporary in-memory provider/model override. It is useful for explicit runtime wiring, but it is not the only way to configure a model.
+
+Lazy Developer uses the normal `config.toml` provider/model configuration as the source of truth for direct Gemini, OpenAI, and Anthropic routes. Compatibility-proxy routes may use a temporary runtime override as an additional guard against native auth reloads replacing the loopback provider.
+
+This keeps direct providers on their native Kimi Code protocol while still protecting proxy-backed providers during `/login` and `/logout` reloads.
+
+## Web search architecture
+
+```text
+Kimi Code WebSearch
+       │
+       ├── available → use it
+       │
+       └── unavailable
+              │
+              ▼
+       lazydev-search MCP
+              │
+              ▼
+        search_web tool
+```
+
+The local MCP service is configured automatically in `KIMI_CODE_HOME/mcp.json`. It runs as a stdio process and does not require a second server to be kept open by the user.
+
+## Artifact safety
+
+Lazy Developer has a dedicated artifact path policy for standalone deliverables.
+
+The rules are intentionally simple:
+
+```text
+1. use the canonical artifact directory
+2. accept a filename, not an arbitrary path
+3. never overwrite an existing file
+4. add the lowest available numeric suffix
+5. verify the final path before reporting success
+```
+
+This applies generically across file extensions; it is not tied to a specific task or filename.
+
+## Cross-platform paths
+
+The runtime includes explicit handling for desktop Linux, macOS, Windows, Termux, and Linux guests running through `proot-distro`.
+
+| Platform | Artifact directory |
+| --- | --- |
+| Linux / macOS | `$HOME/lazydevfile` |
+| Windows | `%USERPROFILE%\\lazydevfile` |
+| Termux + proot | `/storage/emulated/0/lazydevfile` |
+
+The project keeps native Linux artifact behavior intact while making the Termux/proot path deterministic.
+
+## Project layout
+
+```text
+.
+├── agents/             # LazyDev agent profile
+├── commands/           # reusable command prompts
+├── hooks/              # path, shell, and prompt guards
+├── runtime/            # routing, search, policy, compatibility helpers
+├── scripts/             # CLI + tests + smoke checks
+├── skills/             # bundled LazyDev skills
+├── assets/              # project artwork
+├── install.sh           # macOS / Linux / Termux installer
+├── install.ps1          # Windows installer
+├── README.md
+└── LICENSE
+```
+
+## Quality gates
+
+The repository is intentionally test-heavy for a small CLI layer. The default test suite covers configuration, provider boundaries, authentication routing, session compatibility, MCP startup, artifact collision safety, path guards, installer behavior, platform detection, skills, token budgets, and release metadata.
+
+Run it locally with:
+
+```bash
+npm test
+```
+
+CI runs the same project-native checks on GitHub Actions.
+
+## Contributing
+
+Small, focused pull requests are welcome. The easiest contributions are bug fixes, provider compatibility updates, documentation improvements, tests, and reproducible issue reports.
+
+Before opening a PR:
+
+```bash
+npm test
+```
+
+For bugs, include the operating system, Node.js version, Lazy Developer version, Kimi Code version, active provider/model, and the smallest reproducible example that does **not** expose API keys or OAuth credentials.
+
+## Security
+
+Never commit:
+
+```text
+API keys
+OAuth tokens
+session exports containing secrets
+provider credentials
+private workspace data
+```
+
+Read `SECURITY.md` before reporting sensitive issues.
+
+## Troubleshooting
+
+### `Model: not set` after `/login` or `/logout`
+
+Start a fresh `lazydev chat` process after updating to this release. The auth bridge restores the LazyDev provider/model after native auth reloads, while Kimi Code's own OAuth flow remains intact.
+
+### `[provider.api_error] 400`
+
+For proxy-backed providers, the release now repairs incomplete OpenAI tool-call history before forwarding it. For direct providers, inspect the active provider/model first with `lazydev doctor` and retry in a new session if the previous turn was interrupted.
+
+Kimi Code documents session data and replay as a persistent subsystem; interrupted tool exchanges have been a known source of strict-provider 400 failures.
+
+### Live model catalog fails
+
+Run `lazydev setup` again and check the provider endpoint/key. Cloud providers can change model availability or rate limits without notice. For Ollama, make sure the local Ollama service is running and reachable from the same Linux environment.
+
+### Termux cannot start Kimi Code
+
+Use a glibc Linux userland through `proot-distro` and run the installer from inside it. The runtime will still keep standalone artifacts on the shared Android path.
 
 ## Updating
 
-There is no separate updater command. Run the normal platform installer again:
+Re-run the normal installer:
 
 **macOS / Linux**
 
@@ -153,18 +369,9 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-co
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1")))
 ```
 
-The installer is component-aware:
+The installer is component-aware and does not treat every run as a destructive reinstall.
 
-- Kimi Code unchanged → skipped.
-- RTK unchanged → skipped.
-- Lazy Developer at the same GitHub revision and healthy → skipped.
-- Anything changed, missing, or unhealthy → refreshed.
-
-Updating Lazy Developer does not wipe Kimi sessions or saved provider configuration.
-
-## Uninstall everything
-
-For a clean removal, use the matching uninstaller. It is deliberately broader than an update: it removes the managed Lazy Developer installation, Kimi Code, RTK, LazyDev configuration, managed caches, launchers, and related generated files.
+## Uninstalling
 
 **macOS / Linux**
 
@@ -178,34 +385,21 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-co
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/uninstall.ps1")))
 ```
 
-A fresh install after uninstall starts from a clean state. Project folders outside Lazy Developer's managed locations are left alone.
+## Community
 
-## Troubleshooting
+This project grows fastest when people share real compatibility findings. Issues are useful for bugs and reproducible failures; Discussions are better for ideas, workflow experiments, and provider setup notes.
 
-If a provider refresh appears to hang, the live catalog request now has a hard timeout. Rerun `lazydev setup` and try the provider again. For a local Ollama setup, first make sure the URL you entered is reachable from the same machine and that Ollama is serving models.
-
-If Kimi Code reports `[provider.api_error] Error: Invalid URL`, this is usually a provider endpoint problem rather than a model-name problem. Lazy Developer validates every endpoint before starting the session, writes the OpenAI provider to the official `https://api.openai.com/v1` endpoint, and prevents stale `OPENAI_BASE_URL`, Gemini, or Anthropic URL overrides from replacing the session configuration. Run the installer again, then run `lazydev setup` and select the provider once more.
-
-The desktop installer prefers a writable directory that is already on the current `PATH`, so a one-line `curl | sh` install can use `lazydev` immediately. It also repairs stale LazyDev launchers and broken symlinks left by older installs. If no writable `PATH` directory exists, it falls back to `~/.local/bin` and prints the exact `export PATH=...` command needed for the current shell.
-
-## Project
-
-Source: https://github.com/BlizPS/lazy-developer-free-kimi-code
-
-Issues: https://github.com/BlizPS/lazy-developer-free-kimi-code/issues
-
-## Development
-
-Repository metadata is kept for package tooling and CI, but normal desktop installation does not require npm.
-
-From the repository root:
-
-```bash
-npm test
-```
+- 💬 [Open a Discussion](https://github.com/BlizPS/lazy-developer-free-kimi-code/discussions)
+- 🐛 [Report a Bug](https://github.com/BlizPS/lazy-developer-free-kimi-code/issues/new)
+- 🚀 [Browse Releases](https://github.com/BlizPS/lazy-developer-free-kimi-code/releases)
+- ⭐ [Star the Repository](https://github.com/BlizPS/lazy-developer-free-kimi-code/stargazers)
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
 
-> **Version note:** Lazy Developer stays at **1.0.0**. Kimi Code's own version is controlled by the Kimi Code release you install; Lazy Developer does not rewrite or spoof Kimi's binary version. The managed installer pins the compatible Kimi release and disables Kimi's automatic self-upgrade so it does not silently move to a different upstream version.
+---
+
+<div align="center">
+  <sub>Built by <strong>BlizPS</strong> · Lazy Developer 1.0.0</sub>
+</div>

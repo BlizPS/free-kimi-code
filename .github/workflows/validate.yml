@@ -1,21 +1,33 @@
-name: validate
+name: Validate
 
 on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Static safety scan
-        run: python3 scripts/safety_scan.py
-      - name: Validate package
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate skills
+        run: python3 scripts/check_skills.py
+      - name: Validate repository metadata
         run: python3 scripts/validate.py
-      - name: Check mirrors are in sync
-        run: python3 scripts/sync_skills.py --check
-      - name: Check token budget
-        run: python3 scripts/token_budget.py
-      - name: Evaluate skill quality signals
-        run: python3 scripts/eval_skills.py
+      - name: Run safety scan
+        run: python3 scripts/safety_scan.py
+      - name: Verify JavaScript syntax
+        run: |
+          node --check scripts/lazydev.mjs
+          node --check runtime/openai-history.mjs

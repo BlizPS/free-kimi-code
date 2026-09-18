@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { platformPaths } from '../runtime/platform-policy.mjs';
 import { modelIntelligenceProfile, buildIntelligenceAliasSystem } from '../runtime/intelligence-kernel.mjs';
 import { extractSessionModelAliases } from '../runtime/session-model-compat.mjs';
+import { repairOpenAIHistory } from '../runtime/openai-history.mjs';
 
 const version = '1.0.0';
 const TOKEN_SAVINGS_FLOOR = 0.75;
@@ -117,6 +118,14 @@ function writeJsonAtomic(file, data) {
   const tmp = `${file}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
   try { fs.renameSync(tmp, file); } catch { try { fs.rmSync(file, { force: true }); } catch {} fs.renameSync(tmp, file); }
+  if (!isWin) { try { fs.chmodSync(file, 0o600); } catch {} }
+}
+function writeTextAtomic(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, String(text), { mode: 0o600 });
+  try { fs.renameSync(tmp, file); }
+  catch { try { fs.rmSync(file, { force: true }); } catch {} fs.renameSync(tmp, file); }
   if (!isWin) { try { fs.chmodSync(file, 0o600); } catch {} }
 }
 function normalizeConfig(raw) {
@@ -448,6 +457,7 @@ async function createProxy(provider, pc, proxyOptions = {}) {
         return;
       }
       body.model = pc.model;
+      if (Array.isArray(body.messages)) body.messages = repairOpenAIHistory(body.messages);
       if (provider.id === 'openrouter') {
         const providerOptions = body.provider && typeof body.provider === 'object' && !Array.isArray(body.provider) ? body.provider : {};
         body.provider = { ...providerOptions, require_parameters: true, allow_fallbacks: true };
@@ -489,19 +499,21 @@ async function createProxy(provider, pc, proxyOptions = {}) {
         headers
       }, upstreamRes => {
         res.statusCode = upstreamRes.statusCode || 502;
-        if (provider.id === 'openrouter' && (res.statusCode === 404 || res.statusCode === 429)) {
+        const status = res.statusCode;
+        if (status >= 400) {
           let errorBody = '';
           upstreamRes.setEncoding('utf8');
           upstreamRes.on('data', chunk => { errorBody += chunk; });
           upstreamRes.on('end', () => {
             const lower = errorBody.toLowerCase();
-            if (lower.includes('no endpoints found') && lower.includes('tool use')) {
+            const openRouterFallbackStatus = provider.id === 'openrouter' && (res.statusCode === 404 || res.statusCode === 429);
+            if (provider.id === 'openrouter' && lower.includes('no endpoints found') && lower.includes('tool use')) {
               res.statusCode = 503;
               res.setHeader('content-type', 'application/json');
               res.end(JSON.stringify({ error: { message: `OpenRouter has no live endpoint for ${pc.model} that satisfies Kimi Code tool use. Use openrouter/free or rerun lazydev setup.` } }));
               return;
             }
-            if (res.statusCode === 429) {
+            if (openRouterFallbackStatus && status === 429) {
               const retryAfter = upstreamRes.headers['retry-after'];
               res.statusCode = 503;
               res.setHeader('content-type', 'application/json');
@@ -512,7 +524,14 @@ async function createProxy(provider, pc, proxyOptions = {}) {
               res.end(JSON.stringify({ error: { message: `OpenRouter is rate-limited for ${pc.model}.${retryHint}${fallbackHint}` } }));
               return;
             }
-            res.end(errorBody);
+            res.statusCode = status;
+            res.setHeader('content-type', 'application/json');
+            if (errorBody.trim()) {
+              res.end(errorBody);
+              return;
+            }
+            const detail = `Provider ${provider.label} returned HTTP ${status} for model ${pc.model}. No response body was provided by the upstream API.`;
+            res.end(JSON.stringify({ error: { message: detail } }));
           });
           return;
         }
@@ -659,7 +678,7 @@ function startKimiAuthBridge({ configPath, provider, pc, proxy, sessionAliases }
     try {
       const current = fs.readFileSync(configPath, 'utf8');
       const next = composeLazyDevConfig(provider, pc, proxy, sessionAliases, current);
-      if (current !== next) fs.writeFileSync(configPath, next, { mode: 0o600 });
+      if (current !== next) writeTextAtomic(configPath, next);
     } catch {}
   };
   const schedule = () => {
@@ -678,7 +697,7 @@ function startKimiAuthBridge({ configPath, provider, pc, proxy, sessionAliases }
         schedule();
       }
     } catch {}
-  }, 75);
+  }, 50);
   poll.unref?.();
   return () => {
     stopped = true;
@@ -1254,7 +1273,11 @@ async function chat() {
   else launchArgs.push('--agent', 'default');
   const budget = contextBudget(pc.modelInfo);
   const authBridgeStop = startKimiAuthBridge({ configPath, provider, pc, proxy, sessionAliases });
-  const modelEnv = buildKimiModelEnv(provider, pc, proxy, budget);
+  // Native Kimi provider config is the source of truth for direct providers.
+  // The runtime model override is retained only for LazyDev compatibility-proxy
+  // routes, where it prevents native /login or /logout reloads from replacing
+  // the loopback inference route during the same TUI process.
+  const modelEnv = proxy ? buildKimiModelEnv(provider, pc, proxy, budget) : {};
   const childEnv = {
     ...sanitizeKimiChildEnv(provider),
     ...modelEnv,

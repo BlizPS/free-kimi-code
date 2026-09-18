@@ -23,3 +23,7 @@ assert.match(launcher, /composeLazyDevConfig/);
 assert.doesNotMatch(launcher, /Do not invoke account login, logout/);
 
 console.log('proxy boundary smoke: PASS');
+
+const directEnvGuard = launcher.match(/const modelEnv = proxy \? buildKimiModelEnv\(provider, pc, proxy, budget\) : \{\};/);
+assert.ok(directEnvGuard, 'direct providers must not receive runtime KIMI_MODEL overrides');
+console.log('PASS: direct providers use config.toml instead of forced KIMI_MODEL_* runtime overrides');
