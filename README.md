@@ -88,7 +88,7 @@ report2.html
 
 When the host search service is unavailable, the bundled `lazydev-search` MCP service can provide web search without forcing a provider switch.
 
-## Install
+## Install / Updating
 
 ### Lazy Developer CLI
 
@@ -109,6 +109,19 @@ Then:
 ```bash
 lazydev setup
 lazydev chat
+```
+## Uninstalling
+
+**macOS / Linux**
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/uninstall.sh" | sh
+```
+
+**Windows PowerShell**
+
+```powershell
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/uninstall.ps1")))
 ```
 
 ### Universal Skills CLI
