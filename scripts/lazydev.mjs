@@ -1131,12 +1131,13 @@ async function chat() {
   fs.writeFileSync(configPath, buildKimiConfig(provider, pc, proxy, sessionAliases), { mode: 0o600 });
   fs.writeFileSync(tuiPath, buildTuiConfig(), { mode: 0o600 });
   writeKimiAgentGuidance();
-  const mcpConfig = writeLazyDevMcpConfig();
+  writeLazyDevMcpConfig();
   const invocation = findKimiInvocation();
   if (!invocation) { try { proxy?.server.close(); } catch {} line(red(`Kimi Code launcher not found. Install Kimi Code ${KIMI_VERSION} with the LazyDev installer.`)); return; }
-  // Kimi Code reads its managed configuration from KIMI_CODE_HOME.
-  // LazyDev owns that directory and regenerates the provider/model config on each launch.
-  const launchArgs = [...invocation.args, '--add-dir', outputDirectory(), '--mcp-config-file', mcpConfig];
+  // Kimi Code loads $KIMI_CODE_HOME/mcp.json automatically.
+  // Do not pass the newer --mcp-config-file flag: older installed launchers
+  // may reject it even when they can read their normal MCP config location.
+  const launchArgs = [...invocation.args, '--add-dir', outputDirectory()];
   const workDirIndex = process.argv.indexOf('--work-dir');
   if (workDirIndex >= 0 && process.argv[workDirIndex + 1]) launchArgs.push('--work-dir', process.argv[workDirIndex + 1]);
   const mode = process.argv.includes('--new') ? 'new' : process.argv.includes('--sessions') || process.argv.includes('--session') ? 'sessions' : process.argv.includes('--resume') || process.argv.includes('--continue') ? 'continue' : 'new';

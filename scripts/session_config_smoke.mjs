@@ -46,7 +46,7 @@ try {
   assert.equal(mcp.mcpServers['lazydev-search'].args.at(-1), path.join(root, 'runtime', 'lazydev-web-search.mjs'));
   const args = fs.readFileSync(argsFile, 'utf8');
   assert.match(args, /--add-dir/);
-  assert.match(args, /--mcp-config-file/);
+  assert.doesNotMatch(args, /--mcp-config-file/);
   console.log('PASS: launch-time config remaps old session models, preserves session files, exposes artifact path, and loads search MCP');
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
