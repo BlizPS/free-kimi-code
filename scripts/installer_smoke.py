@@ -55,6 +55,14 @@ checks += [
 ]
 for name, needle, text in checks:
     if needle not in text: errors.append(f'{name}: missing {needle}')
+
+if 'version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_VERSION"' not in sh:
+    errors.append('install.sh: Kimi version check must skip newer compatible installations')
+if '(Test-VersionAtLeast $KimiCurrentVersion $KimiVersion)' not in ps:
+    errors.append('install.ps1: Kimi version check must skip newer compatible installations')
+if 'ensure_legacy_launcher_targets' not in sh or 'canonical="$LAZYDEV_BIN_DIR/lazydev"' not in sh:
+    errors.append('install.sh: compatibility launcher reconciliation missing canonical launcher copy')
+
 for name, text in [('install.sh', sh), ('install.ps1', ps)]:
     if 'npm install' in text.lower() or 'npm.cmd install' in text.lower():
         errors.append(f'{name}: installer must not install through npm')

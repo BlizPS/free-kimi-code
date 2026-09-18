@@ -190,9 +190,13 @@ exit 0
 $KimiExe = Find-Kimi
 $KimiCurrentVersion = Get-KimiVersion $KimiExe
 $KimiNeedsUpdate = $true
-if ($KimiCurrentVersion -and $KimiCurrentVersion -eq $KimiVersion) {
+if ($KimiCurrentVersion -and (Test-VersionAtLeast $KimiCurrentVersion $KimiVersion)) {
     $KimiNeedsUpdate = $false
-    Write-Host "Kimi Code $KimiCurrentVersion is already current — skipped."
+    if ($KimiCurrentVersion -eq $KimiVersion) {
+        Write-Host "Kimi Code $KimiCurrentVersion is already current — skipped."
+    } else {
+        Write-Host "Kimi Code $KimiCurrentVersion is newer than the managed minimum $KimiVersion — skipped."
+    }
 } else {
     $KimiDisplay = if ($KimiCurrentVersion) { $KimiCurrentVersion } else { 'not detected' }
     Write-Host "Kimi Code $KimiDisplay needs installation/update."
@@ -261,6 +265,19 @@ if ($RtkNeedsUpdate) {
 }
 
 if ($RtkExe) { Connect-RtkToKimi $RtkExe }
+
+function Ensure-CompatibilityLazyDevLauncher {
+    $canonical = Join-Path $BinRoot 'lazydev.cmd'
+    if (-not (Test-Path -LiteralPath $canonical -PathType Leaf)) { return }
+    $dirs = @($BinRoot, (Join-Path $HOME '.local\bin')) | Select-Object -Unique
+    foreach ($dir in $dirs) {
+        try {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $target = Join-Path $dir 'lazydev.cmd'
+            if ($target -ne $canonical) { Copy-Item -LiteralPath $canonical -Destination $target -Force }
+        } catch {}
+    }
+}
 
 function Refresh-ExistingLazyDevLaunchers {
     $canonical = Join-Path $BinRoot 'lazydev.cmd'
@@ -340,6 +357,7 @@ endlocal
 }
 
 Refresh-ExistingLazyDevLaunchers
+Ensure-CompatibilityLazyDevLauncher
 # Prefer the managed bin directory in new and current PowerShell sessions.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $entries = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }

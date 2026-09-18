@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { createAntigravityProxy } from '../runtime/antigravity-proxy.mjs';
 import { platformPaths } from '../runtime/platform-policy.mjs';
 import { modelIntelligenceProfile, buildIntelligenceAliasSystem } from '../runtime/intelligence-kernel.mjs';
 
@@ -20,7 +21,8 @@ const KIMI_PACKAGE = '@moonshot-ai/kimi-code';
 const KIMI_VERSION = '0.43.1';
 const OPENROUTER_FREE_MODEL = 'openrouter/free';
 const OPENROUTER_MODEL_FALLBACK_LIMIT = 3;
-const GEMINI_NO_TOOL_MODELS = [/^antigravity-preview(?:-|$)/i];
+const GEMINI_NO_TOOL_MODELS = [];
+const ANTIGRAVITY_AGENT = 'antigravity-preview-05-2026';
 const KIMI_BUILTIN_TOOLS = [
   'Read','Write','Edit','Grep','Glob','ReadMediaFile','Bash',
   'WebSearch','FetchURL','EnterPlanMode','ExitPlanMode','TodoList',
@@ -209,9 +211,12 @@ async function requestJson(urlString, { method = 'GET', headers = {}, body, time
 }
 
 function knownModelInfo(_id) { return {}; }
+function isAntigravityModel(modelId) {
+  return /^antigravity-preview(?:-|$)/i.test(String(modelId || '').trim());
+}
 function geminiModelSupportsKimiTools(modelId) {
   const id = String(modelId || '').trim();
-  return !GEMINI_NO_TOOL_MODELS.some((pattern) => pattern.test(id));
+  return isAntigravityModel(id) || !GEMINI_NO_TOOL_MODELS.some((pattern) => pattern.test(id));
 }
 function modelSupportsKimiTools(provider, pc) {
   if (provider?.id === 'gemini') return pc?.toolUse !== false && geminiModelSupportsKimiTools(pc?.model);
@@ -318,9 +323,22 @@ async function fetchModels(provider, apiKey, options = {}) {
   }
   if (provider.kind === 'gemini') {
     const data = await requestJson(`${provider.modelsUrl}?key=${encodeURIComponent(apiKey)}&pageSize=1000`, { timeout });
-    return (Array.isArray(data.models) ? data.models : [])
+    const models = (Array.isArray(data.models) ? data.models : [])
       .filter((x) => Array.isArray(x.supportedGenerationMethods) && x.supportedGenerationMethods.includes('generateContent'))
       .map((x) => normalizeModel(x, provider)).filter((x) => x.id);
+    if (!models.some((m) => m.id === ANTIGRAVITY_AGENT)) {
+      models.unshift({
+        id: ANTIGRAVITY_AGENT,
+        name: 'Antigravity Agent · managed',
+        inputLimit: 1048576,
+        outputLimit: 65536,
+        contextLimit: 1048576,
+        live: true,
+        toolUse: true,
+        managedAgent: true,
+      });
+    }
+    return models;
   }
   if (provider.kind === 'anthropic') {
     const data = await requestJson(provider.modelsUrl, { timeout, headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'user-agent': `lazydev/${version}` } });
@@ -625,7 +643,8 @@ function buildKimiConfig(provider, pc, proxy = null) {
   const budget = contextBudget(pc.modelInfo);
   const context = budget.max;
   const output = budget.output;
-  const providerType = provider.id === 'gemini' ? 'google-genai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
+  const antigravity = provider.id === 'gemini' && isAntigravityModel(pc.model) && proxy;
+  const providerType = antigravity ? 'openai' : provider.id === 'gemini' ? 'google-genai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
   const intelligence = modelIntelligenceProfile(pc.model);
   const toolUse = modelSupportsKimiTools(provider, pc);
   const modelCapabilities = toolUse ? (provider.id === 'gemini' ? ['tool_use','thinking'] : ['tool_use']) : [];
@@ -634,9 +653,11 @@ function buildKimiConfig(provider, pc, proxy = null) {
     '[tools]',
     `disabled = ${JSON.stringify(KIMI_BUILTIN_TOOLS)}`,
   ];
-  const providerLines = provider.id === 'gemini'
-    ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`api_key = ${tomlQuote(pc.apiKey)}`]
-    : provider.id === 'anthropic'
+  const providerLines = antigravity
+    ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote(`http://127.0.0.1:${proxy.port}/v1`)}`,`api_key = ${tomlQuote(proxy.token)}`]
+    : provider.id === 'gemini'
+      ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`api_key = ${tomlQuote(pc.apiKey)}`]
+      : provider.id === 'anthropic'
       ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote('https://api.anthropic.com')}`,`api_key = ${tomlQuote(pc.apiKey)}`]
       : provider.id === 'openai'
         ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote('https://api.openai.com/v1')}`,`api_key = ${tomlQuote(pc.apiKey)}`]
@@ -673,8 +694,8 @@ function buildKimiConfig(provider, pc, proxy = null) {
     `display_name = ${tomlQuote(`${provider.label} · ${pc.model}`)}`,
     ``,
     `[thinking]`,
-    `enabled = ${provider.id === 'gemini' ? 'true' : 'false'}`,
-    ...(provider.id === 'gemini' ? [`effort = ${tomlQuote('low')}`] : []),
+    `enabled = ${provider.id === 'gemini' && !antigravity ? 'true' : 'false'}`,
+    ...(provider.id === 'gemini' && !antigravity ? [`effort = ${tomlQuote('low')}`] : []),
     ``,
     `[loop_control]`,
     `max_attempts_per_step = 2`,
@@ -971,7 +992,7 @@ async function chat() {
   const cfg = normalizeConfig(readConfig());
   const provider = activeProvider(cfg);
   const savedPc = providerConfig(cfg, provider.id);
-  const pc = { ...savedPc, toolUse: modelSupportsKimiTools(provider, savedPc) };
+  let pc = { ...savedPc, toolUse: modelSupportsKimiTools(provider, savedPc) };
   if (!pc.apiKey || !pc.model) { line(red(`No active provider is configured. Run: lazydev setup`)); return; }
   let openRouterModels = [];
   if (provider.id === 'openrouter') {
@@ -987,19 +1008,21 @@ async function chat() {
   const freeFallbacks = provider.id === 'openrouter' && (pc.model === OPENROUTER_FREE_MODEL || /:free$/i.test(pc.model))
     ? buildOpenRouterFreeFallbacks(pc.model, openRouterModels)
     : [];
-  const proxy = !['gemini','openai','anthropic'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null;
+  const antigravity = provider.id === 'gemini' && isAntigravityModel(pc.model);
+  const proxy = antigravity
+    ? await createAntigravityProxy({ apiKey: pc.apiKey, model: pc.model, tokenLabel: 'lazydev-antigravity' })
+    : (!['gemini','openai','anthropic'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null);
   if (provider.id === 'ollama') assertHttpUrl(ollamaChatUrl(pc.baseUrl), 'Ollama API URL');
+  else if (provider.id === 'gemini' && antigravity) assertHttpUrl(`http://127.0.0.1:${proxy.port}/v1`, 'Antigravity proxy URL');
   else if (provider.id === 'gemini') {
-    // Gemini's native Kimi adapter uses its own official endpoint unless a
-    // gateway is explicitly configured; LazyDev does not inject a malformed
-    // base URL here.
+    // Standard Gemini models use Kimi Code's native Google GenAI adapter.
   } else if (provider.id === 'anthropic') assertHttpUrl('https://api.anthropic.com', 'Anthropic API URL');
   else if (provider.id === 'openai') assertHttpUrl('https://api.openai.com/v1', 'OpenAI API URL');
   else if (proxy) assertHttpUrl(`http://127.0.0.1:${proxy.port}/v1`, 'LazyDev proxy URL');
   else assertHttpUrl(provider.chatUrl, `${provider.label} API URL`);
   fs.mkdirSync(kimiHome(), { recursive: true, mode: 0o700 });
-  if (provider.id === 'gemini' && pc.toolUse === false) {
-    line(yellow(`Compatibility mode active: ${pc.model} does not accept Kimi function calls, so Kimi local tools are disabled for this session.`));
+  if (antigravity) {
+    line(yellow(`Antigravity proxy active: ${pc.model} is routed through Gemini Interactions with stateful tool calling.`));
   }
   const configPath = path.join(kimiHome(), 'config.toml');
   const tuiPath = path.join(kimiHome(), 'tui.toml');

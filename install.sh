@@ -205,6 +205,20 @@ replace_legacy_lazydev_launchers() {
   IFS="$old_ifs"
 }
 
+ensure_legacy_launcher_targets() {
+  canonical="$LAZYDEV_BIN_DIR/lazydev"
+  [ -f "$canonical" ] || return 0
+  for dir in "$HOME/.local/bin" "${PREFIX:-}/bin"; do
+    [ -n "$dir" ] || continue
+    [ "$dir" = "$LAZYDEV_BIN_DIR" ] && continue
+    mkdir -p "$dir" 2>/dev/null || true
+    [ -d "$dir" ] && [ -w "$dir" ] || continue
+    candidate="$dir/lazydev"
+    cp "$canonical" "$candidate" 2>/dev/null || true
+    chmod 755 "$candidate" 2>/dev/null || true
+  done
+}
+
 refresh_shell_path() {
   rc="$1"
   [ -n "$rc" ] || return 0
@@ -223,9 +237,13 @@ KIMI_CURRENT_VERSION=""
 KIMI_NEEDS_UPDATE=1
 if [ -n "$KIMI_COMMAND" ]; then
   KIMI_CURRENT_VERSION="$(extract_semver "$($KIMI_COMMAND --version 2>/dev/null || true)")"
-  if [ -n "$KIMI_CURRENT_VERSION" ] && [ "$KIMI_CURRENT_VERSION" = "$KIMI_VERSION" ]; then
+  if [ -n "$KIMI_CURRENT_VERSION" ] && version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_VERSION"; then
     KIMI_NEEDS_UPDATE=0
-    say "Kimi Code $KIMI_CURRENT_VERSION is already current — skipped."
+    if [ "$KIMI_CURRENT_VERSION" = "$KIMI_VERSION" ]; then
+      say "Kimi Code $KIMI_CURRENT_VERSION is already current — skipped."
+    else
+      say "Kimi Code $KIMI_CURRENT_VERSION is newer than the managed minimum $KIMI_VERSION — skipped."
+    fi
   else
     say "Kimi Code ${KIMI_CURRENT_VERSION:-not detected} needs installation/update."
   fi
@@ -449,6 +467,10 @@ EOF
 
   say "✓ Lazy Developer $LAZYDEV_VERSION ready"
 fi
+
+# Reconcile launchers and populate compatibility locations so cached shells
+# cannot keep resolving a removed LazyDev path.
+ensure_legacy_launcher_targets
 
 # Reconcile launchers and shell PATH even when every component was skipped.
 # This matters when an older npm/user-local launcher is still first in the current PATH.

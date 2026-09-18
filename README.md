@@ -40,7 +40,7 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-co
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1")))
 ```
 
-Run the same installer again whenever you want to update. It checks Kimi Code, RTK, and Lazy Developer separately, so unchanged pieces are skipped and only missing, changed, or unhealthy pieces are refreshed. Your Kimi sessions and provider configuration stay in place during updates.
+Run the same installer again whenever you want to update. It checks Kimi Code, RTK, and Lazy Developer separately, so unchanged pieces are skipped. A newer compatible Kimi Code installation is also left alone instead of being downloaded again. Lazy Developer updates are keyed to the GitHub revision, so the project can stay at version 1.0.0 while its source changes. Your Kimi sessions and provider configuration stay in place during updates.
 
 **Termux / Android:** use a Linux userland first. Native Android/bionic Termux is not a supported host for the Linux Kimi/RTK binaries. A minimal setup is:
 
@@ -188,6 +188,6 @@ npm test
 
 MIT
 
-> **Gemini compatibility note:** Google's `antigravity-preview-05-2026` is a managed agent that uses its own Interactions workflow. It does not accept the stateless function-calling pattern that Kimi Code sends through its regular Google GenAI provider, so Lazy Developer automatically switches that model into chat-only compatibility mode instead of sending unsupported Kimi tool definitions. Standard Gemini models keep the normal Kimi tool workflow. See Google's Antigravity documentation for its stateful function-calling requirements.
+ > **Gemini + Antigravity:** `antigravity-preview-05-2026` stays selectable. Because Antigravity is a managed agent on Google's Interactions API, Lazy Developer routes that model through a small local compatibility bridge instead of Kimi Code's regular Gemini transport. The bridge keeps `environment_id` + `previous_interaction_id` across turns and translates Kimi's OpenAI-style tool calls into Interactions function calls, so local Kimi tools can round-trip without the `Function calling is not enabled` error. Google documents function calling for Antigravity as stateful and requires the Interactions API for it.
 
 > **Version note:** Lazy Developer stays at **1.0.0**. Kimi Code's own version is controlled by the Kimi Code release you install; Lazy Developer does not rewrite or spoof Kimi's binary version. The managed installer pins the compatible Kimi release and disables Kimi's automatic self-upgrade so it does not silently move to a different upstream version.
