@@ -190,7 +190,7 @@ exit 0
 $KimiExe = Find-Kimi
 $KimiCurrentVersion = Get-KimiVersion $KimiExe
 $KimiNeedsUpdate = $true
-if ($KimiCurrentVersion -and (Test-VersionAtLeast $KimiCurrentVersion $KimiVersion)) {
+if ($KimiCurrentVersion -and $KimiCurrentVersion -eq $KimiVersion) {
     $KimiNeedsUpdate = $false
     Write-Host "Kimi Code $KimiCurrentVersion is already current — skipped."
 } else {
@@ -246,7 +246,7 @@ if ($KimiNeedsUpdate) {
     $KimiExe = Find-Kimi
     if (-not $KimiExe) { Fail "Kimi Code did not install a usable launcher." }
     $KimiCurrentVersion = Get-KimiVersion $KimiExe
-    if (-not $KimiCurrentVersion -or -not (Test-VersionAtLeast $KimiCurrentVersion $KimiVersion)) { Fail "Installed Kimi Code is $KimiCurrentVersion; expected at least $KimiVersion." }
+    if (-not $KimiCurrentVersion -or $KimiCurrentVersion -ne $KimiVersion) { Fail "Installed Kimi Code is $KimiCurrentVersion; expected exactly $KimiVersion." }
     Write-Host "✓ Kimi Code $KimiCurrentVersion ready"
 }
 

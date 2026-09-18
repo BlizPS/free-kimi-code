@@ -20,6 +20,13 @@ const KIMI_PACKAGE = '@moonshot-ai/kimi-code';
 const KIMI_VERSION = '0.43.1';
 const OPENROUTER_FREE_MODEL = 'openrouter/free';
 const OPENROUTER_MODEL_FALLBACK_LIMIT = 3;
+const GEMINI_NO_TOOL_MODELS = [/^antigravity-preview(?:-|$)/i];
+const KIMI_BUILTIN_TOOLS = [
+  'Read','Write','Edit','Grep','Glob','ReadMediaFile','Bash',
+  'WebSearch','FetchURL','EnterPlanMode','ExitPlanMode','TodoList',
+  'Agent','AgentSwarm','AskUserQuestion','NotifyUser','Skill',
+  'TaskList','TaskOutput','TaskStop','WaitFor'
+];
 // OpenAI-only request fields Kimi Code may send that not every OpenAI-compatible
 // backend accepts (NVIDIA's endpoint validation rejects unknown fields with a
 // 400 Validation error). Stripped by the local compatibility proxy before the
@@ -167,6 +174,15 @@ function prompt(question) {
 }
 
 async function requestJson(urlString, { method = 'GET', headers = {}, body, timeout = 12000 } = {}) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(String(urlString).trim());
+  } catch {
+    throw new Error(`Invalid provider URL: ${String(urlString)}. Use a full http:// or https:// URL.`);
+  }
+  if (!['http:', 'https:'].includes(parsedUrl.protocol) || !parsedUrl.hostname) {
+    throw new Error(`Invalid provider URL: ${parsedUrl.href}. Use a full http:// or https:// URL.`);
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1000, timeout));
   try {
@@ -193,9 +209,19 @@ async function requestJson(urlString, { method = 'GET', headers = {}, body, time
 }
 
 function knownModelInfo(_id) { return {}; }
+function geminiModelSupportsKimiTools(modelId) {
+  const id = String(modelId || '').trim();
+  return !GEMINI_NO_TOOL_MODELS.some((pattern) => pattern.test(id));
+}
+function modelSupportsKimiTools(provider, pc) {
+  if (provider?.id === 'gemini') return pc?.toolUse !== false && geminiModelSupportsKimiTools(pc?.model);
+  return pc?.toolUse !== false;
+}
 function normalizeOllamaBaseUrl(value) {
   let url = String(value || '').trim();
   if (!url) url = 'http://127.0.0.1:11434';
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = `http://${url}`;
+  assertHttpUrl(url, 'Ollama API URL');
   url = url.replace(/\/+$/, '');
   for (const suffix of ['/api/tags', '/api/tag', '/v1/models', '/v1']) {
     if (url.toLowerCase().endsWith(suffix)) { url = url.slice(0, -suffix.length); break; }
@@ -222,7 +248,8 @@ function normalizeModel(item, provider) {
   const id = String(provider.kind === 'gemini' ? item.name || '' : item.id || '').replace(/^models\//, '');
   const known = knownModelInfo(id);
   if (provider.kind === 'gemini') {
-    return { id, name: String(item.displayName || item.name || id), inputLimit: Number(item.inputTokenLimit) || known.inputLimit || null, outputLimit: Number(item.outputTokenLimit) || known.outputLimit || null, contextLimit: Number(item.inputTokenLimit) || known.contextLimit || null, live: true, supportedActions: Array.isArray(item.supportedGenerationMethods) ? item.supportedGenerationMethods : [] };
+    const supportedActions = Array.isArray(item.supportedGenerationMethods) ? item.supportedGenerationMethods : [];
+    return { id, name: String(item.displayName || item.name || id), inputLimit: Number(item.inputTokenLimit) || known.inputLimit || null, outputLimit: Number(item.outputTokenLimit) || known.outputLimit || null, contextLimit: Number(item.inputTokenLimit) || known.contextLimit || null, live: true, supportedActions, toolUse: geminiModelSupportsKimiTools(id) };
   }
   if (provider.kind === 'ollama') {
     const id = String(item.name || item.id || item.model || '').trim();
@@ -511,6 +538,27 @@ function ensureKimiInstalled() {
   return false;
 }
 function tomlQuote(text) { return JSON.stringify(String(text)); }
+function assertHttpUrl(value, label = 'URL') {
+  let parsed;
+  try { parsed = new URL(String(value).trim()); } catch { throw new Error(`${label} is invalid. Expected an absolute http:// or https:// URL.`); }
+  if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
+    throw new Error(`${label} is invalid. Expected an absolute http:// or https:// URL.`);
+  }
+  return parsed;
+}
+function activeProviderEnvKeys(provider) {
+  if (provider.id === 'gemini') return ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GEMINI_BASE_URL', 'GEMINI_BASE_URL'];
+  if (provider.id === 'anthropic') return ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL'];
+  // All remaining LazyDev providers use Kimi's OpenAI-compatible adapter or
+  // the local Ollama proxy, so stale OpenAI env overrides must not replace the
+  // URL/key that LazyDev just generated for this session.
+  return ['OPENAI_API_KEY', 'OPENAI_BASE_URL'];
+}
+function sanitizeKimiChildEnv(provider) {
+  const env = { ...process.env };
+  for (const key of activeProviderEnvKeys(provider)) delete env[key];
+  return env;
+}
 function hasKimiSessions() {
   const index = path.join(kimiHome(), 'session_index.jsonl');
   const sessions = path.join(kimiHome(), 'sessions');
@@ -579,12 +627,20 @@ function buildKimiConfig(provider, pc, proxy = null) {
   const output = budget.output;
   const providerType = provider.id === 'gemini' ? 'google-genai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
   const intelligence = modelIntelligenceProfile(pc.model);
-  const modelCapabilities = provider.id === 'gemini' ? ['tool_use','thinking'] : ['tool_use'];
+  const toolUse = modelSupportsKimiTools(provider, pc);
+  const modelCapabilities = toolUse ? (provider.id === 'gemini' ? ['tool_use','thinking'] : ['tool_use']) : [];
+  const disabledToolsLines = toolUse ? [] : [
+    '',
+    '[tools]',
+    `disabled = ${JSON.stringify(KIMI_BUILTIN_TOOLS)}`,
+  ];
   const providerLines = provider.id === 'gemini'
     ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`api_key = ${tomlQuote(pc.apiKey)}`]
     : provider.id === 'anthropic'
       ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote('https://api.anthropic.com')}`,`api_key = ${tomlQuote(pc.apiKey)}`]
-      : [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote(`http://127.0.0.1:${proxy?.port}/v1`)}`,`api_key = ${tomlQuote(proxy?.token || '')}`];
+      : provider.id === 'openai'
+        ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote('https://api.openai.com/v1')}`,`api_key = ${tomlQuote(pc.apiKey)}`]
+        : [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote(`http://127.0.0.1:${proxy?.port}/v1`)}`,`api_key = ${tomlQuote(proxy?.token || '')}`];
   const artifactHook = path.join(root, 'hooks', 'lazydev-path-guard.mjs');
   const promptHook = path.join(root, 'hooks', 'lazydev-prompt-context.mjs');
   const shellHook = path.join(root, 'hooks', 'lazydev-shell-guard.mjs');
@@ -603,6 +659,7 @@ function buildKimiConfig(provider, pc, proxy = null) {
     `database.search = true`,
     `extra_skill_dirs = [${tomlQuote(path.join(root, 'skills'))}]`,
     `extra_agent_dirs = [${tomlQuote(path.join(root, 'agents'))}]`,
+    ...disabledToolsLines,
     ``,
     ...providerLines,
     ``,
@@ -655,6 +712,9 @@ function buildTuiConfig() {
     `disable_paste_burst = false`,
     `cache_expiry_hint = false`,
     `disable_feedback_survey = true`,
+    ``,
+    `[upgrade]`,
+    `auto_install = false`,
     ``,
     `[notifications]`,
     `enabled = true`,
@@ -715,6 +775,9 @@ async function setup() {
     writeConfig(cfg);
     line(green(`✓ ${provider.label} · saved`));
     line(green(`✓ ${chosen.id} · saved`));
+    if (chosen.toolUse === false) {
+      line(yellow('• Compatibility mode: Kimi local tools are disabled for this model because its API does not accept Kimi function calls.'));
+    }
     line();
   } catch (error) {
     line(red(error instanceof Error ? error.message : String(error)));
@@ -907,7 +970,8 @@ async function chat() {
   if (!ensureKimiInstalled()) return;
   const cfg = normalizeConfig(readConfig());
   const provider = activeProvider(cfg);
-  const pc = providerConfig(cfg, provider.id);
+  const savedPc = providerConfig(cfg, provider.id);
+  const pc = { ...savedPc, toolUse: modelSupportsKimiTools(provider, savedPc) };
   if (!pc.apiKey || !pc.model) { line(red(`No active provider is configured. Run: lazydev setup`)); return; }
   let openRouterModels = [];
   if (provider.id === 'openrouter') {
@@ -924,7 +988,19 @@ async function chat() {
     ? buildOpenRouterFreeFallbacks(pc.model, openRouterModels)
     : [];
   const proxy = !['gemini','openai','anthropic'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null;
+  if (provider.id === 'ollama') assertHttpUrl(ollamaChatUrl(pc.baseUrl), 'Ollama API URL');
+  else if (provider.id === 'gemini') {
+    // Gemini's native Kimi adapter uses its own official endpoint unless a
+    // gateway is explicitly configured; LazyDev does not inject a malformed
+    // base URL here.
+  } else if (provider.id === 'anthropic') assertHttpUrl('https://api.anthropic.com', 'Anthropic API URL');
+  else if (provider.id === 'openai') assertHttpUrl('https://api.openai.com/v1', 'OpenAI API URL');
+  else if (proxy) assertHttpUrl(`http://127.0.0.1:${proxy.port}/v1`, 'LazyDev proxy URL');
+  else assertHttpUrl(provider.chatUrl, `${provider.label} API URL`);
   fs.mkdirSync(kimiHome(), { recursive: true, mode: 0o700 });
+  if (provider.id === 'gemini' && pc.toolUse === false) {
+    line(yellow(`Compatibility mode active: ${pc.model} does not accept Kimi function calls, so Kimi local tools are disabled for this session.`));
+  }
   const configPath = path.join(kimiHome(), 'config.toml');
   const tuiPath = path.join(kimiHome(), 'tui.toml');
   fs.writeFileSync(configPath, buildKimiConfig(provider, pc, proxy), { mode: 0o600 });
@@ -944,8 +1020,9 @@ async function chat() {
     cwd: process.cwd(),
     stdio: 'inherit',
     env: {
-      ...process.env,
+      ...sanitizeKimiChildEnv(provider),
       KIMI_CODE_HOME: kimiHome(),
+      KIMI_CODE_NO_AUTO_UPDATE: '1',
       LAZYDEV_ARTIFACT_DIR: outputDirectory(),
       LAZYDEV_VERSION: version,
       LAZYDEV_MODEL: pc.model,

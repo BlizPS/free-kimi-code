@@ -164,7 +164,9 @@ A fresh install after uninstall starts from a clean state. Project folders outsi
 
 If a provider refresh appears to hang, the live catalog request now has a hard timeout. Rerun `lazydev setup` and try the provider again. For a local Ollama setup, first make sure the URL you entered is reachable from the same machine and that Ollama is serving models.
 
-If `lazydev` resolves to an old or missing path, run `hash -r 2>/dev/null || true` and run the installer again. The installer now repairs stale LazyDev symlinks, refreshes known launchers, and prints the exact launcher path it installed.
+If Kimi Code reports `[provider.api_error] Error: Invalid URL`, this is usually a provider endpoint problem rather than a model-name problem. Lazy Developer validates every endpoint before starting the session, writes the OpenAI provider to the official `https://api.openai.com/v1` endpoint, and prevents stale `OPENAI_BASE_URL`, Gemini, or Anthropic URL overrides from replacing the session configuration. Run the installer again, then run `lazydev setup` and select the provider once more.
+
+The desktop installer prefers a writable directory that is already on the current `PATH`, so a one-line `curl | sh` install can use `lazydev` immediately. It also repairs stale LazyDev launchers and broken symlinks left by older installs. If no writable `PATH` directory exists, it falls back to `~/.local/bin` and prints the exact `export PATH=...` command needed for the current shell.
 
 ## Project
 
@@ -185,3 +187,7 @@ npm test
 ## License
 
 MIT
+
+> **Gemini compatibility note:** Google's `antigravity-preview-05-2026` is a managed agent that uses its own Interactions workflow. It does not accept the stateless function-calling pattern that Kimi Code sends through its regular Google GenAI provider, so Lazy Developer automatically switches that model into chat-only compatibility mode instead of sending unsupported Kimi tool definitions. Standard Gemini models keep the normal Kimi tool workflow. See Google's Antigravity documentation for its stateful function-calling requirements.
+
+> **Version note:** Lazy Developer stays at **1.0.0**. Kimi Code's own version is controlled by the Kimi Code release you install; Lazy Developer does not rewrite or spoof Kimi's binary version. The managed installer pins the compatible Kimi release and disables Kimi's automatic self-upgrade so it does not silently move to a different upstream version.

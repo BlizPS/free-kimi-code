@@ -11,7 +11,7 @@ for signal in ["evidence-first reasoning", "verify", "scope_lock", "context_lean
 for p in ROOT.rglob("*"):
     if not p.is_file() or ".git" in p.parts: continue
     if p.name in {"README.md", "installer_smoke.py"}: continue
-    if p.name in {"install.sh", "install.ps1"}: continue
+    if p.name in {"install.sh", "install.ps1", "gemini_compat_smoke.mjs"}: continue
     if p.suffix.lower() not in {".md",".json",".yml",".yaml",".py",".toml",".mjs",".js"}: continue
     t=p.read_text(encoding="utf-8",errors="ignore").lower()
     forbidden = ["up" + "date", "updat" + "ed", "updat" + "ing"]

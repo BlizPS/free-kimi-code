@@ -129,6 +129,8 @@ if [ -z "${LAZYDEV_BIN_DIR:-}" ] || [ "$LAZYDEV_BIN_DIR" = "$HOME/.local/bin" ];
     IFS="$old_ifs"
     [ -n "$dir" ] || { IFS=':'; continue; }
     candidate="$dir/lazydev"
+    # First priority: repair/replace an existing LazyDev launcher in the
+    # current PATH. This also fixes Bash's cached command path.
     if [ -L "$candidate" ] && [ ! -e "$candidate" ]; then
       if [ -w "$dir" ]; then
         LAZYDEV_BIN_DIR="$dir"
@@ -138,6 +140,37 @@ if [ -z "${LAZYDEV_BIN_DIR:-}" ] || [ "$LAZYDEV_BIN_DIR" = "$HOME/.local/bin" ];
       LAZYDEV_BIN_DIR="$dir"
       break
     fi
+    IFS=':'
+  done
+  IFS="$old_ifs"
+fi
+
+# A piped installer (curl ... | sh) cannot modify the parent shell's
+# environment. Prefer a writable directory that is already on the current
+# PATH so `lazydev` works immediately after installation, with no `source`
+# or shell restart required. Only fall back to ~/.local/bin when none exists.
+if [ "${LAZYDEV_BIN_DIR:-}" = "$HOME/.local/bin" ]; then
+  old_ifs="$IFS"
+  IFS=':'
+  for dir in ${PATH:-}; do
+    IFS="$old_ifs"
+    [ -n "$dir" ] || { IFS=':'; continue; }
+    case "$dir" in
+      "$HOME/.local/bin") ;;
+      *)
+        if [ -d "$dir" ] && [ -w "$dir" ]; then
+          LAZYDEV_BIN_DIR="$dir"
+          break
+        fi
+        if [ ! -e "$dir" ] && [ -w "$(dirname "$dir")" ]; then
+          mkdir -p "$dir" 2>/dev/null || true
+          if [ -d "$dir" ] && [ -w "$dir" ]; then
+            LAZYDEV_BIN_DIR="$dir"
+            break
+          fi
+        fi
+        ;;
+    esac
     IFS=':'
   done
   IFS="$old_ifs"
@@ -190,7 +223,7 @@ KIMI_CURRENT_VERSION=""
 KIMI_NEEDS_UPDATE=1
 if [ -n "$KIMI_COMMAND" ]; then
   KIMI_CURRENT_VERSION="$(extract_semver "$($KIMI_COMMAND --version 2>/dev/null || true)")"
-  if [ -n "$KIMI_CURRENT_VERSION" ] && version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_VERSION"; then
+  if [ -n "$KIMI_CURRENT_VERSION" ] && [ "$KIMI_CURRENT_VERSION" = "$KIMI_VERSION" ]; then
     KIMI_NEEDS_UPDATE=0
     say "Kimi Code $KIMI_CURRENT_VERSION is already current — skipped."
   else
@@ -286,7 +319,7 @@ if [ "$KIMI_NEEDS_UPDATE" -eq 1 ]; then
   [ -n "$KIMI_COMMAND" ] || fatal "Kimi Code did not install a usable launcher."
   KIMI_CURRENT_VERSION="$(extract_semver "$($KIMI_COMMAND --version 2>/dev/null || true)")"
   [ -n "$KIMI_CURRENT_VERSION" ] || fatal "Could not read the installed Kimi Code version."
-  version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_VERSION" || fatal "Installed Kimi Code is $KIMI_CURRENT_VERSION; expected at least $KIMI_VERSION."
+  [ "$KIMI_CURRENT_VERSION" = "$KIMI_VERSION" ] || fatal "Installed Kimi Code is $KIMI_CURRENT_VERSION; expected exactly $KIMI_VERSION."
   say "✓ Kimi Code $KIMI_CURRENT_VERSION ready"
 fi
 
@@ -443,7 +476,12 @@ say "Lazy Developer: $LAZYDEV_VERSION"
 say "LazyDev launcher: $LAZYDEV_BIN_DIR/lazydev"
 say "Existing Kimi sessions and configuration were left in place."
 say ""
-say "If this terminal still resolves an older lazydev, run: hash -r 2>/dev/null || true"
+if printf '%s' ":${PATH:-}:" | grep -q ":${LAZYDEV_BIN_DIR}:"; then
+  say "LazyDev is on the current shell PATH. No restart is required."
+else
+  say "LazyDev is installed in $LAZYDEV_BIN_DIR but that directory is not on this shell's PATH."
+  say "Open a new shell after installation, or run: export PATH="$LAZYDEV_BIN_DIR:\$PATH""
+fi
 say ""
 say "Next:"
 say "  lazydev setup"

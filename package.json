@@ -67,7 +67,7 @@
     "uninstall.ps1"
   ],
   "scripts": {
-    "test": "node scripts/lazydev.mjs doctor && node scripts/command_smoke.mjs && python3 scripts/doctor.py && python3 scripts/check_skills.py && python3 scripts/eval_skills.py && python3 scripts/token_budget.py && python3 scripts/validate.py && python3 scripts/compat_smoke.py && python3 scripts/safety_scan.py && python3 scripts/installer_smoke.py && python3 scripts/provider_label_smoke.py && python3 scripts/provider_catalog_smoke.py && python3 tests/uninstall_smoke.py && python3 scripts/skill_runtime_smoke.py && node scripts/platform_smoke.mjs && node scripts/intelligence_smoke.mjs && node scripts/openrouter_smoke.mjs && python3 scripts/intelligence_smoke.py"
+    "test": "node scripts/lazydev.mjs doctor && node scripts/command_smoke.mjs && python3 scripts/doctor.py && python3 scripts/check_skills.py && python3 scripts/eval_skills.py && python3 scripts/token_budget.py && python3 scripts/validate.py && python3 scripts/compat_smoke.py && python3 scripts/safety_scan.py && python3 scripts/installer_smoke.py && python3 scripts/provider_label_smoke.py && node scripts/gemini_compat_smoke.mjs && python3 scripts/provider_catalog_smoke.py && node scripts/provider_config_smoke.mjs && python3 tests/uninstall_smoke.py && python3 scripts/skill_runtime_smoke.py && node scripts/platform_smoke.mjs && node scripts/intelligence_smoke.mjs && node scripts/openrouter_smoke.mjs && python3 scripts/intelligence_smoke.py"
   },
   "publishConfig": {
     "access": "public"
