@@ -36,7 +36,7 @@ const providers = [
   { id: 'openrouter', label: 'OpenRouter', kind: 'openai', modelsUrl: 'https://openrouter.ai/api/v1/models', chatUrl: 'https://openrouter.ai/api/v1/chat/completions', env: 'OPENROUTER_API_KEY' },
   { id: 'gemini', label: 'Gemini', kind: 'gemini', modelsUrl: 'https://generativelanguage.googleapis.com/v1beta/models', env: 'GEMINI_API_KEY' },
   { id: 'nvidia', label: 'NVIDIA', kind: 'openai', modelsUrl: 'https://integrate.api.nvidia.com/v1/models', chatUrl: 'https://integrate.api.nvidia.com/v1/chat/completions', env: 'NVIDIA_API_KEY' },
-  { id: 'openai', label: 'OpenAI Responses', kind: 'openai_responses', modelsUrl: 'https://api.openai.com/v1/models', env: 'OPENAI_API_KEY' },
+  { id: 'openai', label: 'OpenAI', kind: 'openai_responses', modelsUrl: 'https://api.openai.com/v1/models', env: 'OPENAI_API_KEY' },
   { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', modelsUrl: 'https://api.anthropic.com/v1/models', env: 'ANTHROPIC_API_KEY' },
 ];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

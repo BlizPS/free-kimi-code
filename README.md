@@ -2,11 +2,11 @@
 
 # 🦥 Lazy Developer
 
-<img src="assets/image.png" alt="Lazy Developer" />
+<img src="assets/image.jpg" alt="Lazy Developer" />
 
 [![Version](https://img.shields.io/badge/version-1.0.0-6f42c1)](https://github.com/BlizPS/lazy-developer-skill-cli/releases)
 [![CI](https://github.com/BlizPS/lazy-developer-skill-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-skill-cli/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.0.0-6f42c1)](#) [![CI](https://github.com/BlizPS/lazy-developer-skill-cli/actions/workflows/validate.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-skill-cli/actions/workflows/validate.yml)
+[![Validate](https://github.com/BlizPS/lazy-developer-skill-cli/actions/workflows/validate.yml/badge.svg)](https://github.com/BlizPS/lazy-developer-skill-cli/actions/workflows/validate.yml)
 [![Stars](https://img.shields.io/github/stars/BlizPS/lazy-developer-skill-cli?style=flat)](https://github.com/BlizPS/lazy-developer-skill-cli/stargazers)
 [![Forks](https://img.shields.io/github/forks/BlizPS/lazy-developer-skill-cli?style=flat)](https://github.com/BlizPS/lazy-developer-skill-cli/network/members)
 [![License](https://img.shields.io/badge/license-MIT-111111)](LICENSE)
