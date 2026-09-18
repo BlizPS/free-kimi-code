@@ -31,7 +31,7 @@
     },
     {
       "event": "PreToolUse",
-      "matcher": "WriteFile|StrReplaceFile",
+      "matcher": "Write|WriteFile|StrReplaceFile",
       "command": "node ./hooks/lazydev-path-guard.mjs",
       "timeout": 3
     },

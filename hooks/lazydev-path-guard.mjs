@@ -32,7 +32,6 @@ async function main() {
   const cwd=norm(event.cwd || process.cwd());
   const out=artifactDir();
   const resolved=norm(target);
-  if (inside(resolved,out)) process.exit(0);
   const ctx=loadContext();
   const implied=Boolean(ctx.task?.artifact) || explicitArtifactPrompt(ctx.prompt || '');
   const standaloneExt=/\.(?:html?|pdf|docx?|xlsx?|pptx?|zip|ahk|png|jpe?g|webp|gif|svg|csv|md|txt)$/iu.test(resolved);
@@ -45,9 +44,9 @@ async function main() {
     process.stderr.write(`BLOCKED by LazyDev: standalone deliverables must be written at ${out}. Target was ${resolved}. Use ${path.join(out, path.basename(resolved))}. Do not claim the file is saved until that exact path is verified.\n`);
     process.exit(2);
   }
-  if (implied && toolName === 'WriteFile' && inside(resolved, out) && fs.existsSync(resolved)) {
+  if (implied && /^(?:Write|WriteFile)$/u.test(toolName) && inside(resolved, out) && fs.existsSync(resolved)) {
     const nextName = nextAvailableArtifactName(out, path.basename(resolved));
-    process.stderr.write(`BLOCKED by LazyDev: the artifact already exists at ${resolved}. Do not overwrite an existing standalone deliverable. Use ${path.join(out, nextName)} instead.\n`);
+    process.stderr.write(`BLOCKED by LazyDev: the standalone deliverable already exists at ${resolved}. Keep the existing file untouched and retry Write with ${path.join(out, nextName)}. Do not claim success until that exact new path is verified.\n`);
     process.exit(2);
   }
   process.exit(0);
