@@ -1350,6 +1350,10 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     `compaction_max_attempts = 2`,
     ``,
     ...tokenConfig,
+    `[read]`,
+    `default_max_chars = 100000`,
+    `max_chars = 500000`,
+    ``,
     `[mcp.client]`,
     `tool_call_timeout_ms = 60000`,
     ``,
@@ -1364,6 +1368,12 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     `[[hooks]]`,
     `event = ${tomlQuote('UserPromptSubmit')}`,
     `command = ${tomlQuote(promptCommand)}`,
+    `timeout = 3`,
+    ``,
+    `[[hooks]]`,
+    `event = ${tomlQuote('PreToolUse')}`,
+    `matcher = ${tomlQuote('Read|Glob|Grep')}`,
+    `command = ${tomlQuote(shellQuoteCommand(process.execPath, [path.join(root, 'hooks', 'lazydev-fs-guard.mjs')]))}`,
     `timeout = 3`,
     ``,
     `[[hooks]]`,
@@ -1719,7 +1729,8 @@ async function chat() {
   // resolve their runtime config from KIMI_CODE_HOME instead.
   // The config written above is therefore the canonical runtime configuration.
   const artifactDir = ensureOutputDirectory();
-  const launchArgs = [...invocation.args, '--add-dir', artifactDir];
+  const workspaceDir = path.resolve(process.cwd());
+  const launchArgs = [...invocation.args, '--work-dir', workspaceDir, '--add-dir', artifactDir];
   const workDirIndex = process.argv.indexOf('--work-dir');
   if (workDirIndex >= 0 && process.argv[workDirIndex + 1]) launchArgs.push('--work-dir', process.argv[workDirIndex + 1]);
   const mode = process.argv.includes('--new') ? 'new' : process.argv.includes('--sessions') || process.argv.includes('--session') ? 'sessions' : process.argv.includes('--resume') || process.argv.includes('--continue') ? 'continue' : 'new';

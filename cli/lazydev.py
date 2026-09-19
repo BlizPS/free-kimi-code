@@ -34,6 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HOME = Path.home()
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
+IS_TERMUX = bool(os.environ.get("TERMUX_VERSION") or "com.termux" in str(os.environ.get("PREFIX", "")))
 
 if IS_WINDOWS:
     CONFIG_DIR = Path(os.environ.get("APPDATA", HOME)) / "lazydev"
@@ -42,7 +43,8 @@ if IS_WINDOWS:
 else:
     CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ("Library/Application Support" if IS_MAC else ".config"))) / "lazydev"
     KIMI_HOME = CONFIG_DIR / "kimi-code"
-    ARTIFACT_DIR = Path(os.environ.get("LAZYDEV_ARTIFACT_DIR", HOME / ("Library/Application Support/lazydev/artifacts" if IS_MAC else ".local/share/lazydev/artifacts")))
+    default_artifact = Path("/storage/emulated/0/lazydevfile") if IS_TERMUX else HOME / ("Library/Application Support/lazydev/artifacts" if IS_MAC else ".local/share/lazydev/artifacts")
+    ARTIFACT_DIR = Path(os.environ.get("LAZYDEV_ARTIFACT_DIR", default_artifact))
 
 PROVIDERS: list[dict[str, Any]] = [
     {"id": "openrouter", "label": "OpenRouter", "kind": "openai", "models": "https://openrouter.ai/api/v1/models", "base": "https://openrouter.ai/api/v1", "env": "OPENROUTER_API_KEY"},
@@ -813,6 +815,16 @@ class _ProviderProxy:
 
 
 
+
+def _hook_command(script: Path) -> str:
+    """Build a portable hook command for the active Python interpreter."""
+    executable = str(Path(sys.executable).resolve())
+    target = str(script.resolve())
+    if IS_WINDOWS:
+        return f'"{executable}" "{target}"'
+    import shlex
+    return f'{shlex.quote(executable)} {shlex.quote(target)}'
+
 def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _ProviderProxy | None = None) -> tuple[Path, Path]:
     KIMI_HOME.mkdir(parents=True, exist_ok=True)
     pc = provider_config(cfg, provider["id"])
@@ -859,10 +871,14 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         f'model = {toml_quote(model)}',
         f'max_context_size = {context}',
         f'max_input_size = {input_limit}',
-        f'max_output_size = {min(output, max(256, context // 4))}',
+        f'max_output_size = {min(output, max(256, context))}',
         f'capabilities = {json.dumps(capabilities)}',
         f'display_name = {toml_quote(provider["label"] + " · " + model)}',
         *( [f'off_effort = {toml_quote(known["offEffort"])}'] if known.get("offEffort") else [] ),
+        '',
+        '[read]',
+        'default_max_chars = 100000',
+        'max_chars = 500000',
         '',
         '[thinking]',
         f'enabled = {"true" if provider["id"] == "gemini" else "false"}',
@@ -880,6 +896,23 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         '',
         '[mcp.client]',
         'tool_call_timeout_ms = 60000',
+        '',
+        '[[hooks]]',
+        'event = "UserPromptSubmit"',
+        f'command = {toml_quote(_hook_command(ROOT / "hooks" / "lazydev-prompt-context.py"))}',
+        'timeout = 3',
+        '',
+        '[[hooks]]',
+        'event = "PreToolUse"',
+        'matcher = "Read|Glob|Grep"',
+        f'command = {toml_quote(_hook_command(ROOT / "hooks" / "lazydev-fs-guard.py"))}',
+        'timeout = 3',
+        '',
+        '[[hooks]]',
+        'event = "PreToolUse"',
+        'matcher = "Write|WriteFile|StrReplaceFile"',
+        f'command = {toml_quote(_hook_command(ROOT / "hooks" / "lazydev-path-guard.py"))}',
+        'timeout = 3',
         '',
     ]
     lines = [line for line in lines if line is not None]
@@ -917,6 +950,8 @@ def write_runtime_system(provider: dict[str, Any], model: str) -> None:
         "- Use bundled LazyDev skills when materially relevant.",
         f"- Active provider: {provider['label']}; model: {model}.",
         f"- Standalone artifacts must be written under {ARTIFACT_DIR}.",
+        "- File search safety: use Glob with a separate directory and pattern; do not use absolute wildcard paths or scan OS/system roots.",
+        "- Read safety: never request a max_chars budget below 4096; use pagination for larger files.",
     ]
     (KIMI_HOME / "SYSTEM.md").write_text(base.rstrip() + "\n\n" + "\n".join(additions) + "\n", encoding="utf-8")
 
@@ -943,7 +978,8 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
         proxy and proxy.close()
         raise
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    args = ["--add-dir", str(ARTIFACT_DIR)]
+    workspace = _workspace_for_chat()
+    args = ["--work-dir", str(workspace), "--add-dir", str(ARTIFACT_DIR)]
     if sessions:
         args.append("--session")
     elif continue_session:
@@ -963,7 +999,7 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     output = model_output_size(provider, pc)
     env["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(context)
     try:
-        return subprocess.call([kimi, *args], cwd=os.getcwd(), env=env)
+        return subprocess.call([kimi, *args], cwd=str(workspace), env=env)
     except KeyboardInterrupt:
         return 130
     finally:
@@ -971,9 +1007,45 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
             proxy.close()
 
 
+
+def _safe_walk_files(root: Path, suffixes: set[str], *, max_entries: int = 20000) -> set[str]:
+    """Collect file suffix evidence without failing on protected directories."""
+    found: set[str] = set()
+    seen = 0
+    try:
+        root = root.resolve()
+    except OSError:
+        return found
+    if not root.is_dir():
+        return found
+    for base, dirs, files in os.walk(root, topdown=True, onerror=lambda _error: None):
+        # Skip common dependency/build trees to keep detection bounded and quiet.
+        dirs[:] = [
+            name for name in dirs
+            if name not in {".git", "node_modules", "vendor", "dist", "build", ".venv", "venv", "target", ".gradle"}
+        ]
+        for filename in files:
+            seen += 1
+            suffix = Path(filename).suffix.lower()
+            if suffix in suffixes:
+                found.add(suffix)
+            if seen >= max_entries:
+                return found
+    return found
+
+
+def _workspace_for_chat() -> Path:
+    """Return a stable writable working directory for Kimi file tools."""
+    try:
+        cwd = Path.cwd().resolve()
+    except OSError:
+        cwd = Path.home().resolve()
+    return cwd if cwd.is_dir() else Path.home().resolve()
+
 def detect_languages(cwd: Path) -> list[dict[str, Any]]:
-    ts = (cwd / "tsconfig.json").exists() or any(cwd.rglob("*.ts")) or any(cwd.rglob("*.tsx"))
-    go = (cwd / "go.mod").exists() or (cwd / "go.work").exists() or any(cwd.rglob("*.go"))
+    suffixes = _safe_walk_files(cwd, {".ts", ".tsx", ".go"})
+    ts = (cwd / "tsconfig.json").is_file() or bool(suffixes & {".ts", ".tsx"})
+    go = (cwd / "go.mod").is_file() or (cwd / "go.work").is_file() or ".go" in suffixes
     result = []
     if ts:
         evidence = [name for name in ("tsconfig.json", "*.ts", "*.tsx") if (cwd / name).exists()] if (cwd / "tsconfig.json").exists() else ["TypeScript source"]
