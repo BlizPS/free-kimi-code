@@ -56,6 +56,7 @@ PROVIDERS: list[dict[str, Any]] = [
     {"id": "groq", "label": "Groq", "kind": "openai", "models": "https://api.groq.com/openai/v1/models", "base": "https://api.groq.com/openai/v1", "env": "GROQ_API_KEY"},
     {"id": "codebuddy", "label": "CodeBuddy", "kind": "openai", "models": ["https://copilot.tencent.com/v3/config", "https://api.codebuddy.ai/v1/models"], "base": "https://api.codebuddy.ai/v1", "env": "CODEBUDDY_API_KEY"},
     {"id": "anthropic", "label": "Anthropic", "kind": "anthropic", "models": "https://api.anthropic.com/v1/models", "base": "https://api.anthropic.com", "env": "ANTHROPIC_API_KEY"},
+    {"id": "pollinations", "label": "Pollinations", "kind": "pollinations", "models": "https://text.pollinations.ai/models", "base": "https://text.pollinations.ai/", "chat": "https://text.pollinations.ai/openai", "env": None, "auth": "none", "free": True},
 ]
 
 SKILLS = [
@@ -91,11 +92,14 @@ PROVIDER_OUTPUT_HARD_CAPS = {
     "ollama": 32768,
 }
 MODEL_LIMIT_RULES = (
-    (re.compile(r"^nvidia/nemotron-3-super-120b-a12b$", re.I), 1048576, 32768, True, True, "none"),
-    (re.compile(r"^gemini-3\.1-flash-image(?:-.+)?$", re.I), 131072, 32768, False, True, None),
-    (re.compile(r"^gemini-3\.1-flash-lite(?:-.+)?$", re.I), 1048576, 65536, True, True, None),
-    (re.compile(r"^gemini-3\.1-pro(?:-.+)?$", re.I), 1048576, 65536, True, True, None),
-    (re.compile(r"^gemini-3-flash(?:-.+)?$", re.I), 1048576, 65536, True, True, None),
+    # These rules provide numeric limits only. Tool capability is deliberately
+    # never hardcoded here; it must come from live provider metadata or a
+    # runtime capability probe.
+    (re.compile(r"^nvidia/nemotron-3-super-120b-a12b$", re.I), 1048576, 32768, True, "none"),
+    (re.compile(r"^gemini-3\.1-flash-image(?:-.+)?$", re.I), 131072, 32768, True, None),
+    (re.compile(r"^gemini-3\.1-flash-lite(?:-.+)?$", re.I), 1048576, 65536, True, None),
+    (re.compile(r"^gemini-3\.1-pro(?:-.+)?$", re.I), 1048576, 65536, True, None),
+    (re.compile(r"^gemini-3-flash(?:-.+)?$", re.I), 1048576, 65536, True, None),
 )
 
 
@@ -110,14 +114,14 @@ def _positive_int(value: Any) -> int | None:
 def known_model_limits(provider: dict[str, Any], model: str) -> dict[str, Any]:
     pid = str(provider.get("id", ""))
     model_id = str(model or "").strip()
-    for pattern, context, output, tool_use, thinking, off_effort in MODEL_LIMIT_RULES:
+    for pattern, context, output, thinking, off_effort in MODEL_LIMIT_RULES:
         if pattern.search(model_id):
             if pattern.pattern.startswith("^nvidia/") and pid != "nvidia":
                 continue
             return {
                 "context": context,
                 "output": output,
-                "toolUse": tool_use,
+                "toolUse": None,
                 "thinking": thinking,
                 "offEffort": off_effort,
                 "source": "catalog-rule",
@@ -209,6 +213,10 @@ def active_provider(config: dict[str, Any]) -> dict[str, Any]:
     return PROVIDERS[1]
 
 
+def provider_requires_api_key(provider: dict[str, Any]) -> bool:
+    return provider.get("auth") != "none" and provider.get("id") != "ollama"
+
+
 def request_json(url: str, *, headers: dict[str, str] | None = None, timeout: float = 15) -> Any:
     req = urllib.request.Request(url, headers={"Accept": "application/json", **(headers or {})})
     try:
@@ -237,20 +245,48 @@ def normalize_model(item: dict[str, Any], provider: dict[str, Any]) -> dict[str,
             "name": item.get("displayName") or raw,
             "context": item.get("inputTokenLimit"),
             "output": item.get("outputTokenLimit"),
-            "toolUse": True,
+            "toolUse": None,
+            "toolUseSource": "unknown",
         }
         return apply_model_limits(info, provider, raw) | {"id": raw, "name": item.get("displayName") or raw, "live": True}
+    if pid == "pollinations":
+        raw = str(item.get("name") or item.get("id") or item.get("model") or "").strip()
+        capabilities = item.get("capabilities") if isinstance(item.get("capabilities"), list) else []
+        explicit_tools = item.get("tools") if isinstance(item.get("tools"), bool) else None
+        tool_use = explicit_tools if explicit_tools is not None else (True if "tool_calling" in capabilities else None)
+        context = item.get("context_length") or item.get("contextWindow") or item.get("context_window")
+        output = item.get("max_output_tokens") or item.get("max_completion_tokens")
+        info = {
+            "id": raw,
+            "name": item.get("name") or raw,
+            "description": item.get("description") or "",
+            "context": context,
+            "output": output,
+            "toolUse": tool_use,
+            "toolUseSource": "live" if tool_use is not None else "unknown",
+            "reasoning": bool(item.get("reasoning") or "reasoning" in capabilities),
+            "capabilities": capabilities,
+            "aliases": item.get("aliases") if isinstance(item.get("aliases"), list) else [],
+            "inputModalities": item.get("input_modalities") if isinstance(item.get("input_modalities"), list) else [],
+            "outputModalities": item.get("output_modalities") if isinstance(item.get("output_modalities"), list) else [],
+            "free": True,
+            "freeTier": str(item.get("tier") or "").lower() == "anonymous" or bool(provider.get("free")),
+        }
+        return apply_model_limits(info, provider, raw) | {"id": raw, "name": item.get("name") or raw, "live": True}
     if pid == "ollama":
+
         raw = str(item.get("name") or item.get("model") or item.get("id") or "").strip()
-        info = apply_model_limits({"id": raw, "name": raw, "toolUse": True, "local": True}, provider, raw)
+        info = apply_model_limits({"id": raw, "name": raw, "toolUse": None, "toolUseSource": "unknown", "local": True}, provider, raw)
         return info | {"live": True}
     raw = str(item.get("id") or item.get("name") or item.get("slug") or "").strip()
     pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
-    supported = item.get("supported_parameters") if isinstance(item.get("supported_parameters"), list) else []
+    supported_present = isinstance(item.get("supported_parameters"), list)
+    supported = item.get("supported_parameters") if supported_present else []
     free = pid == "openrouter" and (raw == "openrouter/free" or raw.lower().endswith(":free") or (str(pricing.get("prompt", "")) == "0" and str(pricing.get("completion", "")) == "0"))
     top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
     output_limit = item.get("max_completion_tokens") or top_provider.get("max_completion_tokens")
-    info = {"id": raw, "name": item.get("name") or raw, "toolUse": True if not supported else "tools" in supported, "free": free, "context": item.get("context_length"), "output": output_limit}
+    tool_use = ("tools" in supported) if supported_present else None
+    info = {"id": raw, "name": item.get("name") or raw, "toolUse": tool_use, "toolUseSource": "live" if supported_present else "unknown", "free": free, "context": item.get("context_length"), "output": output_limit}
     return apply_model_limits(info, provider, raw) | {"live": True}
 
 
@@ -275,6 +311,14 @@ def fetch_models(provider: dict[str, Any], api_key: str = "", base_url: str = ""
         url = f"{provider['models']}?key={urllib.parse.quote(api_key, safe='')}"
         data = request_json(url)
         raw = data.get("models", []) if isinstance(data, dict) else []
+    elif pid == "pollinations":
+        data = request_json(provider["models"], headers={"User-Agent": f"lazydev/{VERSION}"})
+        if isinstance(data, list):
+            raw = data
+        elif isinstance(data, dict):
+            raw = data.get("models", data.get("data", []))
+        else:
+            raw = []
     elif pid == "anthropic":
         data = request_json(provider["models"], headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "User-Agent": f"lazydev/{VERSION}"})
         raw = data.get("data", []) if isinstance(data, dict) else []
@@ -349,7 +393,7 @@ def setup() -> int:
     print("Provider setup · live model catalog\n")
     for i, provider in enumerate(PROVIDERS, 1):
         saved = provider_config(config, provider["id"])
-        configured = bool(saved.get("model")) and (provider["id"] == "ollama" or bool(saved.get("apiKey")))
+        configured = bool(saved.get("model")) and (provider["id"] == "ollama" or not provider_requires_api_key(provider) or bool(saved.get("apiKey")))
         state = ansi("32", "saved") if configured else ansi("2", "not configured")
         print(f"{i}. {provider['label']} · {state}{(' · ' + str(saved['model'])) if saved.get('model') else ''}")
     number = prompt(f"\nProvider [1-{len(PROVIDERS)}]: ")
@@ -362,6 +406,9 @@ def setup() -> int:
     if provider["id"] == "ollama":
         base = prompt("Ollama API URL [http://127.0.0.1:11434]: ", saved.get("baseUrl") or provider["base"])
         key = "ollama"
+    elif not provider_requires_api_key(provider):
+        base = provider.get("base", "")
+        key = ""
     else:
         key = str(saved.get("apiKey", ""))
         if key and prompt(f"{provider['label']} key saved. Keep it? [Y/n]: ", "y").lower() not in {"y", "yes"}:
@@ -422,7 +469,11 @@ def refresh_selected_model(config: dict[str, Any], provider: dict[str, Any], pc:
     current = apply_model_limits(pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}, provider, model)
     # Older LazyDev versions stored guessed limits without a live marker. Refresh
     # those records once so stale context/output values cannot survive upgrades.
-    needs_live_refresh = provider.get("id") != "ollama" and (not bool(current.get("live")) or current.get("contextSource") == "fallback" or current.get("outputSource") == "fallback")
+    # Capability metadata is dynamic and must not be trusted from older LazyDev
+    # config snapshots. Refresh remote catalogs so a model that changed from
+    # tool-capable to no-tools (or vice versa) is detected without any model-id
+    # special case. Local Ollama models use the lazy runtime probe instead.
+    needs_live_refresh = provider.get("id") != "ollama"
     if not needs_live_refresh:
         return current
     try:
@@ -451,12 +502,184 @@ def is_antigravity_model_name(model: str) -> bool:
     return bool(re.search(r"antigravity|gemini.*preview", str(model), re.I))
 
 
-def model_supports_tools(pc: dict[str, Any]) -> bool:
+def native_tool_capability(pc: dict[str, Any]) -> bool | None:
+    """Return native tool capability without hardcoding a model identifier."""
     info = pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}
     value = info.get("toolUse")
-    if value is None:
+    if value is False:
+        return False
+    if value is True:
         return True
-    return bool(value)
+    return None
+
+
+SYNTHETIC_TOOL_OPEN = "<lazydev_tool_call>"
+SYNTHETIC_TOOL_CLOSE = "</lazydev_tool_call>"
+SYNTHETIC_TOOL_MAX_SCHEMA_CHARS = 24000
+SYNTHETIC_TOOL_MAX_RESULT_CHARS = 20000
+
+def _tool_definitions(body: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = body.get("tools")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        fn = item.get("function") if isinstance(item.get("function"), dict) else item
+        name = str(fn.get("name") or "").strip()
+        if not name:
+            continue
+        out.append({
+            "name": name,
+            "description": str(fn.get("description") or "")[:2000],
+            "parameters": fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {"type": "object", "properties": {}},
+        })
+    return out
+
+
+def _synthetic_tool_prompt(tools: list[dict[str, Any]]) -> str:
+    if not tools:
+        return ""
+    catalog = [{"name": t["name"], "description": t["description"], "parameters": t["parameters"]} for t in tools]
+    schema = json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
+    if len(schema) > SYNTHETIC_TOOL_MAX_SCHEMA_CHARS:
+        trimmed: list[dict[str, Any]] = []
+        size = 2
+        for item in catalog:
+            encoded = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+            if size + len(encoded) + 1 > SYNTHETIC_TOOL_MAX_SCHEMA_CHARS:
+                break
+            trimmed.append(item)
+            size += len(encoded) + 1
+        schema = json.dumps(trimmed, ensure_ascii=False, separators=(",", ":"))
+    return (
+        "\n\n[LazyDev Synthetic Tool Bridge]\n"
+        "Native function/tool calling is unavailable for this model, but the agent tools remain available through LazyDev. "
+        "Do not say that tools are unavailable. When a tool is needed, emit exactly one or more calls with valid JSON inside "
+        f"{SYNTHETIC_TOOL_OPEN} and {SYNTHETIC_TOOL_CLOSE}. The JSON must contain `name` and an object-valued `arguments`. "
+        "The name must exactly match an available tool. Do not use Markdown fences around the envelope. After a tool result, continue normally.\n"
+        "Available tools: " + schema
+    )
+
+
+def _inject_synthetic_tool_prompt(messages: list[Any], prompt_text: str) -> list[Any]:
+    out = [dict(m) if isinstance(m, dict) else m for m in messages]
+    if not prompt_text:
+        return out
+    for idx, msg in enumerate(out):
+        if isinstance(msg, dict) and msg.get("role") == "system":
+            content = str(msg.get("content") or "")
+            out[idx] = {**msg, "content": content.rstrip() + prompt_text}
+            return out
+    return [{"role": "system", "content": prompt_text.strip()}, *out]
+
+
+def _prepare_synthetic_messages(messages: list[Any]) -> list[Any]:
+    out: list[Any] = []
+    call_names: dict[str, str] = {}
+    for item in messages:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        msg = dict(item)
+        role = str(msg.get("role") or "")
+        if role == "assistant" and isinstance(msg.get("tool_calls"), list):
+            summaries = []
+            for call in msg["tool_calls"]:
+                if not isinstance(call, dict):
+                    continue
+                call_id = str(call.get("id") or "").strip()
+                fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+                name = str(fn.get("name") or "").strip()
+                if call_id and name:
+                    call_names[call_id] = name
+                    summaries.append(f"{name}({str(fn.get('arguments') or '{}')[:4000]})")
+            msg.pop("tool_calls", None)
+            msg.pop("function_call", None)
+            content = str(msg.get("content") or "").strip()
+            marker = f"[LazyDev synthetic tool call executed: {'; '.join(summaries)}]" if summaries else ""
+            msg["content"] = "\n".join(part for part in (content, marker) if part)
+            out.append(msg)
+            continue
+        if role == "tool":
+            call_id = str(msg.get("tool_call_id") or "").strip()
+            name = call_names.get(call_id) or str(msg.get("name") or "tool")
+            value = msg.get("content")
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False)
+            out.append({"role": "user", "content": f"[LazyDev synthetic tool result: {name}]\n{str(value or '')[:SYNTHETIC_TOOL_MAX_RESULT_CHARS]}"})
+            continue
+        if role == "assistant" and isinstance(msg.get("function_call"), dict):
+            fn = msg.pop("function_call")
+            msg["content"] = f"[LazyDev synthetic tool call executed: {str(fn.get('name') or 'tool')}({str(fn.get('arguments') or '{}')[:4000]})]"
+        out.append(msg)
+    return out
+
+
+def _extract_synthetic_tool_calls(content: str, tool_defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    text = str(content or "")
+    if SYNTHETIC_TOOL_OPEN not in text:
+        return []
+    allowed = {tool["name"] for tool in tool_defs}
+    pattern = re.compile(re.escape(SYNTHETIC_TOOL_OPEN) + r"\s*(\{.*?\})\s*" + re.escape(SYNTHETIC_TOOL_CLOSE), re.S)
+    found: list[dict[str, Any]] = []
+    for match in pattern.finditer(text):
+        try:
+            payload = json.loads(match.group(1))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        name = str(payload.get("name") or "").strip()
+        args = payload.get("arguments", payload.get("args"))
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                args = None
+        if name in allowed and isinstance(args, dict):
+            found.append({"name": name, "arguments": args})
+    return found
+
+
+def _synthetic_tool_completion(model: str, completion: dict[str, Any], calls: list[dict[str, Any]], stream: bool) -> tuple[dict[str, str], bytes]:
+    response_id = str(completion.get("id") or f"chatcmpl-lazydev-{secrets.token_hex(6)}")
+    created = int(completion.get("created") or time.time())
+    entries = []
+    for index, call in enumerate(calls):
+        entries.append({"index": index, "id": f"call_lazydev_{secrets.token_hex(8)}", "type": "function", "function": {"name": call["name"], "arguments": json.dumps(call["arguments"], ensure_ascii=False, separators=(",", ":"))}})
+    if not calls:
+        content = str((((completion.get("choices") or [{}])[0].get("message") or {}).get("content")) or "")
+        entries = []
+        chunks = [
+            {"id": response_id, "object": "chat.completion.chunk", "created": created, "model": model, "choices": [{"index": 0, "delta": {"role": "assistant", "content": content}, "finish_reason": None}]},
+            {"id": response_id, "object": "chat.completion.chunk", "created": created, "model": model, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        ]
+    else:
+        chunks = [
+            {"id": response_id, "object": "chat.completion.chunk", "created": created, "model": model, "choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{k: v for k, v in entry.items() if k != "index"} | {"index": entry["index"]} for entry in entries]}, "finish_reason": None}]},
+            {"id": response_id, "object": "chat.completion.chunk", "created": created, "model": model, "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+        ]
+    if not stream:
+        message = {"role": "assistant", "content": None if calls else str((((completion.get("choices") or [{}])[0].get("message") or {}).get("content")) or "")}
+        if calls:
+            message["tool_calls"] = [{k: v for k, v in entry.items() if k != "index"} for entry in entries]
+        payload = {"id": response_id, "object": "chat.completion", "created": created, "model": model, "choices": [{"index": 0, "message": message, "finish_reason": "tool_calls" if calls else "stop"}]}
+        if isinstance(completion.get("usage"), dict):
+            payload["usage"] = completion["usage"]
+        return {"content-type": "application/json"}, json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    data = "".join(f"data: {json.dumps(chunk, ensure_ascii=False, separators=(',', ':'))}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+    return {"content-type": "text/event-stream", "cache-control": "no-cache"}, data.encode("utf-8")
+
+
+def _tool_error_is_unsupported(status: int, detail: str) -> bool:
+    text = str(detail or "").lower()
+    if int(status) == 404 and "no endpoints found" in text and "tool" in text:
+        return True
+    if int(status) not in (400, 404, 422):
+        return False
+    return bool(re.search(r"(?:unsupported|unknown|unrecognized|not supported|does not support|cannot|can't).*?(?:tool|function)|(?:tool|function).*?(?:unsupported|unknown|unrecognized|not supported|does not support)", text, re.I))
 
 
 def clear_terminal() -> None:
@@ -514,6 +737,29 @@ def _retry_after_seconds(headers: dict[str, str]) -> float:
         return 0.0
 
 
+def _is_openrouter_tool_endpoint_error(status: int, detail: str) -> bool:
+    if str(detail or "").strip() == "":
+        return False
+    text = str(detail).lower()
+    return (
+        str(status) == "404"
+        and "no endpoints found" in text
+        and "tool use" in text
+    )
+
+
+def _strip_tool_request_fields(body: dict[str, Any]) -> dict[str, Any]:
+    cleaned = dict(body)
+    for field in ("tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"):
+        cleaned.pop(field, None)
+    return cleaned
+
+
+def _looks_like_npm_error(text: str) -> bool:
+    value = str(text or "")
+    return bool(re.search(r"(?:npm\s+(?:ERR!|error)|ERR_NPM|ERESOLVE|EAI_AGAIN|ELIFECYCLE|ENOENT.*npm|command failed.*npm)", value, re.I))
+
+
 def _normalize_provider_request(body: dict[str, Any], provider: dict[str, Any], pc: dict[str, Any]) -> dict[str, Any]:
     normalized, _ = _strip_request_fields(body, KNOWN_UNSUPPORTED_REQUEST_FIELDS)
     pid = str(provider.get("id", ""))
@@ -535,12 +781,6 @@ def _normalize_provider_request(body: dict[str, Any], provider: dict[str, Any], 
     if "max_tokens" not in normalized and "max_completion_tokens" not in normalized:
         normalized["max_tokens"] = output_cap
     if pid == "openrouter":
-        # Kimi Code sends several optional OpenAI-style parameters for agent/tool
-        # turns. Requiring every one of those parameters to be supported by a
-        # provider can eliminate otherwise tool-capable OpenRouter endpoints and
-        # surface a misleading 404: "no endpoints found that support tool use".
-        # OpenRouter should still enforce feature compatibility for the tool
-        # payload itself, while allowing provider-side parameter variance.
         provider_options = normalized.get("provider")
         if not isinstance(provider_options, dict):
             provider_options = {}
@@ -611,6 +851,7 @@ class _ProviderProxy:
     def __init__(self, provider: dict[str, Any], pc: dict[str, Any]):
         self.provider = provider
         self.pc = pc
+        self.learned_no_tools = False
         self.token = secrets.token_hex(24)
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self.thread = threading.Thread(target=self.server.serve_forever, name="lazydev-provider-proxy", daemon=True)
@@ -695,12 +936,25 @@ class _ProviderProxy:
                     return self._send_json(400, {"error": {"message": "Invalid JSON"}})
                 if not isinstance(body, dict):
                     return self._send_json(400, {"error": {"message": "Request body must be an object"}})
-                body["model"] = str(outer.pc.get("model") or body.get("model") or "")
+                original_model = str(outer.pc.get("model") or body.get("model") or "")
+                attempt_model = original_model
+                synthetic_tools_active = (outer.learned_no_tools or native_tool_capability(outer.pc) is False) and bool(_tool_definitions(body))
+                synthetic_tools_learned = outer.learned_no_tools
+                downstream_stream = bool(body.get("stream"))
+                body["model"] = original_model
                 removed_fields = set(KNOWN_UNSUPPORTED_REQUEST_FIELDS)
                 repair_count = 0
                 transient_attempt = 0
                 while True:
-                    normalized_body = _normalize_provider_request(body, outer.provider, outer.pc)
+                    body["model"] = attempt_model
+                    request_body = dict(body)
+                    tool_defs = _tool_definitions(request_body)
+                    if synthetic_tools_active and tool_defs:
+                        request_body["messages"] = _inject_synthetic_tool_prompt(_prepare_synthetic_messages(request_body.get("messages") if isinstance(request_body.get("messages"), list) else []), _synthetic_tool_prompt(tool_defs))
+                        request_body = _strip_tool_request_fields(request_body)
+                        request_body["stream"] = False
+                    normalized_body = _normalize_provider_request(request_body, outer.provider, outer.pc)
+                    normalized_body["model"] = attempt_model
                     outbound, removed_now = _strip_request_fields(normalized_body, removed_fields)
                     removed_fields |= removed_now
                     try:
@@ -714,7 +968,7 @@ class _ProviderProxy:
                     status = int(response.status)
                     headers = {k: v for k, v in response.getheaders()}
                     is_stream = bool(outbound.get("stream"))
-                    if status == 400 and repair_count < PROXY_MAX_400_REPAIRS:
+                    if status in {400, 404} and (status == 404 or repair_count < PROXY_MAX_400_REPAIRS):
                         error_payload = response.read()
                         try:
                             detail = json.loads(error_payload.decode("utf-8", "replace")).get("error", {}).get("message", "")
@@ -725,12 +979,24 @@ class _ProviderProxy:
                             connection.close()
                         except Exception:
                             pass
-                        newly_rejected = _unsupported_fields_from_error(detail) - removed_fields
-                        if newly_rejected:
-                            removed_fields |= newly_rejected
-                            repair_count += 1
+
+                        if (not synthetic_tools_active) and _tool_error_is_unsupported(status, detail) and _tool_definitions(body):
+                            outer.learned_no_tools = True
+                            outer.pc.setdefault("modelInfo", {})["toolUse"] = False
+                            outer.pc.setdefault("modelInfo", {})["toolUseSource"] = "probe"
+                            outer.pc["toolUse"] = False
+                            synthetic_tools_active = True
+                            synthetic_tools_learned = True
+                            transient_attempt = 0
                             continue
-                        return self._send_json(400, {"error": {"message": detail or "Provider rejected the request."}})
+
+                        if status == 400:
+                            newly_rejected = _unsupported_fields_from_error(detail) - removed_fields
+                            if newly_rejected:
+                                removed_fields |= newly_rejected
+                                repair_count += 1
+                                continue
+                        return self._send_json(status, {"error": {"message": detail or "Provider rejected the request."}})
                     if status in {429, 500, 502, 503, 504} and transient_attempt < PROXY_MAX_RETRIES:
                         retry_after = _retry_after_seconds(headers)
                         delay = retry_after or min(4.0, 0.6 * (2 ** transient_attempt))
@@ -759,6 +1025,29 @@ class _ProviderProxy:
                         self.close_connection = True
                         return
                     try:
+                        if synthetic_tools_active:
+                            payload = response.read()
+                            try:
+                                completion = json.loads(payload.decode("utf-8", "replace"))
+                            except Exception as exc:
+                                return self._send_json(502, {"error": {"message": f"Synthetic tool bridge received invalid upstream JSON: {exc}"}})
+                            choices = completion.get("choices") if isinstance(completion, dict) else []
+                            message = choices[0].get("message") if choices and isinstance(choices[0], dict) else {}
+                            content = message.get("content") if isinstance(message, dict) else ""
+                            calls = _extract_synthetic_tool_calls(str(content or ""), tool_defs)
+                            response_headers, raw_response = _synthetic_tool_completion(attempt_model, completion if isinstance(completion, dict) else {}, calls, downstream_stream)
+                            self.send_response(200)
+                            for key, value in response_headers.items():
+                                self.send_header(key, value)
+                            self.send_header("Content-Length", str(len(raw_response)))
+                            self.send_header("X-LazyDev-Synthetic-Tools", "1")
+                            if synthetic_tools_learned:
+                                self.send_header("X-LazyDev-Tool-Capability", "detected-unsupported")
+                            self.send_header("Connection", "close")
+                            self.end_headers()
+                            self.wfile.write(raw_response)
+                            self.close_connection = True
+                            return
                         if is_stream and isinstance(outbound.get("tools"), list) and outbound.get("tools") and outer.provider.get("id") == "nvidia":
                             payload = response.read()
                             reason = _stream_finish_reason(payload)
@@ -779,9 +1068,11 @@ class _ProviderProxy:
                                 except Exception:
                                     pass
                                 continue
-                            self._relay(status, headers, io.BytesIO(payload), is_stream)
+                            relay_headers = dict(headers)
+                            self._relay(status, relay_headers, io.BytesIO(payload), is_stream)
                         else:
-                            self._relay(status, headers, response, is_stream)
+                            relay_headers = dict(headers)
+                            self._relay(status, relay_headers, response, is_stream)
                     finally:
                         try:
                             connection.close()
@@ -847,7 +1138,8 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     reserve_target = max(4096, min(49152, max(output * 2, round(context * 0.08))))
     reserve = min(reserve_target, max(1024, context // 4)) if context > 4096 else max(512, context // 8)
     input_limit = context
-    tool_use = model_supports_tools(pc)
+    native_tools = native_tool_capability(pc)
+    tool_use = True if proxy is not None else native_tools is not False
     capabilities = []
     if tool_use:
         capabilities.append("tool_use")
@@ -871,6 +1163,16 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         'database.search = true',
         f'extra_skill_dirs = [{toml_quote(str(ROOT / "skills"))}]',
         f'extra_agent_dirs = [{toml_quote(str(ROOT / "agents"))}]',
+        *( [
+            '',
+            '[tools]',
+            'disabled = ' + json.dumps([
+                'Agent','AskUserQuestion','SetTodoList','Shell','ReadFile','ReadMediaFile',
+                'Glob','Grep','WriteFile','StrReplaceFile','SearchWeb','FetchURL',
+                'EnterPlanMode','ExitPlanMode','TaskList','TaskOutput','TaskStop','Skill',
+                'mcp__*__*',
+            ]),
+        ] if not tool_use else [] ),
         '',
         '[providers.lazydev]',
         f'type = {toml_quote(provider_type)}',
@@ -1041,6 +1343,8 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
         print("No active provider is configured. Run: lazydev setup", file=sys.stderr)
         return 1
     pc["modelInfo"] = refresh_selected_model(cfg, provider, pc)
+    if pc.get("modelInfo", {}).get("toolUse") is False:
+        print(f"Synthetic tool mode: {pc.get('model')} has no native tool calling; LazyDev keeps this model and bridges tools locally.")
     proxy = None
     if provider["id"] not in {"anthropic", "gemini"}:
         proxy = _ProviderProxy(provider, pc)
@@ -1317,7 +1621,18 @@ def doctor() -> int:
     print(f"Artifacts     {ARTIFACT_DIR}")
     provider = active_provider(cfg)
     print(f"Provider      {provider['label']} · {provider_config(cfg, provider['id']).get('model') or 'not configured'}")
-    print(f"Node.js       not used by native LazyDev CLI")
+    npm = shutil.which("npm")
+    if npm:
+        try:
+            npm_version = subprocess.run([npm, "--version"], capture_output=True, text=True, timeout=5, check=False)
+            npm_text = (npm_version.stdout or npm_version.stderr or "").strip()
+            print(f"npm           {npm_text or 'detected; version unavailable'}")
+            if npm_version.returncode != 0 or _looks_like_npm_error(npm_version.stderr):
+                print("npm status    ERROR detected; native LazyDev does not require npm and will continue without it")
+        except Exception as exc:
+            print(f"npm status    ERROR detected ({exc}) · native LazyDev does not require npm")
+    else:
+        print("npm           not installed · native LazyDev does not require npm")
     return 0
 
 

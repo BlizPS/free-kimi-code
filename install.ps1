@@ -257,12 +257,23 @@ if ($RtkExe -and $RtkCurrentVersion -and $RtkLatestVersion -and (Test-VersionAtL
 if ($KimiNeedsUpdate) {
     Step "Installing/updating Kimi Code to the latest available release"
     $kimiInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
+    $kimiInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.log')
     try {
         Invoke-WebRequest -UseBasicParsing -Uri $KimiInstallUrl -OutFile $kimiInstallerPath
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $kimiInstallerPath
-        if ($LASTEXITCODE -ne 0) { Fail "Kimi Code installer exited with code $LASTEXITCODE." }
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $kimiInstallerPath *> $kimiInstallerLog
+        $kimiExitCode = $LASTEXITCODE
+        if (Test-Path -LiteralPath $kimiInstallerLog) { Get-Content -LiteralPath $kimiInstallerLog | Write-Host }
+        if ($kimiExitCode -ne 0) {
+            $npmError = $false
+            if (Test-Path -LiteralPath $kimiInstallerLog) {
+                $npmError = Select-String -Path $kimiInstallerLog -Pattern 'npm\s+(ERR!|error)|ERR_NPM|ERESOLVE|EAI_AGAIN|ELIFECYCLE|ENOENT.*npm|command failed.*npm' -Quiet -CaseSensitive:$false
+            }
+            if ($npmError) { Fail "Kimi Code installer failed with an npm error. The npm failure is shown above; fix npm/node setup and rerun LazyDev installer." }
+            Fail "Kimi Code installer exited with code $kimiExitCode."
+        }
     } finally {
         Remove-Item -LiteralPath $kimiInstallerPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $kimiInstallerLog -Force -ErrorAction SilentlyContinue
     }
     $KimiExe = Find-Kimi
     if (-not $KimiExe) { Fail "Kimi Code did not install a usable launcher." }

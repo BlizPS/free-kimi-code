@@ -30,8 +30,10 @@ const TOKEN_SAVINGS_TARGET = 0.80;
 const MAX_SKILL_FRACTION = 0.24;
 const KIMI_PACKAGE = '@moonshot-ai/kimi-code';
 const OPENROUTER_FREE_MODEL = 'openrouter/free';
-const OPENROUTER_MODEL_FALLBACK_LIMIT = 3;
-const GEMINI_NO_TOOL_MODELS = [];
+const SYNTHETIC_TOOL_OPEN = '<lazydev_tool_call>';
+const SYNTHETIC_TOOL_CLOSE = '</lazydev_tool_call>';
+const SYNTHETIC_TOOL_MAX_SCHEMA_CHARS = 24000;
+const SYNTHETIC_TOOL_MAX_RESULT_CHARS = 20000;
 const PROVIDER_TRANSIENT_MAX_RETRIES = Math.max(0, Math.min(4, Number(process.env.LAZYDEV_TRANSIENT_RETRIES || 2)));
 const PROVIDER_TRANSIENT_BASE_MS = Math.max(250, Math.min(5000, Number(process.env.LAZYDEV_TRANSIENT_BASE_MS || 800)));
 const PROVIDER_TRANSIENT_MAX_MS = Math.max(PROVIDER_TRANSIENT_BASE_MS, Math.min(30000, Number(process.env.LAZYDEV_TRANSIENT_MAX_MS || 8000)));
@@ -46,10 +48,13 @@ const TOKEN_CODEC_TEMPLATE_PRESSURE = Math.max(0.55, Math.min(0.95, Number(proce
 const TOKEN_CODEC_TEMPLATE_MIN_SAVED = Math.max(64, Math.min(4096, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_MIN_SAVED || 128)));
 const ANTIGRAVITY_AGENT = 'antigravity-preview-09-2026';
 const KIMI_BUILTIN_TOOLS = [
-  'Read','Write','Edit','Grep','Glob','ReadMediaFile','Bash',
-  'WebSearch','FetchURL','EnterPlanMode','ExitPlanMode','TodoList',
-  'Agent','AgentSwarm','AskUserQuestion','NotifyUser','Skill',
-  'TaskList','TaskOutput','TaskStop','WaitFor'
+  // Current Kimi Code default-agent tool names. LazyDev exposes these to the
+  // local agent even when the upstream model has no native tool-call wire format.
+  'Agent','AskUserQuestion','SetTodoList','Shell','ReadFile','ReadMediaFile',
+  'Glob','Grep','WriteFile','StrReplaceFile','SearchWeb','FetchURL',
+  'EnterPlanMode','ExitPlanMode','TaskList','TaskOutput','TaskStop','Skill',
+  // MCP tools use glob matching in Kimi Code's global tool switch.
+  'mcp__*__*'
 ];
 // OpenAI-only request fields Kimi Code may send that not every OpenAI-compatible
 // backend accepts (NVIDIA's endpoint validation rejects unknown fields with a
@@ -73,6 +78,7 @@ const providers = [
   { id: 'groq', label: 'Groq', kind: 'openai', modelsUrl: 'https://api.groq.com/openai/v1/models', chatUrl: 'https://api.groq.com/openai/v1/chat/completions', env: 'GROQ_API_KEY' },
   { id: 'codebuddy', label: 'CodeBuddy', kind: 'codebuddy', modelsUrls: ['https://copilot.tencent.com/v3/config', 'https://api.codebuddy.ai/v1/models'], chatUrls: ['https://copilot.tencent.com/v2/chat/completions', 'https://api.codebuddy.ai/v1/chat/completions'], env: 'CODEBUDDY_API_KEY' },
   { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', modelsUrl: 'https://api.anthropic.com/v1/models', chatUrl: 'https://api.anthropic.com/v1/messages', env: 'ANTHROPIC_API_KEY' },
+  { id: 'pollinations', label: 'Pollinations', kind: 'pollinations', modelsUrl: 'https://text.pollinations.ai/models', chatUrl: 'https://text.pollinations.ai/openai', baseUrl: 'https://text.pollinations.ai/', env: null, auth: 'none', free: true },
 ];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EFFICIENCY_POLICY_FILE = path.join(root, 'runtime', 'lazy-efficiency.md');
@@ -249,6 +255,7 @@ function normalizeConfig(raw) {
 }
 function writeConfig(data) { writeJsonAtomic(configFile(), data); }
 function providerConfig(cfg, id) { const x = cfg.providers?.[id]; return x && typeof x === 'object' ? x : {}; }
+function providerRequiresApiKey(provider) { return provider?.auth !== 'none' && provider?.id !== 'ollama'; }
 function migrateDisabledModelConfig(cfg) {
   const active = providers.find((x) => x.id === cfg.activeProvider);
   const activePc = active ? providerConfig(cfg, active.id) : {};
@@ -256,7 +263,7 @@ function migrateDisabledModelConfig(cfg) {
   const fallback = providers.find((candidate) => {
     if (candidate.id === 'gemini') return false;
     const c = providerConfig(cfg, candidate.id);
-    return Boolean(c.apiKey && c.model) || (candidate.id === 'ollama' && Boolean(c.baseUrl && c.model));
+    return Boolean(c.model) && (!providerRequiresApiKey(candidate) || Boolean(c.apiKey) || candidate.id === 'ollama');
   });
   if (fallback) cfg.activeProvider = fallback.id;
   else activePc.model = '';
@@ -264,7 +271,7 @@ function migrateDisabledModelConfig(cfg) {
 }
 function activeProvider(cfg) { return providers.find((x) => x.id === cfg.activeProvider) || providers.find((x) => x.id === 'gemini') || providers[0]; }
 async function verifyLiveModel(provider, pc) {
-  if (!pc?.apiKey || !pc?.model) return { status: 'not-configured' };
+  if (!pc?.model || (providerRequiresApiKey(provider) && !pc?.apiKey)) return { status: 'not-configured' };
   try {
     const models = await fetchModels(provider, pc.apiKey);
     const found = models.find((m) => m.id === pc.model);
@@ -368,13 +375,14 @@ const PROVIDER_OUTPUT_HARD_CAPS = Object.freeze({
   groq: 32768,
   codebuddy: 32768,
   anthropic: 65536,
+  pollinations: 32768,
 });
 const KNOWN_MODEL_LIMITS = [
-  { test: /^nvidia\/nemotron-3-super-120b-a12b$/i, contextLimit: 1048576, outputLimit: 32768, toolUse: true, thinking: false, offEffort: 'none', provider: 'nvidia' },
-  { test: /^gemini-3\.1-flash-image(?:-.+)?$/i, contextLimit: 131072, outputLimit: 32768, toolUse: false, thinking: true },
-  { test: /^gemini-3\.1-flash-lite(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, toolUse: true, thinking: true },
-  { test: /^gemini-3\.1-pro(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, toolUse: true, thinking: true },
-  { test: /^gemini-3-flash(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, toolUse: true, thinking: true },
+  { test: /^nvidia\/nemotron-3-super-120b-a12b$/i, contextLimit: 1048576, outputLimit: 32768, thinking: false, offEffort: 'none', provider: 'nvidia' },
+  { test: /^gemini-3\.1-flash-image(?:-.+)?$/i, contextLimit: 131072, outputLimit: 32768, thinking: true },
+  { test: /^gemini-3\.1-flash-lite(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, thinking: true },
+  { test: /^gemini-3\.1-pro(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, thinking: true },
+  { test: /^gemini-3-flash(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, thinking: true },
 ];
 function knownModelInfo(id, providerId = '') {
   const model = String(id || '').trim();
@@ -387,20 +395,89 @@ function applyKnownModelLimits(info, provider) {
   if (!Number(out.contextLimit) && known.contextLimit) out.contextLimit = known.contextLimit;
   if (!Number(out.inputLimit) && known.contextLimit) out.inputLimit = known.contextLimit;
   if (!Number(out.outputLimit) && known.outputLimit) out.outputLimit = known.outputLimit;
-  if (known.toolUse !== undefined && /image/i.test(String(out.id || '')) && provider?.id === 'gemini') out.toolUse = known.toolUse;
+  if (known.toolUse !== undefined) out.toolUse = known.toolUse;
   if (known.offEffort) out.offEffort = known.offEffort;
   return out;
 }
 function isAntigravityModel(modelId) {
   return /^antigravity-preview(?:-|$)/i.test(String(modelId || '').trim());
 }
-function geminiModelSupportsKimiTools(modelId) {
-  const id = String(modelId || '').trim();
-  return isAntigravityModel(id) || !GEMINI_NO_TOOL_MODELS.some((pattern) => pattern.test(id));
+function nativeToolCapability(provider, pc) {
+  const explicit = pc?.toolUse;
+  const live = pc?.modelInfo?.toolUse;
+  if (explicit === false || live === false) return false;
+  if (explicit === true || live === true) return true;
+  return null;
 }
-function modelSupportsKimiTools(provider, pc) {
-  if (provider?.id === 'gemini') return pc?.toolUse !== false && geminiModelSupportsKimiTools(pc?.model);
-  return pc?.toolUse !== false;
+function modelSupportsKimiTools(provider, pc) { return nativeToolCapability(provider, pc) !== false; }
+function syntheticToolDefinitions(body = {}) {
+  if (!Array.isArray(body.tools)) return [];
+  return body.tools.map(item => {
+    if (!item || typeof item !== 'object') return null;
+    const fn = item.function && typeof item.function === 'object' ? item.function : item;
+    const name = String(fn.name || '').trim();
+    return name ? { name, description: String(fn.description || '').slice(0, 2000), parameters: fn.parameters && typeof fn.parameters === 'object' ? fn.parameters : { type: 'object', properties: {} } } : null;
+  }).filter(Boolean);
+}
+function syntheticToolPrompt(tools) {
+  if (!tools.length) return '';
+  const catalog = tools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters }));
+  let schema = JSON.stringify(catalog);
+  if (schema.length > SYNTHETIC_TOOL_MAX_SCHEMA_CHARS) {
+    const trimmed = []; let size = 2;
+    for (const item of catalog) { const part = JSON.stringify(item); if (size + part.length + 1 > SYNTHETIC_TOOL_MAX_SCHEMA_CHARS) break; trimmed.push(item); size += part.length + 1; }
+    schema = JSON.stringify(trimmed);
+  }
+  return `\n\n[LazyDev Synthetic Tool Bridge]\nNative function/tool calling is unavailable for this model, but agent tools remain available through LazyDev. Do not say tools are unavailable. When a tool is needed, emit exactly one or more calls with valid JSON inside ${SYNTHETIC_TOOL_OPEN} and ${SYNTHETIC_TOOL_CLOSE}. JSON must contain name and an object-valued arguments. The name must exactly match an available tool. Do not use Markdown fences around the envelope. After a tool result, continue normally.\nAvailable tools: ${schema}`;
+}
+function injectSyntheticToolPrompt(messages, prompt) {
+  const out = Array.isArray(messages) ? messages.map(m => (m && typeof m === 'object' ? { ...m } : m)) : [];
+  if (!prompt) return out;
+  const index = out.findIndex(m => m && typeof m === 'object' && m.role === 'system');
+  if (index >= 0) { const content = String(out[index].content || ''); out[index] = { ...out[index], content: content.trimEnd() + prompt }; return out; }
+  return [{ role: 'system', content: prompt.trim() }, ...out];
+}
+function prepareSyntheticMessages(messages) {
+  const out = []; const callNames = new Map();
+  for (const item of Array.isArray(messages) ? messages : []) {
+    if (!item || typeof item !== 'object') { out.push(item); continue; }
+    const msg = { ...item };
+    if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
+      const summaries = [];
+      for (const call of msg.tool_calls) { const id = String(call?.id || '').trim(); const fn = call?.function && typeof call.function === 'object' ? call.function : {}; const name = String(fn.name || '').trim(); if (id && name) { callNames.set(id, name); summaries.push(`${name}(${String(fn.arguments || '{}').slice(0, 4000)})`); } }
+      delete msg.tool_calls; delete msg.function_call;
+      const content = String(msg.content || '').trim(); const marker = summaries.length ? `[LazyDev synthetic tool call executed: ${summaries.join('; ')}]` : '';
+      msg.content = [content, marker].filter(Boolean).join('\n'); out.push(msg); continue;
+    }
+    if (msg.role === 'tool') {
+      const id = String(msg.tool_call_id || '').trim(); const name = callNames.get(id) || String(msg.name || 'tool'); let content = msg.content; if (content && typeof content === 'object') { try { content = JSON.stringify(content); } catch {} }
+      out.push({ role: 'user', content: `[LazyDev synthetic tool result: ${name}]\n${String(content || '').slice(0, SYNTHETIC_TOOL_MAX_RESULT_CHARS)}` }); continue;
+    }
+    if (msg.role === 'assistant' && msg.function_call && typeof msg.function_call === 'object') { const fn = msg.function_call; delete msg.function_call; msg.content = `[LazyDev synthetic tool call executed: ${String(fn.name || 'tool')}(${String(fn.arguments || '{}').slice(0, 4000)})]`; }
+    out.push(msg);
+  }
+  return out;
+}
+function extractSyntheticToolCalls(content, toolDefs) {
+  const text = String(content || ''); if (!text.includes(SYNTHETIC_TOOL_OPEN)) return []; const allowed = new Set(toolDefs.map(t => t.name));
+  const pattern = new RegExp(SYNTHETIC_TOOL_OPEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*(\\{[\\s\\S]*?\\})\\s*' + SYNTHETIC_TOOL_CLOSE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+  const out = []; let match; while ((match = pattern.exec(text))) { try { const value = JSON.parse(match[1]); if (!value || typeof value !== 'object') continue; const name = String(value.name || '').trim(); let args = value.arguments ?? value.args; if (typeof args === 'string') args = JSON.parse(args); if (allowed.has(name) && args && typeof args === 'object' && !Array.isArray(args)) out.push({ name, arguments: args }); } catch {} } return out;
+}
+function syntheticToolResponse(model, completion, calls, stream) {
+  const id = String(completion?.id || `chatcmpl-lazydev-${crypto.randomBytes(6).toString('hex')}`); const created = Number(completion?.created || Math.floor(Date.now() / 1000));
+  const entries = calls.map((call, index) => ({ index, id: `call_lazydev_${crypto.randomBytes(8).toString('hex')}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } }));
+  if (!stream) { const msg = { role: 'assistant', content: calls.length ? null : String(completion?.choices?.[0]?.message?.content || '') }; if (calls.length) msg.tool_calls = entries.map(({ index: _i, ...x }) => x); const payload = { id, object: 'chat.completion', created, model, choices: [{ index: 0, message: msg, finish_reason: calls.length ? 'tool_calls' : 'stop' }] }; if (completion?.usage) payload.usage = completion.usage; return { contentType: 'application/json', body: JSON.stringify(payload) }; }
+  const now = Math.floor(Date.now() / 1000); const chunks = calls.length ? [
+    { id, object: 'chat.completion.chunk', created: now, model, choices: [{ index: 0, delta: { role: 'assistant', tool_calls: entries.map(e => ({ index: e.index, id: e.id, type: e.type, function: e.function })) }, finish_reason: null }] },
+    { id, object: 'chat.completion.chunk', created: now, model, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+  ] : [
+    { id, object: 'chat.completion.chunk', created: now, model, choices: [{ index: 0, delta: { role: 'assistant', content: String(completion?.choices?.[0]?.message?.content || '') }, finish_reason: null }] },
+    { id, object: 'chat.completion.chunk', created: now, model, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+  ];
+  return { contentType: 'text/event-stream', body: chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n' };
+}
+function toolErrorIsUnsupported(status, detail) {
+  const text = String(detail || '').toLowerCase(); if (Number(status) === 404 && text.includes('no endpoints found') && text.includes('tool')) return true; if (![400, 404, 422].includes(Number(status))) return false; return /(?:unsupported|unknown|unrecognized|not supported|does not support|cannot|can't).*?(?:tool|function)|(?:tool|function).*?(?:unsupported|unknown|unrecognized|not supported|does not support)/i.test(text);
 }
 function normalizeOllamaBaseUrl(value) {
   let url = String(value || '').trim();
@@ -442,19 +519,46 @@ function normalizeModel(item, provider) {
       contextLimit: Number(item.inputTokenLimit) || known.contextLimit || null,
       live: true,
       supportedActions,
-      toolUse: known.toolUse !== undefined ? known.toolUse : geminiModelSupportsKimiTools(id),
+      toolUse: known.toolUse !== undefined ? known.toolUse : null,
+      toolUseSource: known.toolUse !== undefined ? 'catalog-rule' : 'unknown',
+    }, provider);
+  }
+  if (provider.kind === 'pollinations') {
+    const capabilities = Array.isArray(item.capabilities) ? item.capabilities : [];
+    const explicitTools = item.tools === true ? true : item.tools === false ? false : null;
+    const toolUse = explicitTools !== null ? explicitTools : capabilities.includes('tool_calling') ? true : null;
+    const contextLimit = Number(item.context_length) || Number(item.contextWindow) || Number(item.context_window) || null;
+    const outputLimit = Number(item.max_output_tokens) || Number(item.max_completion_tokens) || null;
+    return applyKnownModelLimits({
+      id,
+      name: String(item.name || item.id || id),
+      description: String(item.description || ''),
+      inputLimit: contextLimit,
+      outputLimit,
+      contextLimit,
+      live: true,
+      toolUse,
+      toolUseSource: toolUse === null ? 'unknown' : 'live',
+      reasoning: item.reasoning === true || capabilities.includes('reasoning'),
+      capabilities,
+      inputModalities: Array.isArray(item.input_modalities) ? item.input_modalities : [],
+      outputModalities: Array.isArray(item.output_modalities) ? item.output_modalities : [],
+      aliases: Array.isArray(item.aliases) ? item.aliases : [],
+      isFree: true,
+      freeTier: String(item.tier || '').toLowerCase() === 'anonymous' || provider.free === true,
     }, provider);
   }
   if (provider.kind === 'ollama') {
-    return applyKnownModelLimits({ id, name: id, inputLimit: null, outputLimit: null, contextLimit: null, live: true, toolUse: true, local: true }, provider);
+    return applyKnownModelLimits({ id, name: id, inputLimit: null, outputLimit: null, contextLimit: null, live: true, toolUse: null, toolUseSource: 'unknown', local: true }, provider);
   }
   if (provider.kind === 'codebuddy') {
-    return applyKnownModelLimits({ id, name: String(item.displayName || item.name || item.id || id), inputLimit: Number(item.max_input_tokens) || Number(item.context_window) || null, outputLimit: Number(item.max_output_tokens) || Number(item.max_tokens) || null, contextLimit: Number(item.context_window) || Number(item.max_input_tokens) || null, live: true, toolUse: item.supportsToolCall !== false }, provider);
+    const toolUse = item.supportsToolCall === true ? true : item.supportsToolCall === false ? false : null;
+    return applyKnownModelLimits({ id, name: String(item.displayName || item.name || item.id || id), inputLimit: Number(item.max_input_tokens) || Number(item.context_window) || null, outputLimit: Number(item.max_output_tokens) || Number(item.max_tokens) || null, contextLimit: Number(item.context_window) || Number(item.max_input_tokens) || null, live: true, toolUse, toolUseSource: toolUse === null ? 'unknown' : 'live' }, provider);
   }
   if (provider.kind === 'anthropic') {
     const capabilities = item.capabilities && typeof item.capabilities === 'object' ? item.capabilities : {};
-    const toolUse = capabilities.tool_use?.supported === true || capabilities.tools?.supported === true;
-    return applyKnownModelLimits({ id, name: String(item.display_name || item.name || id), inputLimit: Number(item.max_input_tokens) || known.inputLimit || null, outputLimit: Number(item.max_tokens) || known.outputLimit || null, contextLimit: Number(item.max_input_tokens) || known.contextLimit || null, live: true, capabilities, toolUse }, provider);
+    const toolUse = capabilities.tool_use?.supported === true || capabilities.tools?.supported === true ? true : (capabilities.tool_use?.supported === false || capabilities.tools?.supported === false ? false : null);
+    return applyKnownModelLimits({ id, name: String(item.display_name || item.name || id), inputLimit: Number(item.max_input_tokens) || known.inputLimit || null, outputLimit: Number(item.max_tokens) || known.outputLimit || null, contextLimit: Number(item.max_input_tokens) || known.contextLimit || null, live: true, capabilities, toolUse, toolUseSource: toolUse === null ? 'unknown' : 'live' }, provider);
   }
   const supportedParameters = Array.isArray(item.supported_parameters) ? item.supported_parameters : null;
   const pricing = item.pricing && typeof item.pricing === 'object' ? item.pricing : {};
@@ -485,18 +589,6 @@ function sortOpenRouterModels(models) {
     return String(a.name).localeCompare(String(b.name));
   });
 }
-function buildOpenRouterFreeFallbacks(primaryModel, models) {
-  const pool = models.filter((m) => m.isFree && m.toolUse !== false && m.id && m.id !== primaryModel && m.id !== OPENROUTER_FREE_MODEL);
-  const unique = [];
-  const seen = new Set([primaryModel, OPENROUTER_FREE_MODEL]);
-  for (const model of pool) {
-    if (!model.id || seen.has(model.id)) continue;
-    seen.add(model.id);
-    unique.push(model.id);
-    if (unique.length >= OPENROUTER_MODEL_FALLBACK_LIMIT) break;
-  }
-  return unique;
-}
 async function fetchModels(provider, apiKey, options = {}) {
   const timeout = Number(options.timeout) || 12000;
   if (provider.kind === 'ollama') {
@@ -515,6 +607,11 @@ async function fetchModels(provider, apiKey, options = {}) {
       .filter((x) => Array.isArray(x.supportedGenerationMethods) && x.supportedGenerationMethods.includes('generateContent'))
       .map((x) => normalizeModel(x, provider)).filter((x) => x.id);
     return models.filter((m) => !isAntigravityModel(m.id));
+  }
+  if (provider.kind === 'pollinations') {
+    const data = await requestJson(provider.modelsUrl, { timeout, headers: { 'user-agent': `lazydev/${version}` } });
+    const raw = Array.isArray(data) ? data : Array.isArray(data.models) ? data.models : Array.isArray(data.data) ? data.data : [];
+    return raw.map((x) => normalizeModel(x, provider)).filter((x) => x.id).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }
   if (provider.kind === 'anthropic') {
     const data = await requestJson(provider.modelsUrl, { timeout, headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'user-agent': `lazydev/${version}` } });
@@ -537,8 +634,11 @@ async function fetchModels(provider, apiKey, options = {}) {
   const data = await requestJson(provider.modelsUrl, { timeout, headers: { Authorization: `Bearer ${apiKey}`, 'user-agent': `lazydev/${version}` } });
   const list = Array.isArray(data.data) ? data.data : [];
   if (provider.id !== 'openrouter') return list.map((x) => normalizeModel(x, provider)).filter((x) => x.id);
-  const filtered = list.filter((x) => !Array.isArray(x.supported_parameters) || x.supported_parameters.includes('tools'));
-  const models = filtered.map((x) => normalizeModel(x, provider)).filter((x) => x.id);
+  // Keep the complete live catalog. Tool support is capability metadata, not a
+  // reason to hide a model from setup. This lets LazyDev auto-detect models such
+  // as any catalog-declared no-tool model and enter synthetic-tool mode instead
+  // of crashing with a provider 404 when Agent/MCP tools are present.
+  const models = list.map((x) => normalizeModel(x, provider)).filter((x) => x.id);
   if (!models.some((x) => x.id === OPENROUTER_FREE_MODEL)) models.unshift(syntheticOpenRouterFreeModel());
   return sortOpenRouterModels(models);
 }
@@ -590,6 +690,16 @@ function kimiEntry() {
   const packageRoot = resolveKimiPackageRoot();
   return packageRoot ? path.join(packageRoot, 'package.json') : null;
 }
+function isOpenRouterToolEndpointError(status, detail) {
+  const text = String(detail || '').toLowerCase();
+  return Number(status) === 404 && text.includes('no endpoints found') && text.includes('tool use');
+}
+function stripToolRequestFields(body) {
+  const cleaned = { ...body };
+  for (const field of ['tools','tool_choice','parallel_tool_calls','functions','function_call']) delete cleaned[field];
+  return cleaned;
+}
+
 function unsupportedRequestFieldsFromError(text) {
   const value = String(text || '');
   const names = new Set();
@@ -630,8 +740,9 @@ function normalizeOpenAICompatibleRequest(body, provider, pc, removed = new Set(
   }
   return out;
 }
-async function createProxy(provider, pc, proxyOptions = {}) {
+async function createProxy(provider, pc) {
   const token = crypto.randomBytes(24).toString('hex');
+  let learnedNoTools = false;
   const server = http.createServer((req, res) => {
     const expected = `Bearer ${token}`;
     if (req.headers.authorization !== expected) {
@@ -664,18 +775,20 @@ async function createProxy(provider, pc, proxyOptions = {}) {
       }
       body.model = pc.model;
       if (Array.isArray(body.messages)) body.messages = repairOpenAIHistory(body.messages);
+      let syntheticToolsActive = (learnedNoTools || nativeToolCapability(provider, pc) === false) && syntheticToolDefinitions(body).length > 0;
+      let syntheticToolsLearned = learnedNoTools;
+      const downstreamStream = body.stream === true;
       const removedRequestFields = new Set(UNSUPPORTED_PASSTHROUGH_FIELDS);
       const preparedBody = provider.id === 'gemini' ? prepareGeminiRequest(body, pc.model) : normalizeOpenAICompatibleRequest(body, provider, pc, removedRequestFields);
       if (preparedBody !== body) body = preparedBody;
       if (provider.id === 'openrouter') {
         const providerOptions = body.provider && typeof body.provider === 'object' && !Array.isArray(body.provider) ? body.provider : {};
+        // Do not inject a custom `models` array into openrouter/free. The OpenRouter
+        // free router is already feature-aware and chooses an endpoint that supports
+        // the request, including tool calling. Custom model arrays can override that
+        // routing decision and recreate the exact 404 this proxy is meant to avoid.
         body.provider = { ...providerOptions, require_parameters: false, allow_fallbacks: true };
-        const freeFallbacks = Array.isArray(proxyOptions.freeFallbacks) ? proxyOptions.freeFallbacks : [];
-        if (pc.model === OPENROUTER_FREE_MODEL || /:free$/i.test(pc.model)) {
-          const fallbacks = Array.from(new Set(freeFallbacks)).filter((id) => id && id !== pc.model).slice(0, OPENROUTER_MODEL_FALLBACK_LIMIT);
-          if (fallbacks.length) body.models = fallbacks;
-          else delete body.models;
-        }
+        delete body.models;
       }
       let tokenCodecStats = { changed: false, savedTokens: 0, beforeChars: 0, afterChars: 0, references: 0, replacedLines: 0, eligiblePayloads: 0, templateSavedTokens: 0, templateReferences: 0, cacheBoundary: -1 };
       if (TOKEN_CODEC_ENABLED && Array.isArray(body.messages)) {
@@ -711,7 +824,7 @@ async function createProxy(provider, pc, proxyOptions = {}) {
       const headers = {
         'content-type': 'application/json',
         'accept': req.headers.accept || 'application/json',
-        ...(provider.id === 'ollama' ? {} : provider.id === 'anthropic' ? { 'x-api-key': pc.apiKey, 'anthropic-version': '2023-06-01' } : {'authorization': `Bearer ${pc.apiKey}`}),
+        ...(provider.id === 'ollama' || !providerRequiresApiKey(provider) ? {} : provider.id === 'anthropic' ? { 'x-api-key': pc.apiKey, 'anthropic-version': '2023-06-01' } : {'authorization': `Bearer ${pc.apiKey}`}),
         'user-agent': `lazydev/${version}`
       };
       const transport = target.protocol === 'http:' ? http : https;
@@ -752,7 +865,14 @@ async function createProxy(provider, pc, proxyOptions = {}) {
         let repairCount = 0;
         const removedFields = new Set(UNSUPPORTED_PASSTHROUGH_FIELDS);
         while (true) {
-          const outboundBody = normalizeOpenAICompatibleRequest(body, provider, pc, removedFields);
+          let requestBody = { ...body };
+          const toolDefs = syntheticToolDefinitions(requestBody);
+          if (syntheticToolsActive && toolDefs.length) {
+            requestBody.messages = injectSyntheticToolPrompt(prepareSyntheticMessages(requestBody.messages), syntheticToolPrompt(toolDefs));
+            requestBody = stripToolRequestFields(requestBody);
+            requestBody.stream = false;
+          }
+          const outboundBody = normalizeOpenAICompatibleRequest(requestBody, provider, pc, removedFields);
           const result = await new Promise((resolve, reject) => {
             let responseSettled = false;
             const upstream = sendUpstream(outboundBody, upstreamRes => {
@@ -762,6 +882,14 @@ async function createProxy(provider, pc, proxyOptions = {}) {
                 upstreamRes.setEncoding('utf8');
                 upstreamRes.on('data', chunk => { errorBody += chunk; });
                 upstreamRes.on('end', () => resolve({ ok: false, status, body: errorBody, headers: upstreamRes.headers }));
+                upstreamRes.on('error', reject);
+                return;
+              }
+              if (syntheticToolsActive) {
+                let raw = '';
+                upstreamRes.setEncoding('utf8');
+                upstreamRes.on('data', chunk => { raw += chunk; });
+                upstreamRes.on('end', () => resolve({ ok: true, synthetic: true, status, body: raw, headers: upstreamRes.headers }));
                 upstreamRes.on('error', reject);
                 return;
               }
@@ -779,7 +907,27 @@ async function createProxy(provider, pc, proxyOptions = {}) {
             });
           }).catch(error => ({ ok: false, status: 502, body: error instanceof Error ? error.message : String(error), headers: {} }));
 
-          if (result.ok) return;
+          if (result.ok) {
+            if (result.synthetic) {
+              let completion = null;
+              try { completion = JSON.parse(result.body || '{}'); } catch (error) {
+                if (!res.headersSent) { res.statusCode = 502; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: { message: `Synthetic tool bridge received invalid upstream JSON: ${error.message}` } })); }
+                return;
+              }
+              const content = String(completion?.choices?.[0]?.message?.content || '');
+              const calls = extractSyntheticToolCalls(content, toolDefs);
+              const generated = syntheticToolResponse(attemptModel || pc.model, completion, calls, downstreamStream);
+              res.statusCode = 200;
+              res.setHeader('X-LazyDev-Synthetic-Tools', '1');
+              if (syntheticToolsLearned) res.setHeader('X-LazyDev-Tool-Capability', 'detected-unsupported');
+              res.setHeader('content-type', generated.contentType);
+              res.setHeader('content-length', Buffer.byteLength(generated.body));
+              res.setHeader('connection', 'close');
+              res.end(generated.body);
+              return;
+            }
+            return;
+          }
           if (result.status === 400 && repairCount < 4) {
             const fields = [...unsupportedRequestFieldsFromError(result.body)].filter((field) => !removedFields.has(field));
             if (fields.length) {
@@ -800,12 +948,14 @@ async function createProxy(provider, pc, proxyOptions = {}) {
             const parsed = (() => { try { return JSON.parse(result.body || '{}'); } catch { return null; } })();
             const detail = parsed?.error?.message || parsed?.message || result.body || '';
             const lower = String(result.body || '').toLowerCase();
-            const openRouterFallbackStatus = provider.id === 'openrouter' && (res.statusCode === 404 || res.statusCode === 429);
-            if (provider.id === 'openrouter' && lower.includes('no endpoints found') && lower.includes('tool use')) {
-              res.statusCode = 503;
-              res.setHeader('content-type', 'application/json');
-              res.end(JSON.stringify({ error: { message: `OpenRouter has no live endpoint for ${pc.model} that satisfies Kimi Code tool use. Use openrouter/free or rerun lazydev setup.` } }));
-              return;
+            const openRouterFallbackStatus = provider.id === 'openrouter' && (result.status === 404 || result.status === 429);
+            if (!syntheticToolsActive && toolErrorIsUnsupported(result.status, detail) && syntheticToolDefinitions(body).length) {
+              learnedNoTools = true;
+              pc.toolUse = false;
+              pc.modelInfo = { ...(pc.modelInfo || {}), toolUse: false, toolUseSource: 'probe' };
+              syntheticToolsActive = true;
+              syntheticToolsLearned = true;
+              continue;
             }
             if (openRouterFallbackStatus && result.status === 429) {
               const retryAfter = result.headers?.['retry-after'];
@@ -1295,7 +1445,8 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
   const geminiProxy = provider.id === 'gemini' && Boolean(proxy);
   const providerType = provider.id === 'gemini' && !antigravity && !geminiProxy ? 'google-genai' : antigravity || geminiProxy ? 'openai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
   const intelligence = modelIntelligenceProfile(pc.model);
-  const toolUse = modelSupportsKimiTools(provider, pc);
+  const nativeTools = nativeToolCapability(provider, pc);
+  const toolUse = proxy ? true : nativeTools !== false;
   const modelCapabilities = toolUse ? (provider.id === 'gemini' ? ['tool_use','thinking'] : ['tool_use']) : [];
   const disabledToolsLines = toolUse ? [] : [
     '',
@@ -1470,7 +1621,7 @@ async function setup() {
   line();
   providers.forEach((p, i) => {
     const c = providerConfig(cfg, p.id);
-    const configured = p.id === 'ollama' ? Boolean(c.baseUrl && c.model) : Boolean(c.apiKey && c.model);
+    const configured = p.id === 'ollama' ? Boolean(c.baseUrl && c.model) : providerRequiresApiKey(p) ? Boolean(c.apiKey && c.model) : Boolean(c.model);
     const state = configured ? green('saved') : dim('not configured');
     line(`${i + 1}. ${p.label} · ${state}${c.model ? ` · ${truncate(c.model, 42)}` : ''}`);
   });
@@ -1485,6 +1636,9 @@ async function setup() {
     baseUrl = (await prompt(`Ollama API URL [${baseUrl || 'http://127.0.0.1:11434'}]: `)).trim() || baseUrl || 'http://127.0.0.1:11434';
     baseUrl = normalizeOllamaBaseUrl(baseUrl);
     process.stdout.write(`${provider.label} · checking local API + live models ... `);
+  } else if (!providerRequiresApiKey(provider)) {
+    apiKey = '';
+    process.stdout.write(`${provider.label} · loading live models (no API key) ... `);
   } else {
     if (apiKey) {
       const keep = (await prompt(`${provider.label} key saved. Keep it? [Y/n]: `)).trim().toLowerCase();
@@ -1513,7 +1667,7 @@ async function setup() {
     line(green(`✓ ${provider.label} · saved`));
     line(green(`✓ ${chosen.id} · saved`));
     if (chosen.toolUse === false) {
-      line(yellow('• Compatibility mode: Kimi local tools are disabled for this model because its API does not accept Kimi function calls.'));
+      line(yellow('• Synthetic tool mode: this model does not advertise native tool calling. LazyDev keeps the same model and bridges tools locally.'));
     }
     line();
   } catch (error) {
@@ -1645,6 +1799,15 @@ function doctor() {
   clearScreen();
   title(`Lazy Developer doctor · ${version}`);
   line(`Runtime       ${process.platform} · ${os.arch()} · Node ${process.version}`);
+  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const npmProbe = spawnSync(npmCommand, ['--version'], { encoding: 'utf8', timeout: 5000 });
+  const npmOutput = String(npmProbe.stdout || npmProbe.stderr || '').trim();
+  if (npmProbe.error || npmProbe.status !== 0 || /npm\s+(?:ERR!|error)|ERR_NPM|ERESOLVE|EAI_AGAIN|ELIFECYCLE|ENOENT.*npm/i.test(String(npmProbe.stderr || ''))) {
+    line(`npm status    ${red('ERROR detected')} · native LazyDev does not require npm`);
+    if (npmOutput) line(`npm detail    ${truncate(npmOutput.replace(/\s+/g, ' '), 90)}`);
+  } else {
+    line(`npm           ${npmOutput || 'detected; version unavailable'}`);
+  }
   line(`Agent CLI     ${findAvailableAgentCli()?.command || 'not detected'}`);
   line(`Skills        ${skills.length} bundled`);
   line(`RTK           ${detectRtkVersion() || 'not installed'}`);
@@ -1734,30 +1897,34 @@ async function chat() {
   const savedPc = providerConfig(cfg, provider.id);
   let pc = { ...savedPc, toolUse: modelSupportsKimiTools(provider, savedPc) };
   if (!pc.apiKey || !pc.model) { line(red(`No active provider is configured. Run: lazydev setup`)); return; }
-  let openRouterModels = [];
   if (provider.id === 'openrouter') {
     const live = await verifyLiveModel(provider, pc);
-    if (live.status === 'missing' || live.status === 'no-tools') {
-      line(red(`OpenRouter model check failed: ${pc.model} is not currently exposed as a tool-capable live model.`));
+    if (live.status === 'missing') {
+      line(red(`OpenRouter model check failed: ${pc.model} is not currently exposed by the live model catalog.`));
       line(dim(`Run: lazydev setup → OpenRouter → choose a current model from the live catalog.`));
       return;
     }
-    openRouterModels = live.models || [];
+    if (live.model) {
+      pc.modelInfo = live.model;
+      // Preserve unknown capability as unknown so the proxy can learn it from
+      // the first tool-call response instead of assuming support.
+      pc.toolUse = live.model.toolUse;
+    }
+    if (live.status === 'no-tools') {
+      line(yellow(`Synthetic tool mode: ${pc.model} has no native tool-calling capability; LazyDev keeps this model and bridges tools locally.`));
+    }
   }
-  // Gemini and Anthropic use their native Kimi provider types; the other providers are normalized through the local compatibility proxy where needed.
-  const freeFallbacks = provider.id === 'openrouter' && (pc.model === OPENROUTER_FREE_MODEL || /:free$/i.test(pc.model))
-    ? buildOpenRouterFreeFallbacks(pc.model, openRouterModels)
-    : [];
+  // The selected model is never replaced because native tool calling is unavailable.
   if (isAntigravityModel(pc.model)) {
     line(red('That model is temporarily disabled in LazyDev. Choose another configured provider/model with `lazydev setup`.'));
     return;
   }
-  // Route every remote provider through the same loopback proxy so transient retry, request
-  // normalization, and token compression apply consistently. Ollama stays direct because it is
-  // local by design and has no provider-side availability or billing layer to protect.
+  // Route OpenAI-compatible providers and Ollama through the loopback proxy.
+  // Gemini and Anthropic keep their native wire adapters; OpenRouter/Ollama use
+  // the proxy as the synthetic-tool boundary when native tool calling is absent.
   pc.modelInfo = effectiveModelInfo(provider, pc);
-  const proxy = !['ollama', 'gemini', 'anthropic'].includes(provider.id)
-    ? await createProxy(provider, pc, { freeFallbacks })
+  const proxy = !['gemini', 'anthropic'].includes(provider.id)
+    ? await createProxy(provider, pc)
     : null;
   const sessionAliases = discoverSessionModelAliases(`lazydev/${pc.model}`);
   if (provider.id === 'ollama') assertHttpUrl(ollamaChatUrl(pc.baseUrl), 'Ollama API URL');

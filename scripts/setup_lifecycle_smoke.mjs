@@ -25,7 +25,7 @@ const child = spawnSync(process.execPath, [entry, 'setup'], {
   timeout: 3000,
 });
 assert.equal(child.status, 0, child.stderr);
-assert.match(child.stdout, /Provider \[1-9\]/);
+assert.match(child.stdout, /Provider \[1-10\]/);
 assert.match(child.stdout, /Choose a provider number/);
 
 console.log('setup lifecycle smoke: PASS');

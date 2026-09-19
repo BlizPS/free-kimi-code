@@ -381,7 +381,17 @@ fi
 
 if [ "$KIMI_NEEDS_UPDATE" -eq 1 ]; then
   step "Installing/updating Kimi Code to the latest available release"
-  curl -fsSL "$KIMI_INSTALL_URL" | bash
+  KIMI_INSTALL_SCRIPT="$TMP_DIR/kimi-install.sh"
+  KIMI_INSTALL_LOG="$TMP_DIR/kimi-install.log"
+  curl -fsSL "$KIMI_INSTALL_URL" -o "$KIMI_INSTALL_SCRIPT" || fatal "Could not download the Kimi Code installer."
+  if ! bash "$KIMI_INSTALL_SCRIPT" >"$KIMI_INSTALL_LOG" 2>&1; then
+    cat "$KIMI_INSTALL_LOG" >&2 || true
+    if grep -Eqi 'npm[[:space:]]+(ERR!|error)|ERR_NPM|ERESOLVE|EAI_AGAIN|ELIFECYCLE|ENOENT.*npm|command failed.*npm' "$KIMI_INSTALL_LOG"; then
+      fatal "Kimi Code installer failed with an npm error. The npm failure is shown above; fix npm/node setup and rerun LazyDev installer."
+    fi
+    fatal "Kimi Code installer failed. See the installer output above."
+  fi
+  cat "$KIMI_INSTALL_LOG"
   KIMI_COMMAND="$(find_kimi 2>/dev/null || true)"
   [ -n "$KIMI_COMMAND" ] || fatal "Kimi Code did not install a usable launcher."
   KIMI_CURRENT_VERSION="$(extract_semver "$($KIMI_COMMAND --version 2>/dev/null || true)")"

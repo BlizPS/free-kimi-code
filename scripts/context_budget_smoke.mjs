@@ -30,8 +30,6 @@ const TOKEN_SAVINGS_TARGET = 0.80;
 const MAX_SKILL_FRACTION = 0.24;
 const KIMI_PACKAGE = '@moonshot-ai/kimi-code';
 const OPENROUTER_FREE_MODEL = 'openrouter/free';
-const OPENROUTER_MODEL_FALLBACK_LIMIT = 3;
-const GEMINI_NO_TOOL_MODELS = [];
 const PROVIDER_TRANSIENT_MAX_RETRIES = Math.max(0, Math.min(4, Number(process.env.LAZYDEV_TRANSIENT_RETRIES || 2)));
 const PROVIDER_TRANSIENT_BASE_MS = Math.max(250, Math.min(5000, Number(process.env.LAZYDEV_TRANSIENT_BASE_MS || 800)));
 const PROVIDER_TRANSIENT_MAX_MS = Math.max(PROVIDER_TRANSIENT_BASE_MS, Math.min(30000, Number(process.env.LAZYDEV_TRANSIENT_MAX_MS || 8000)));
@@ -73,6 +71,7 @@ const providers = [
   { id: 'groq', label: 'Groq', kind: 'openai', modelsUrl: 'https://api.groq.com/openai/v1/models', chatUrl: 'https://api.groq.com/openai/v1/chat/completions', env: 'GROQ_API_KEY' },
   { id: 'codebuddy', label: 'CodeBuddy', kind: 'codebuddy', modelsUrls: ['https://copilot.tencent.com/v3/config', 'https://api.codebuddy.ai/v1/models'], chatUrls: ['https://copilot.tencent.com/v2/chat/completions', 'https://api.codebuddy.ai/v1/chat/completions'], env: 'CODEBUDDY_API_KEY' },
   { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', modelsUrl: 'https://api.anthropic.com/v1/models', chatUrl: 'https://api.anthropic.com/v1/messages', env: 'ANTHROPIC_API_KEY' },
+  { id: 'pollinations', label: 'Pollinations', kind: 'pollinations', modelsUrl: 'https://text.pollinations.ai/models', chatUrl: 'https://text.pollinations.ai/openai', baseUrl: 'https://text.pollinations.ai/', env: null, auth: 'none', free: true },
 ];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EFFICIENCY_POLICY_FILE = path.join(root, 'runtime', 'lazy-efficiency.md');
@@ -358,11 +357,11 @@ const PROVIDER_OUTPUT_HARD_CAPS = Object.freeze({
   anthropic: 65536,
 });
 const KNOWN_MODEL_LIMITS = [
-  { test: /^nvidia\/nemotron-3-super-120b-a12b$/i, contextLimit: 1048576, outputLimit: 32768, toolUse: true, thinking: false, offEffort: 'none', provider: 'nvidia' },
-  { test: /^gemini-3\.1-flash-image(?:-.+)?$/i, contextLimit: 131072, outputLimit: 32768, toolUse: false, thinking: true },
-  { test: /^gemini-3\.1-flash-lite(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, toolUse: true, thinking: true },
-  { test: /^gemini-3\.1-pro(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, toolUse: true, thinking: true },
-  { test: /^gemini-3-flash(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, toolUse: true, thinking: true },
+  { test: /^nvidia\/nemotron-3-super-120b-a12b$/i, contextLimit: 1048576, outputLimit: 32768, thinking: false, offEffort: 'none', provider: 'nvidia' },
+  { test: /^gemini-3\.1-flash-image(?:-.+)?$/i, contextLimit: 131072, outputLimit: 32768, thinking: true },
+  { test: /^gemini-3\.1-flash-lite(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, thinking: true },
+  { test: /^gemini-3\.1-pro(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, thinking: true },
+  { test: /^gemini-3-flash(?:-.+)?$/i, contextLimit: 1048576, outputLimit: 65536, thinking: true },
 ];
 function knownModelInfo(id, providerId = '') {
   const model = String(id || '').trim();
@@ -382,14 +381,7 @@ function applyKnownModelLimits(info, provider) {
 function isAntigravityModel(modelId) {
   return /^antigravity-preview(?:-|$)/i.test(String(modelId || '').trim());
 }
-function geminiModelSupportsKimiTools(modelId) {
-  const id = String(modelId || '').trim();
-  return isAntigravityModel(id) || !GEMINI_NO_TOOL_MODELS.some((pattern) => pattern.test(id));
-}
-function modelSupportsKimiTools(provider, pc) {
-  if (provider?.id === 'gemini') return pc?.toolUse !== false && geminiModelSupportsKimiTools(pc?.model);
-  return pc?.toolUse !== false;
-}
+function modelSupportsKimiTools(provider, pc) { return pc?.toolUse !== false; }
 function normalizeOllamaBaseUrl(value) {
   let url = String(value || '').trim();
   if (!url) url = 'http://127.0.0.1:11434';
@@ -430,11 +422,12 @@ function normalizeModel(item, provider) {
       contextLimit: Number(item.inputTokenLimit) || known.contextLimit || null,
       live: true,
       supportedActions,
-      toolUse: known.toolUse !== undefined ? known.toolUse : geminiModelSupportsKimiTools(id),
+      toolUse: null,
+      toolUseSource: 'unknown',
     }, provider);
   }
   if (provider.kind === 'ollama') {
-    return applyKnownModelLimits({ id, name: id, inputLimit: null, outputLimit: null, contextLimit: null, live: true, toolUse: true, local: true }, provider);
+    return applyKnownModelLimits({ id, name: id, inputLimit: null, outputLimit: null, contextLimit: null, live: true, toolUse: null, toolUseSource: 'unknown', local: true }, provider);
   }
   if (provider.kind === 'codebuddy') {
     return applyKnownModelLimits({ id, name: String(item.displayName || item.name || item.id || id), inputLimit: Number(item.max_input_tokens) || Number(item.context_window) || null, outputLimit: Number(item.max_output_tokens) || Number(item.max_tokens) || null, contextLimit: Number(item.context_window) || Number(item.max_input_tokens) || null, live: true, toolUse: item.supportsToolCall !== false }, provider);
@@ -472,18 +465,6 @@ function sortOpenRouterModels(models) {
     if (a.isFree !== b.isFree) return a.isFree ? -1 : 1;
     return String(a.name).localeCompare(String(b.name));
   });
-}
-function buildOpenRouterFreeFallbacks(primaryModel, models) {
-  const pool = models.filter((m) => m.isFree && m.toolUse !== false && m.id && m.id !== primaryModel && m.id !== OPENROUTER_FREE_MODEL);
-  const unique = [];
-  const seen = new Set([primaryModel, OPENROUTER_FREE_MODEL]);
-  for (const model of pool) {
-    if (!model.id || seen.has(model.id)) continue;
-    seen.add(model.id);
-    unique.push(model.id);
-    if (unique.length >= OPENROUTER_MODEL_FALLBACK_LIMIT) break;
-  }
-  return unique;
 }
 async function fetchModels(provider, apiKey, options = {}) {
   const timeout = Number(options.timeout) || 12000;
@@ -655,13 +636,9 @@ async function createProxy(provider, pc, proxyOptions = {}) {
       if (preparedBody !== body) body = preparedBody;
       if (provider.id === 'openrouter') {
         const providerOptions = body.provider && typeof body.provider === 'object' && !Array.isArray(body.provider) ? body.provider : {};
-        body.provider = { ...providerOptions, require_parameters: true, allow_fallbacks: true };
-        const freeFallbacks = Array.isArray(proxyOptions.freeFallbacks) ? proxyOptions.freeFallbacks : [];
-        if (pc.model === OPENROUTER_FREE_MODEL || /:free$/i.test(pc.model)) {
-          const fallbacks = Array.from(new Set(freeFallbacks)).filter((id) => id && id !== pc.model).slice(0, OPENROUTER_MODEL_FALLBACK_LIMIT);
-          if (fallbacks.length) body.models = fallbacks;
-          else delete body.models;
-        }
+        body.provider = { ...providerOptions, require_parameters: false, allow_fallbacks: true };
+        // Never replace the selected model. OpenRouter performs feature-aware endpoint routing.
+        delete body.models;
       }
       let tokenCodecStats = { changed: false, savedTokens: 0, beforeChars: 0, afterChars: 0, references: 0, replacedLines: 0, eligiblePayloads: 0, templateSavedTokens: 0, templateReferences: 0, cacheBoundary: -1 };
       if (TOKEN_CODEC_ENABLED && Array.isArray(body.messages)) {
@@ -1669,20 +1646,21 @@ async function chat() {
   const savedPc = providerConfig(cfg, provider.id);
   let pc = { ...savedPc, toolUse: modelSupportsKimiTools(provider, savedPc) };
   if (!pc.apiKey || !pc.model) { line(red(`No active provider is configured. Run: lazydev setup`)); return; }
-  let openRouterModels = [];
   if (provider.id === 'openrouter') {
     const live = await verifyLiveModel(provider, pc);
-    if (live.status === 'missing' || live.status === 'no-tools') {
-      line(red(`OpenRouter model check failed: ${pc.model} is not currently exposed as a tool-capable live model.`));
+    if (live.status === 'missing') {
+      line(red(`OpenRouter model check failed: ${pc.model} is not currently exposed by the live model catalog.`));
       line(dim(`Run: lazydev setup → OpenRouter → choose a current model from the live catalog.`));
       return;
     }
-    openRouterModels = live.models || [];
+    if (live.model) {
+      pc.modelInfo = live.model;
+      pc.toolUse = live.model.toolUse;
+    }
+    if (live.status === 'no-tools') line(yellow(`Synthetic tool mode: ${pc.model} has no native tool-calling capability; LazyDev keeps this model and bridges tools locally.`));
   }
   // Gemini and Anthropic use their native Kimi provider types; the other providers are normalized through the local compatibility proxy where needed.
-  const freeFallbacks = provider.id === 'openrouter' && (pc.model === OPENROUTER_FREE_MODEL || /:free$/i.test(pc.model))
-    ? buildOpenRouterFreeFallbacks(pc.model, openRouterModels)
-    : [];
+
   if (isAntigravityModel(pc.model)) {
     line(red('That model is temporarily disabled in LazyDev. Choose another configured provider/model with `lazydev setup`.'));
     return;
@@ -1691,8 +1669,8 @@ async function chat() {
   // normalization, and token compression apply consistently. Ollama stays direct because it is
   // local by design and has no provider-side availability or billing layer to protect.
   pc.modelInfo = effectiveModelInfo(provider, pc);
-  const proxy = !['ollama', 'gemini', 'anthropic'].includes(provider.id)
-    ? await createProxy(provider, pc, { freeFallbacks })
+  const proxy = !['gemini', 'anthropic'].includes(provider.id)
+    ? await createProxy(provider, pc)
     : null;
   const sessionAliases = discoverSessionModelAliases(`lazydev/${pc.model}`);
   if (provider.id === 'ollama') assertHttpUrl(ollamaChatUrl(pc.baseUrl), 'Ollama API URL');

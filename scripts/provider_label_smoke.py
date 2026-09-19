@@ -9,11 +9,11 @@ if legacy_label in text or legacy_kind in text:
 expected = [
     ('openrouter', 'OpenRouter'), ('gemini', 'Gemini'), ('nvidia', 'NVIDIA'),
     ('openai', 'OpenAI'), ('ollama', 'Ollama Local'), ('llm7', 'LLM7'),
-    ('groq', 'Groq'), ('codebuddy', 'CodeBuddy'), ('anthropic', 'Anthropic'),
+    ('groq', 'Groq'), ('codebuddy', 'CodeBuddy'), ('anthropic', 'Anthropic'), ('pollinations', 'Pollinations'),
 ]
 for pid, label in expected:
     if f"id: '{pid}'" not in text or f"label: '{label}'" not in text:
         raise SystemExit(f'FAIL: missing provider {label}')
 if "Provider [1-${providers.length}]" not in text:
     raise SystemExit('FAIL: setup provider range is not dynamic')
-print('PASS: 9 provider menu and canonical OpenAI label are present')
+print('PASS: 10 provider menu and canonical OpenAI label are present')
