@@ -31,20 +31,21 @@ from typing import Any
 VERSION = "1.0.0"
 KIMI_VERSION = "2.0.0"
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from runtime.platform_paths import platform_paths, ensure_artifact_directory
 HOME = Path.home()
 IS_WINDOWS = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
-IS_TERMUX = bool(os.environ.get("TERMUX_VERSION") or "com.termux" in str(os.environ.get("PREFIX", "")))
-
-if IS_WINDOWS:
-    CONFIG_DIR = Path(os.environ.get("APPDATA", HOME)) / "lazydev"
-    KIMI_HOME = CONFIG_DIR / "kimi-code"
-    ARTIFACT_DIR = Path(os.environ.get("LOCALAPPDATA", HOME)) / "LazyDev" / "artifacts"
-else:
-    CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ("Library/Application Support" if IS_MAC else ".config"))) / "lazydev"
-    KIMI_HOME = CONFIG_DIR / "kimi-code"
-    default_artifact = Path("/storage/emulated/0/lazydevfile") if IS_TERMUX else HOME / ("Library/Application Support/lazydev/artifacts" if IS_MAC else ".local/share/lazydev/artifacts")
-    ARTIFACT_DIR = Path(os.environ.get("LAZYDEV_ARTIFACT_DIR", default_artifact))
+_PLATFORM_PATHS = platform_paths()
+IS_TERMUX = bool(_PLATFORM_PATHS["termux"])
+CONFIG_DIR = Path(_PLATFORM_PATHS["configDirectory"])
+KIMI_HOME = Path(_PLATFORM_PATHS["kimiHome"])
+# Standalone deliverables use one visible, predictable directory. The CLI
+# intentionally owns this path rather than inheriting stale environment values
+# from older LazyDev releases.
+ARTIFACT_DIR = Path(_PLATFORM_PATHS["artifactDirectory"])
 
 PROVIDERS: list[dict[str, Any]] = [
     {"id": "openrouter", "label": "OpenRouter", "kind": "openai", "models": "https://openrouter.ai/api/v1/models", "base": "https://openrouter.ai/api/v1", "env": "OPENROUTER_API_KEY"},
@@ -914,6 +915,18 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         f'command = {toml_quote(_hook_command(ROOT / "hooks" / "lazydev-path-guard.py"))}',
         'timeout = 3',
         '',
+        '[[hooks]]',
+        'event = "PostToolUse"',
+        'matcher = "Write|WriteFile"',
+        f'command = {toml_quote(_hook_command(ROOT / "hooks" / "lazydev-artifact-router.py"))}',
+        'timeout = 3',
+        '',
+        '[[hooks]]',
+        'event = "PostToolUse"',
+        'matcher = "Write|WriteFile|Edit|StrReplaceFile"',
+        f'command = {toml_quote(_hook_command(ROOT / "hooks" / "lazydev-ui-audit.py"))}',
+        'timeout = 3',
+        '',
     ]
     lines = [line for line in lines if line is not None]
     config_path = KIMI_HOME / "config.toml"
@@ -943,15 +956,20 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
 def write_runtime_system(provider: dict[str, Any], model: str) -> None:
     system_source = ROOT / "runtime" / "SYSTEM.md"
     base = system_source.read_text(encoding="utf-8") if system_source.is_file() else ""
+    today = time.strftime("%Y-%m-%d")
     additions = [
         "## LazyDev Native CLI Runtime",
         "- Keep simple requests simple; avoid unrelated files, abstractions, and prose.",
         "- Inspect before changing and verify the smallest meaningful result before claiming completion.",
         "- Use bundled LazyDev skills when materially relevant.",
+        f"- Current date: {today}. Treat this only as the current calendar date; never use it as a historical event year.",
         f"- Active provider: {provider['label']}; model: {model}.",
-        f"- Standalone artifacts must be written under {ARTIFACT_DIR}.",
-        "- File search safety: use Glob with a separate directory and pattern; do not use absolute wildcard paths or scan OS/system roots.",
-        "- Read safety: never request a max_chars budget below 4096; use pagination for larger files.",
+        f"- Standalone artifacts must end up under the exact canonical directory: {ARTIFACT_DIR}.",
+        "- File search: Glob uses path=<real directory> and pattern=<relative glob>; never put an absolute path or wildcard into pattern, and never scan OS/system roots.",
+        "- Read: max_chars is optional and may be small; use the configured default for normal source files and pagination for large files. Do not emit an artificial minimum-max_chars error.",
+        f"- Factual UI content: research historical/current facts, years, statistics, names, and dates before writing. For current/latest/today claims, a displayed current year must match {today[:4]}; historical years require a source.",
+        "- UI images: never guess URLs. Prefer inline SVG/CSS or verified local assets; use remote images only after checking the URL. A saved standalone UI must not depend on placeholder/broken image references.",
+        "- After UI writes, inspect image src/background-image URLs, check local assets exist, and recheck date-sensitive copy before finishing.",
     ]
     (KIMI_HOME / "SYSTEM.md").write_text(base.rstrip() + "\n\n" + "\n".join(additions) + "\n", encoding="utf-8")
 
@@ -977,7 +995,7 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     except Exception:
         proxy and proxy.close()
         raise
-    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_artifact_directory()
     workspace = _workspace_for_chat()
     # Kimi Code uses the child process working directory as its workspace root.
     # Do not pass --work-dir: that flag is not supported by every standalone Kimi Code build.
@@ -993,6 +1011,7 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     env["KIMI_LOOP_MAX_STEPS_PER_TURN"] = "0"
     env["LAZYDEV_ARTIFACT_DIR"] = str(ARTIFACT_DIR)
     env["LAZYDEV_VERSION"] = VERSION
+    env["LAZYDEV_CONTEXT_DIR"] = str(HOME / ".lazydev")
     env["LAZYDEV_MODEL"] = str(pc.get("model"))
     for name in list(env):
         if name.startswith("KIMI_MODEL_"):
@@ -1190,6 +1209,7 @@ def env_info(as_json: bool) -> int:
 
 
 def artifact_command(name: str | None) -> int:
+    ensure_artifact_directory()
     if not name:
         print(str(ARTIFACT_DIR))
         return 0
@@ -1197,7 +1217,7 @@ def artifact_command(name: str | None) -> int:
     if raw.is_absolute() or raw.name != name or name in {".", ".."}:
         print("Artifact filename must be a single filename.", file=sys.stderr)
         return 1
-    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_artifact_directory()
     target = ARTIFACT_DIR / name
     if target.exists():
         stem, suffix = raw.stem, raw.suffix

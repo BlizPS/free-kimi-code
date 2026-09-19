@@ -17,8 +17,8 @@ with tempfile.TemporaryDirectory(prefix="lazydev-fs-") as tmp:
     html = root / "anime-watcher.html"
     html.write_text("<html>ok</html>\n", encoding="utf-8")
 
-    too_small = validate_tool_event("Read", {"path": str(html), "max_chars": 200})
-    assert too_small and "max_chars" in too_small
+    small_read = validate_tool_event("Read", {"path": str(html), "max_chars": 200})
+    assert small_read is None
 
     good_read = validate_tool_event("Read", {"path": str(html), "max_chars": 4096})
     assert good_read is None

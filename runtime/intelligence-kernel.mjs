@@ -55,8 +55,9 @@ const SIGNALS = {
   review: [/\b(review|audit|diff|security review|code review|inspect)\b/i],
   test: [/\b(test|verify|validation|coverage|smoke|regression proof)\b/i],
   ui: [/\b(ui|ux|frontend|landing page|responsive|animation|design system|3d|three\.js|webgl)\b/i],
-  research: [/\b(latest|current|newest|research|compare|documentation|docs|look up|search)\b/i],
+  research: [/\b(latest|current|newest|research|compare|documentation|docs|look up|search|sejarah|historical|history|tahun|year|statistik|statistics|biography|biografi)\b/i],
   security: [/\b(auth|credential|secret|injection|xss|csrf|permission|sandbox)\b/i],
+  factual: [/\b(sejarah|historical|history|tahun|year|statistic|statistics|data|biography|biografi|timeline|peristiwa|event)\b/i],
   performance: [/\b(performance|latency|slow|memory|cpu|optimi[sz]e|benchmark)\b/i],
 };
 
@@ -123,10 +124,12 @@ export function buildTaskContext(task) {
   const mode = task.simple ? 'simple-direct' : task.depth;
   const uiContext = task.text ? buildUiTaskContext(task.text) : '';
   const uiDesign = task.text && task.primary === 'ui' ? buildCompactUiDesignFrame(task.text, task.cwd || process.cwd()) : '';
+  const factual = task.scores?.factual > 0;
   const parts = [
     `[LZ] mode=${mode}; task=${task.primary}; complexity=${task.complexity}`,
     ...(uiContext ? [uiContext] : []),
     ...(uiDesign ? [uiDesign] : []),
+    ...(factual ? ['[FACT-CHECK] Research factual dates, historical claims, names, and statistics before writing; never invent year values.'] : []),
     buildReasoningScaffoldFrame(task.primary || 'implementation'),
     `[PLAN] ${buildTaskMicroPlan(task.primary || 'implementation').join(' → ')}`,
     `plan=${task.plan ? 'required' : 'skip unless needed'}; verify=required; artifact=${task.artifact ? 'canonical-path' : 'repo-native'}`,

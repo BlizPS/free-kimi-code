@@ -2,7 +2,7 @@
 import path from 'node:path';
 import os from 'node:os';
 
-const READ_MIN_CHARS = 4096;
+const READ_MIN_CHARS = 1;
 const WILDCARD_RE = /[*?\[\]{}]/u;
 const WINDOWS_SYSTEM_RE = /^(?:[A-Za-z]:[\\/](?:Windows|Program Files(?: \(x86\))?|ProgramData|\$Recycle\.Bin|System Volume Information)(?:[\\/]|$)|\\\\[^\\]+\\(?:Windows|Program Files(?: \(x86\))?|ProgramData)(?:[\\/]|$))/iu;
 const POSIX_ROOTS = new Set(['/','/bin','/sbin','/etc','/usr','/var','/opt','/System','/Library','/private']);
@@ -28,8 +28,8 @@ const name = String(event.tool_name || '');
 const args = event.tool_input && typeof event.tool_input === 'object' ? event.tool_input : {};
 
 if (name === 'Read') {
-  if (args.max_chars !== undefined && Number(args.max_chars) < READ_MIN_CHARS) {
-    block('max_chars is too small for a reliable read. Retry with max_chars >= 4096 (prefer 100000 for normal source files).');
+  if (args.max_chars !== undefined && (!Number.isFinite(Number(args.max_chars)) || Number(args.max_chars) < READ_MIN_CHARS)) {
+    block('max_chars must be a positive integer when provided.');
   }
   if (isSystemPath(args.path)) {
     block('do not read operating-system directories. Read the project workspace or a specific user file instead.');

@@ -5,7 +5,7 @@ import os
 import re
 from pathlib import Path
 
-READ_MIN_CHARS = 4096
+READ_MIN_CHARS = 1
 WILDCARD_RE = re.compile(r"[*?\[\]{}]")
 WINDOWS_SYSTEM_RE = re.compile(
     r"^(?:[A-Za-z]:[\\/](?:Windows|Program Files(?: \(x86\))?|ProgramData|\$Recycle\.Bin|System Volume Information)(?:[\\/]|$)|\\\\[^\\]+\\(?:Windows|Program Files(?: \(x86\))?|ProgramData)(?:[\\/]|$))",
@@ -46,9 +46,9 @@ def _message(tool_name: str, tool_input: dict) -> str | None:
             try:
                 max_chars = int(raw_max)
             except (TypeError, ValueError):
-                return "max_chars must be a positive integer. Use at least 4096 for file reads."
+                return "max_chars must be a positive integer when provided."
             if max_chars < READ_MIN_CHARS:
-                return "max_chars is too small for a reliable read. Retry with max_chars >= 4096 (prefer 100000 for normal source files)."
+                return "max_chars must be a positive integer when provided."
         if is_system_path(tool_input.get("path")):
             return "do not read operating-system directories. Read the project workspace or a specific user file instead."
 

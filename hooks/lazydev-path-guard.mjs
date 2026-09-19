@@ -40,10 +40,9 @@ async function main() {
   const artifactSegment=path.basename(out);
   const pathSegments=resolved.split(path.sep).filter(Boolean);
   const looksLikeArtifactAlias=pathSegments.includes(artifactSegment) && !inside(resolved,out);
-  if (implied && standaloneExt && (workspaceRootFile || looksLikeArtifactAlias)) {
-    process.stderr.write(`BLOCKED by LazyDev: standalone deliverables must be written at ${out}. Target was ${resolved}. Use ${path.join(out, path.basename(resolved))}. Do not claim the file is saved until that exact path is verified.\n`);
-    process.exit(2);
-  }
+  // Misplaced standalone files are recoverable: the PostToolUse artifact
+  // router moves successful Write/WriteFile outputs to the canonical path.
+  // Keep this pre-tool hook focused on collision protection.
   if (implied && /^(?:Write|WriteFile)$/u.test(toolName) && inside(resolved, out) && fs.existsSync(resolved)) {
     const nextName = nextAvailableArtifactName(out, path.basename(resolved));
     process.stderr.write(`BLOCKED by LazyDev: the standalone deliverable already exists at ${resolved}. Keep the existing file untouched and retry Write with ${path.join(out, nextName)}. Do not claim success until that exact new path is verified.\n`);

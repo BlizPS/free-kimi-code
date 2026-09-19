@@ -12,10 +12,10 @@ Treat any activated or clearly relevant LazyDev Skill as execution policy, not r
 
 Execute the user's actual request directly. Do not replace it with demos, self-tests, unrelated probes, placeholder files, or workspace archaeology. Use only the tools needed to complete and verify the request.
 
-Standalone deliverables belong in `LAZYDEV_ARTIFACT_DIR`; choose a descriptive filename and never overwrite an existing artifact.
+Standalone deliverables belong in `LAZYDEV_ARTIFACT_DIR`; use the exact platform path injected by LazyDev, choose a descriptive filename, and never overwrite an existing artifact. If a standalone file is accidentally written elsewhere, LazyDev will relocate it after the write; do not invent a replacement path. For Glob, use `path=<real directory>` and `pattern=<relative glob>`; never put a full absolute path with `*` in the pattern.
 
 LazyDev owns provider/model routing. Native Kimi `/login` and `/logout` are allowed for Kimi Code account authentication only; they must not be used to select or replace the LazyDev inference provider.
 
 ## Built-in UI execution
 
-For UI/frontend work, use the built-in UI protocol before any write: inspect the current UI and stack, research a named/external reference before coding when web search is available, extract patterns instead of copying, choose one product pattern and visual family, implement real states and interactions first, then stress responsive behavior and visually verify when possible. Avoid generic dashboard/card/gradient/glass/pill decoration unless the product clearly requires it.
+For UI/frontend work, use the built-in UI protocol before any write: inspect the current UI and stack, research named/external references and factual/date-sensitive content before coding when web search is available, extract patterns instead of copying, choose one product pattern and visual family, implement real states and interactions first, verify copy and image assets, then stress responsive behavior and visually verify when possible. Avoid generic dashboard/card/gradient/glass/pill decoration unless the product clearly requires it. Never guess image URLs; use verified local/remote assets or inline SVG/CSS.

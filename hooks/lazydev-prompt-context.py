@@ -16,10 +16,10 @@ prompt = str(prompt).strip()
 checks = {
     "debug": r"\b(error|bug|crash|fail|broken|hang|timeout|regression)\b",
     "ui": r"\b(ui|ux|frontend|responsive|landing page|design system)\b",
-    "artifact": r"\b(save|export|download|artifact|deliverable|generate|create)\b",
+    "artifact": r"\b(save|export|download|artifact|deliverable|generate|create|write|simpan|menyimpan|unduh|hasilkan|buat|bikin|buatin|buatkan|bikinin)\b",
     "review": r"\b(review|audit|code review|inspect)\b",
     "test": r"\b(test|verify|validation|coverage|smoke)\b",
-    "research": r"\b(latest|current|documentation|docs|research|search)\b",
+    "research": r"\b(latest|current|documentation|docs|research|search|sejarah|historical|history|tahun|year|statistik|data|biography|biografi)\b",
     "security": r"\b(auth|credential|secret|xss|csrf|permission|sandbox)\b",
 }
 scores = {name: len(re.findall(pattern, prompt, re.I)) for name, pattern in checks.items()}

@@ -157,11 +157,23 @@ function uiCommand(argv) {
 
 function outputDirectory() {
   const configured = String(process.env.LAZYDEV_ARTIFACT_DIR || '').trim();
-  return configured || platform.artifactDirectory;
+  if (!configured) return platform.artifactDirectory;
+  const normalized = configured.replaceAll('\\', '/').replace(/\/$/u, '');
+  const canonical = String(platform.artifactDirectory).replaceAll('\\', '/').replace(/\/$/u, '');
+  if (isTermux && !normalized.startsWith('/storage/emulated/0/')) return platform.artifactDirectory;
+  if (!isTermux && /\/(?:AppData\/Local\/LazyDev\/artifacts|\.local\/(?:share\/)?lazydev\/artifacts)$/iu.test(normalized)) return platform.artifactDirectory;
+  if (normalized === canonical) return platform.artifactDirectory;
+  return configured;
 }
 function ensureOutputDirectory() {
   const dir = outputDirectory();
   fs.mkdirSync(dir, { recursive: true });
+  if (isTermux) {
+    const alias = path.join(platform.home, 'lazydevfile');
+    if (path.resolve(alias) !== path.resolve(dir) && !fs.existsSync(alias)) {
+      try { fs.symlinkSync(dir, alias, 'dir'); } catch {}
+    }
+  }
   return dir;
 }
 function safeArtifactPath(name) {
@@ -1295,9 +1307,13 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
   const artifactHook = path.join(root, 'hooks', 'lazydev-path-guard.mjs');
   const promptHook = path.join(root, 'hooks', 'lazydev-prompt-context.mjs');
   const shellHook = path.join(root, 'hooks', 'lazydev-shell-guard.mjs');
+  const artifactRouterHook = path.join(root, 'hooks', 'lazydev-artifact-router.mjs');
+  const uiAuditHook = path.join(root, 'hooks', 'lazydev-ui-audit.py');
   const promptCommand = shellQuoteCommand(process.execPath, [promptHook]);
   const artifactCommand = shellQuoteCommand(process.execPath, [artifactHook]);
   const shellCommand = shellQuoteCommand(process.execPath, [shellHook]);
+  const artifactRouterCommand = shellQuoteCommand(process.execPath, [artifactRouterHook]);
+  const uiAuditCommand = `${JSON.stringify(process.platform === 'win32' ? process.env.PYTHON || 'python' : process.env.PYTHON || 'python3')} ${JSON.stringify(uiAuditHook)}`;
   const tokenConfig = buildKimiTokenConfig({ maxContext: context, maxOutput: output, reserveRatio: 0.08 });
   return [
     `default_model = ${tomlQuote(alias)}`,
@@ -1380,6 +1396,18 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     `event = ${tomlQuote('PreToolUse')}`,
     `matcher = ${tomlQuote('Write|WriteFile|StrReplaceFile')}`,
     `command = ${tomlQuote(artifactCommand)}`,
+    `timeout = 3`,
+    ``,
+    `[[hooks]]`,
+    `event = ${tomlQuote('PostToolUse')}`,
+    `matcher = ${tomlQuote('Write|WriteFile')}`,
+    `command = ${tomlQuote(artifactRouterCommand)}`,
+    `timeout = 3`,
+    ``,
+    `[[hooks]]`,
+    `event = ${tomlQuote('PostToolUse')}`,
+    `matcher = ${tomlQuote('Write|WriteFile|Edit|StrReplaceFile')}`,
+    `command = ${tomlQuote(uiAuditCommand)}`,
     `timeout = 3`,
     ``,
     `[[hooks]]`,

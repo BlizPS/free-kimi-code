@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { promises as fsp } from 'node:fs';
 
 const root = path.resolve(new URL('..', import.meta.url).pathname);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lazydev-guard-'));
@@ -15,9 +16,9 @@ try {
     encoding: 'utf8',
     env: { ...process.env, KIMI_CODE_HOME: kimiHome, LAZYDEV_ARTIFACT_DIR: '/storage/emulated/0/lazydevfile' },
   });
-  assert.equal(result.status, 2, `expected Write to be blocked, got ${result.status}: ${result.stderr}`);
-  assert.match(result.stderr, /\/storage\/emulated\/0\/lazydevfile/);
-  console.log('PASS: artifact path guard intercepts Kimi Write and forces the canonical artifact directory');
+  assert.equal(result.status, 0, `legacy path should be recoverable, got ${result.status}: ${result.stderr}`);
+  assert.equal(result.stderr, '');
+  console.log('PASS: artifact path guard allows recoverable paths; post-write router owns relocation');
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
