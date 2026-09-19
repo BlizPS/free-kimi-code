@@ -8,8 +8,8 @@ $ProgressPreference = 'SilentlyContinue'
 $Repo = 'BlizPS/lazy-developer-free-kimi-code'
 $Branch = if ($env:LAZYDEV_BRANCH) { $env:LAZYDEV_BRANCH } else { 'main' }
 $LazyDevVersion = '1.0.0'
-$KimiVersion = '2.0.0'
 $KimiInstallUrl = 'https://code.kimi.com/kimi-code/install.ps1'
+$KimiReleasesApiUrl = 'https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest'
 $ArchiveUrl = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
 $GitHubApiUrl = "https://api.github.com/repos/$Repo/commits/$Branch"
 $RtkApiUrl = 'https://api.github.com/repos/rtk-ai/rtk/releases/latest'
@@ -106,6 +106,16 @@ function Get-RtkLatestVersion {
     } catch {}
     return ''
 }
+function Get-KimiLatestVersion {
+    try {
+        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.0' }
+        $data = Invoke-RestMethod -Headers $headers -Uri $KimiReleasesApiUrl
+        $tag = [string]$data.tag_name
+        $m = [regex]::Match($tag, '(\d+\.\d+\.\d+)$')
+        if ($m.Success) { return $m.Groups[1].Value }
+    } catch {}
+    return ''
+}
 function Get-InstalledLazyVersion {
     $file = Join-Path $InstallRoot 'package.json'
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return '' }
@@ -164,7 +174,7 @@ if ($Help) {
 @"
 Lazy Developer installer
 
-Installs or updates Kimi Code $KimiVersion, RTK, and Lazy Developer $LazyDevVersion without npm or a private Node.js runtime.
+Installs or updates the latest Kimi Code release, RTK, and Lazy Developer $LazyDevVersion without npm or a private Node.js runtime.
 The LazyDev CLI is native Python and does not require Node.js.
 Run the same command again to update only components that changed.
 Existing Kimi sessions are left alone during updates.
@@ -176,17 +186,26 @@ Ensure-PythonRunner
 
 $KimiExe = Find-Kimi
 $KimiCurrentVersion = Get-KimiVersion $KimiExe
+$KimiLatestVersion = Get-KimiLatestVersion
 $KimiNeedsUpdate = $true
-if ($KimiCurrentVersion -and (Test-VersionAtLeast $KimiCurrentVersion $KimiVersion)) {
-    $KimiNeedsUpdate = $false
-    if ($KimiCurrentVersion -eq $KimiVersion) {
-        Write-Host "Kimi Code $KimiCurrentVersion is already current — skipped."
+if ($KimiCurrentVersion) {
+    if ($KimiLatestVersion) {
+        if (Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion) {
+            $KimiNeedsUpdate = $false
+            if ($KimiCurrentVersion -eq $KimiLatestVersion) {
+                Write-Host "Kimi Code $KimiCurrentVersion is already current — skipped."
+            } else {
+                Write-Host "Kimi Code $KimiCurrentVersion is newer than the latest published $KimiLatestVersion — skipped."
+            }
+        } else {
+            Write-Host "Kimi Code $KimiCurrentVersion → $KimiLatestVersion — update required."
+        }
     } else {
-        Write-Host "Kimi Code $KimiCurrentVersion is newer than the managed minimum $KimiVersion — skipped."
+        $KimiNeedsUpdate = $false
+        Write-Host "Kimi Code $KimiCurrentVersion is installed; latest release could not be checked — skipped."
     }
 } else {
-    $KimiDisplay = if ($KimiCurrentVersion) { $KimiCurrentVersion } else { 'not detected' }
-    Write-Host "Kimi Code $KimiDisplay needs installation/update."
+    Write-Host 'Kimi Code not found — installing the latest available release.'
 }
 
 $RemoteRevision = Get-GitHubRevision
@@ -236,8 +255,7 @@ if ($RtkExe -and $RtkCurrentVersion -and $RtkLatestVersion -and (Test-VersionAtL
 }
 
 if ($KimiNeedsUpdate) {
-    Step "Installing/updating Kimi Code $KimiVersion"
-    $env:KIMI_VERSION = $KimiVersion
+    Step "Installing/updating Kimi Code to the latest available release"
     $kimiInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
     try {
         Invoke-WebRequest -UseBasicParsing -Uri $KimiInstallUrl -OutFile $kimiInstallerPath
@@ -249,7 +267,8 @@ if ($KimiNeedsUpdate) {
     $KimiExe = Find-Kimi
     if (-not $KimiExe) { Fail "Kimi Code did not install a usable launcher." }
     $KimiCurrentVersion = Get-KimiVersion $KimiExe
-    if (-not $KimiCurrentVersion -or $KimiCurrentVersion -ne $KimiVersion) { Fail "Installed Kimi Code is $KimiCurrentVersion; expected exactly $KimiVersion." }
+    if (-not $KimiCurrentVersion) { Fail 'Installed Kimi Code version could not be detected.' }
+    if ($KimiLatestVersion -and -not (Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion)) { Fail "Installed Kimi Code is $KimiCurrentVersion; latest detected release is $KimiLatestVersion." }
     Write-Host "✓ Kimi Code $KimiCurrentVersion ready"
 }
 

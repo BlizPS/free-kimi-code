@@ -4,8 +4,8 @@ set -eu
 REPO="BlizPS/lazy-developer-free-kimi-code"
 BRANCH="${LAZYDEV_BRANCH:-main}"
 LAZYDEV_VERSION="1.0.0"
-KIMI_VERSION="2.0.0"
 KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"
+KIMI_RELEASE_API_URL="https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest"
 RTK_INSTALL_URL="https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh"
 REPO_ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz"
 GITHUB_API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"
@@ -80,6 +80,23 @@ version_at_least() {
 
 extract_semver() {
   printf '%s\n' "$1" | sed -n 's/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1
+}
+
+get_kimi_latest_version() {
+  response="$TMP_DIR/kimi-release.json"
+  if curl -fsSL \
+    -H 'Accept: application/vnd.github+json' \
+    -H 'User-Agent: lazy-developer-installer/1.0.0' \
+    "$KIMI_RELEASE_API_URL" -o "$response" 2>/dev/null; then
+    tag_line="$(grep -m1 -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' "$response" 2>/dev/null || true)"
+    version="$(printf '%s\n' "$tag_line" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | tail -n 1 || true)"
+    if [ -n "$version" ]; then
+      printf '%s\n' "$version"
+      return 0
+    fi
+  fi
+  url="$(curl -fsSL -o /dev/null -w '%{url_effective}' 'https://github.com/MoonshotAI/kimi-code/releases/latest' 2>/dev/null || true)"
+  printf '%s\n' "$url" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | tail -n 1
 }
 
 TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t lazydev)"
@@ -256,21 +273,31 @@ refresh_shell_path() {
 }
 KIMI_COMMAND="$(find_kimi 2>/dev/null || true)"
 KIMI_CURRENT_VERSION=""
+KIMI_LATEST_VERSION="$(get_kimi_latest_version || true)"
 KIMI_NEEDS_UPDATE=1
 if [ -n "$KIMI_COMMAND" ]; then
   KIMI_CURRENT_VERSION="$(extract_semver "$($KIMI_COMMAND --version 2>/dev/null || true)")"
-  if [ -n "$KIMI_CURRENT_VERSION" ] && version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_VERSION"; then
-    KIMI_NEEDS_UPDATE=0
-    if [ "$KIMI_CURRENT_VERSION" = "$KIMI_VERSION" ]; then
-      say "Kimi Code $KIMI_CURRENT_VERSION is already current — skipped."
+  if [ -n "$KIMI_CURRENT_VERSION" ]; then
+    if [ -n "$KIMI_LATEST_VERSION" ]; then
+      if version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_LATEST_VERSION"; then
+        KIMI_NEEDS_UPDATE=0
+        if [ "$KIMI_CURRENT_VERSION" = "$KIMI_LATEST_VERSION" ]; then
+          say "Kimi Code $KIMI_CURRENT_VERSION is already current — skipped."
+        else
+          say "Kimi Code $KIMI_CURRENT_VERSION is newer than the latest published $KIMI_LATEST_VERSION — skipped."
+        fi
+      else
+        say "Kimi Code $KIMI_CURRENT_VERSION → $KIMI_LATEST_VERSION — update required."
+      fi
     else
-      say "Kimi Code $KIMI_CURRENT_VERSION is newer than the managed minimum $KIMI_VERSION — skipped."
+      KIMI_NEEDS_UPDATE=0
+      say "Kimi Code $KIMI_CURRENT_VERSION is installed; latest release could not be checked — skipped."
     fi
   else
-    say "Kimi Code ${KIMI_CURRENT_VERSION:-not detected} needs installation/update."
+    say "Kimi Code launcher found but its version could not be detected — update required."
   fi
 else
-  say "Kimi Code not found — installing $KIMI_VERSION."
+  say "Kimi Code not found — installing the latest available release."
 fi
 
 get_remote_revision() {
@@ -353,13 +380,13 @@ else
 fi
 
 if [ "$KIMI_NEEDS_UPDATE" -eq 1 ]; then
-  step "Installing/updating Kimi Code $KIMI_VERSION"
-  curl -fsSL "$KIMI_INSTALL_URL" | KIMI_VERSION="$KIMI_VERSION" bash
+  step "Installing/updating Kimi Code to the latest available release"
+  curl -fsSL "$KIMI_INSTALL_URL" | bash
   KIMI_COMMAND="$(find_kimi 2>/dev/null || true)"
   [ -n "$KIMI_COMMAND" ] || fatal "Kimi Code did not install a usable launcher."
   KIMI_CURRENT_VERSION="$(extract_semver "$($KIMI_COMMAND --version 2>/dev/null || true)")"
   [ -n "$KIMI_CURRENT_VERSION" ] || fatal "Could not read the installed Kimi Code version."
-  [ "$KIMI_CURRENT_VERSION" = "$KIMI_VERSION" ] || fatal "Installed Kimi Code is $KIMI_CURRENT_VERSION; expected exactly $KIMI_VERSION."
+  if [ -n "$KIMI_LATEST_VERSION" ] && ! version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_LATEST_VERSION"; then fatal "Installed Kimi Code is $KIMI_CURRENT_VERSION; latest detected release is $KIMI_LATEST_VERSION."; fi
   say "✓ Kimi Code $KIMI_CURRENT_VERSION ready"
 fi
 

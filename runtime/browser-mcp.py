@@ -279,8 +279,25 @@ def handle(request: dict[str, Any]) -> dict[str, Any] | None:
     return reply(request_id, error={"code": -32601, "message": f"Method not found: {method}"})
 
 
+def write_json_line(payload: dict[str, Any]) -> None:
+    # MCP JSON-RPC is UTF-8. Writing encoded bytes avoids Windows cp1252/charmap
+    # failures when fetched pages contain Japanese, emoji, or other Unicode.
+    data = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+    stream = getattr(sys.stdout, "buffer", None)
+    if stream is not None:
+        stream.write(data)
+        stream.flush()
+    else:
+        sys.stdout.write(data.decode("utf-8"))
+        sys.stdout.flush()
+
+
 def main() -> None:
-    for raw in sys.stdin:
+    stream = getattr(sys.stdin, "buffer", None)
+    iterator = stream if stream is not None else sys.stdin
+    for raw in iterator:
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", "replace")
         raw = raw.strip()
         if not raw:
             continue
@@ -288,8 +305,7 @@ def main() -> None:
             request = json.loads(raw)
             response = handle(request)
             if response is not None:
-                sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
-                sys.stdout.flush()
+                write_json_line(response)
         except Exception as exc:
             request_id = None
             try:
@@ -297,8 +313,7 @@ def main() -> None:
             except Exception:
                 pass
             if request_id is not None:
-                sys.stdout.write(json.dumps(reply(request_id, error={"code": -32000, "message": str(exc)}), ensure_ascii=False) + "\n")
-                sys.stdout.flush()
+                write_json_line(reply(request_id, error={"code": -32000, "message": str(exc)}))
 
 
 if __name__ == "__main__":

@@ -29,7 +29,6 @@ from pathlib import Path
 from typing import Any
 
 VERSION = "1.0.0"
-KIMI_VERSION = "2.0.0"
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -1005,7 +1004,7 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     clear_terminal()
     kimi = find_kimi()
     if not kimi:
-        print("Kimi Code launcher not found. Install Kimi Code 2.0.0 with the LazyDev installer.", file=sys.stderr)
+        print("Kimi Code launcher not found. Install Kimi Code with the LazyDev installer.", file=sys.stderr)
         return 1
     cfg = read_config()
     provider = active_provider(cfg)

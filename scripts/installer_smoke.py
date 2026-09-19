@@ -8,14 +8,14 @@ ps=(ROOT/'install.ps1').read_text(encoding='utf-8')
 pkg=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))
 
 checks=[
-    ('install.sh', 'KIMI_VERSION="2.0.0"', sh),
+    ('install.sh', 'KIMI_RELEASE_API_URL="https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest"', sh),
     ('install.sh', 'KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"', sh),
     ('install.sh', 'GITHUB_API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"', sh),
     ('install.sh', '.lazydev-revision', sh),
     ('install.sh', 'KIMI_NEEDS_UPDATE=0', sh),
     ('install.sh', 'LAZYDEV_NEEDS_UPDATE=0', sh),
     ('install.sh', 'Existing Kimi sessions and configuration were left in place.', sh),
-    ('install.ps1', "$KimiVersion = '2.0.0'", ps),
+    ('install.ps1', "$KimiReleasesApiUrl = 'https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest'", ps),
     ('install.ps1', "https://code.kimi.com/kimi-code/install.ps1", ps),
     ('install.ps1', "$GitHubApiUrl =", ps),
     ('install.ps1', "'.lazydev-revision'", ps),
@@ -60,10 +60,13 @@ checks += [
 for name, needle, text in checks:
     if needle not in text: errors.append(f'{name}: missing {needle}')
 
-if 'version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_VERSION"' not in sh:
-    errors.append('install.sh: Kimi version check must skip newer compatible installations')
-if '(Test-VersionAtLeast $KimiCurrentVersion $KimiVersion)' not in ps:
-    errors.append('install.ps1: Kimi version check must skip newer compatible installations')
+if 'KIMI_LATEST_VERSION=' not in sh or 'version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_LATEST_VERSION"' not in sh:
+    errors.append('install.sh: Kimi version check must use dynamically discovered latest release')
+if '$KimiLatestVersion = Get-KimiLatestVersion' not in ps or 'Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion' not in ps:
+    errors.append('install.ps1: Kimi version check must use dynamically discovered latest release')
+for name, text in [('install.sh', sh), ('install.ps1', ps)]:
+    if 'KIMI_VERSION' in text or '$KimiVersion' in text:
+        errors.append(f'{name}: hardcoded Kimi version remains')
 if 'ensure_legacy_launcher_targets' not in sh or 'canonical="$LAZYDEV_BIN_DIR/lazydev"' not in sh:
     errors.append('install.sh: compatibility launcher reconciliation missing canonical launcher copy')
 if 'for dir in "$HOME/.local/bin" "${PREFIX:-}/bin"' in sh:

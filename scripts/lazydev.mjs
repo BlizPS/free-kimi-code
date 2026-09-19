@@ -29,7 +29,6 @@ const TOKEN_SAVINGS_FLOOR = 0.75;
 const TOKEN_SAVINGS_TARGET = 0.80;
 const MAX_SKILL_FRACTION = 0.24;
 const KIMI_PACKAGE = '@moonshot-ai/kimi-code';
-const KIMI_VERSION = '2.0.0';
 const OPENROUTER_FREE_MODEL = 'openrouter/free';
 const OPENROUTER_MODEL_FALLBACK_LIMIT = 3;
 const GEMINI_NO_TOOL_MODELS = [];
@@ -997,7 +996,7 @@ function ensureKimiInstalled() {
   if (packageRoot) return true;
   const launcher = findKimiInvocation();
   if (launcher) return true;
-  console.error(red(`Lazy Developer requires Kimi Code ${KIMI_VERSION}.`));
+  console.error(red(`Lazy Developer requires an installed Kimi Code CLI.`));
   console.error('Install it with the Lazy Developer installer, then run: lazydev chat');
   console.error('macOS/Linux: curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.sh" | sh');
   console.error('Windows PowerShell: irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1" -OutFile "$env:TEMP\lazydev-install.ps1"; & "$env:TEMP\lazydev-install.ps1"');
@@ -1754,7 +1753,7 @@ async function chat() {
   writeKimiAgentGuidance();
   writeLazyDevMcpConfig();
   const invocation = findKimiInvocation();
-  if (!invocation) { try { proxy?.server.close(); } catch {} line(red(`Kimi Code launcher not found. Install Kimi Code ${KIMI_VERSION} with the LazyDev installer.`)); return; }
+  if (!invocation) { try { proxy?.server.close(); } catch {} line(red(`Kimi Code launcher not found. Install Kimi Code with the LazyDev installer.`)); return; }
   // Kimi Code standalone resolves its managed runtime from KIMI_CODE_HOME.
   // Do not pass the legacy explicit-config flag: recent standalone builds
   // resolve their runtime config from KIMI_CODE_HOME instead.
