@@ -1203,9 +1203,9 @@ function writeLazyDevMcpConfig() {
   } catch {}
   const servers = data.mcpServers && typeof data.mcpServers === 'object' ? { ...data.mcpServers } : {};
   servers['lazydev-search'] = {
-    command: process.execPath,
-    args: [path.join(root, 'runtime', 'lazydev-web-search.mjs')],
-    env: { LAZYDEV_SEARCH_USER_AGENT: `lazydev/${version}` },
+    command: process.platform === 'win32' ? 'python' : 'python3',
+    args: [path.join(root, 'runtime', 'browser-mcp.py')],
+    env: { LAZYDEV_BROWSER_USER_AGENT: `LazyDev-Browser/${version}` },
     cwd: root,
   };
   data.mcpServers = servers;

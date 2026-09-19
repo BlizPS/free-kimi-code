@@ -1216,11 +1216,14 @@ function writeLazyDevMcpConfig() {
     if (!data || typeof data !== 'object') data = {};
   } catch {}
   const servers = data.mcpServers && typeof data.mcpServers === 'object' ? { ...data.mcpServers } : {};
+  const pythonCommand = process.env.LAZYDEV_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
   servers['lazydev-search'] = {
-    command: process.execPath,
-    args: [path.join(root, 'runtime', 'lazydev-web-search.mjs')],
-    env: { LAZYDEV_SEARCH_USER_AGENT: `lazydev/${version}` },
+    command: pythonCommand,
+    args: [path.join(root, 'runtime', 'browser-mcp.py')],
+    env: { LAZYDEV_BROWSER_USER_AGENT: `LazyDev-Browser/${version}` },
     cwd: root,
+    startupTimeoutMs: 30000,
+    toolTimeoutMs: 60000,
   };
   data.mcpServers = servers;
   writeJsonAtomic(file, data);

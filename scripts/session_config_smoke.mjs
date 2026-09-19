@@ -43,7 +43,9 @@ try {
   assert.match(config, /matcher = "Write\|WriteFile\|StrReplaceFile"/);
   assert.match(config, /\[mcp\.client\]/);
   const mcp = JSON.parse(fs.readFileSync(path.join(kimiHome, 'mcp.json'), 'utf8'));
-  assert.equal(mcp.mcpServers['lazydev-search'].args.at(-1), path.join(root, 'runtime', 'lazydev-web-search.mjs'));
+  assert.equal(mcp.mcpServers['lazydev-search'].args.at(-1), path.join(root, 'runtime', 'browser-mcp.py'));
+  assert.equal(mcp.mcpServers['lazydev-search'].toolTimeoutMs, 60000);
+  assert.equal(mcp.mcpServers['lazydev-search'].startupTimeoutMs, 30000);
   const args = fs.readFileSync(argsFile, 'utf8');
   assert.doesNotMatch(args, /--config-file/);
   assert.match(args, /--add-dir/);

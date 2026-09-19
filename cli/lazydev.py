@@ -953,6 +953,33 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     return config_path, tui_path
 
 
+def write_kimi_mcp_config() -> Path:
+    """Register the dependency-free Python browser/search MCP without Node.js."""
+    KIMI_HOME.mkdir(parents=True, exist_ok=True)
+    mcp_file = KIMI_HOME / "mcp.json"
+    try:
+        data = json.loads(mcp_file.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    servers = data.get("mcpServers")
+    if not isinstance(servers, dict):
+        servers = {}
+    servers["lazydev-search"] = {
+        "command": str(Path(sys.executable).resolve()),
+        "args": [str((ROOT / "runtime" / "browser-mcp.py").resolve())],
+        "cwd": str(ROOT),
+        "startupTimeoutMs": 30000,
+        "toolTimeoutMs": 60000,
+    }
+    data["mcpServers"] = servers
+    temp = mcp_file.with_suffix(f".tmp-{os.getpid()}")
+    temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    temp.replace(mcp_file)
+    return mcp_file
+
+
 def write_runtime_system(provider: dict[str, Any], model: str) -> None:
     system_source = ROOT / "runtime" / "SYSTEM.md"
     base = system_source.read_text(encoding="utf-8") if system_source.is_file() else ""
@@ -992,6 +1019,7 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
         proxy = _ProviderProxy(provider, pc)
     try:
         write_kimi_files(provider, cfg, proxy)
+        write_kimi_mcp_config()
     except Exception:
         proxy and proxy.close()
         raise
