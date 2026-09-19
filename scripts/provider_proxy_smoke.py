@@ -70,7 +70,7 @@ try:
     huge_pc = {"apiKey": "x", "model": "huge-context-model", "modelInfo": {"context": 1048576, "output": 131072}}
     huge = {"model": "huge-context-model", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 131072}
     huge_normalized = mod._normalize_provider_request(huge, provider, huge_pc)
-    assert int(huge_normalized["max_tokens"]) <= 16384, huge_normalized
+    assert int(huge_normalized["max_tokens"]) <= 32768, huge_normalized
 
     tool = {"type": "function", "function": {"name": "ReadFile", "description": "Read a file", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}
     no_native_pc = {"apiKey": "test-key", "model": "same-model", "modelInfo": {"context": 32768, "output": 4096, "toolUse": False}}

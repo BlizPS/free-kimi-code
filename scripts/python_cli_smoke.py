@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory() as td:
         assert model_entry["max_context_size"] == 131072
         assert model_entry["max_context_size"] > 0
         assert model_entry["max_output_size"] == 16384
-        assert model_entry["max_input_size"] == 114688
+        assert model_entry["max_input_size"] == 125830
 
         # The exact NVIDIA model has a documented 1M context and agent/tool
         # support; when metadata is absent the built-in model rule supplies it.
@@ -80,8 +80,8 @@ with tempfile.TemporaryDirectory() as td:
         parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
         model_entry = parsed["models"]["lazydev/Nvidia/nemotron-3-super-120b-a12b"]
         assert model_entry["max_context_size"] == 1048576
-        assert model_entry["max_input_size"] == 1032192
-        assert model_entry["max_output_size"] == 16384
+        assert model_entry["max_input_size"] == 1006633
+        assert model_entry["max_output_size"] == 32768
         assert "tool_use" in model_entry["capabilities"]
         assert model_entry["off_effort"] == "none"
     finally:
@@ -103,7 +103,7 @@ normalized = mod._normalize_provider_request({
 })
 assert "prompt_cache_key" not in normalized
 assert "reasoning_effort" not in normalized
-assert normalized["max_tokens"] == 16384
+assert normalized["max_tokens"] == 32768
 kwargs = normalized["extra_body"]["chat_template_kwargs"]
 assert kwargs["enable_thinking"] is True and kwargs["low_effort"] is True and kwargs["force_nonempty_content"] is True
 
@@ -142,7 +142,7 @@ try:
         refreshed = mod.refresh_selected_model(live_cfg, live_provider, refreshed_pc)
         assert refreshed_pc["model"] == "nvidia/nemotron-3-super-120b-a12b"
         assert refreshed["context"] == 1048576
-        assert refreshed["output"] == 16384
+        assert refreshed["output"] == 32768
     finally:
         mod.PROVIDERS[:] = old_provider_models
 finally:

@@ -25,6 +25,7 @@ import { buildGeminiRetryRequest, chunkFinishReason, chunkHasVisibleOutput, gemi
 import { compressAgenticMessages, FOVEANCE_DEFAULTS } from '../systems/token/foveance.mjs';
 
 const version = '1.0.0';
+const CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768;
 const TOKEN_SAVINGS_FLOOR = 0.75;
 const TOKEN_SAVINGS_TARGET = 0.80;
 const MAX_SKILL_FRACTION = 0.24;
@@ -1231,16 +1232,22 @@ function effectiveModelInfo(provider, pc) {
 }
 
 function contextBudget(modelInfo = {}) {
-  const rawMax = Math.max(1024, Number(modelInfo?.contextLimit) || Number(modelInfo?.inputLimit) || 16384);
-  const cap = Number(process.env.LAZYDEV_CONTEXT_CAP || 0);
-  const max = cap > 0 ? Math.max(1024, Math.min(rawMax, cap)) : rawMax;
-  const rawOutput = Math.max(256, Number(modelInfo?.outputLimit) || 8192);
-  const output = Math.max(256, Math.min(rawOutput, Math.max(256, Math.floor(max * 0.25)), 16384));
-  const reserve = max > 4096 ? Math.min(Math.max(1024, output), Math.max(1024, Math.floor(max / 4))) : Math.max(512, Math.floor(max / 6));
+  const max = Math.max(1024, Number(modelInfo?.contextLimit) || Number(modelInfo?.context_length) || Number(modelInfo?.maxContextSize) || Number(modelInfo?.max_context_size) || Number(modelInfo?.inputLimit) || 16384);
+  const rawOutput = Math.max(256, Number(modelInfo?.outputLimit) || Number(modelInfo?.max_completion_tokens) || 8192);
+  const outputFraction = max <= 8192 ? 0.20 : max <= 131072 ? 0.25 : 0.20;
+  const output = Math.max(256, Math.min(rawOutput, Math.max(256, Math.floor(max * outputFraction)), CONTEXT_ABSOLUTE_OUTPUT_CAP));
+  const reserve = Math.max(768, Math.min(output, Math.floor(max * 0.25)));
   const input = Math.max(1024, max - reserve);
-  const ratio = Math.max(0.60, Math.min(0.90, (max - reserve - 512) / Math.max(1, max)));
+  const ratio = 0.90;
   return { max, output, reserve, input, ratio };
 }
+
+const fullWindowCheck = contextBudget({ contextLimit: 32768, inputLimit: 12288, outputLimit: 32768 });
+if (fullWindowCheck.max !== 32768) throw new Error(`Context window was incorrectly reduced: ${fullWindowCheck.max}`);
+if (fullWindowCheck.output !== 8192) throw new Error(`Unexpected optimized output budget for 32K model: ${fullWindowCheck.output}`);
+const largeWindowCheck = contextBudget({ contextLimit: 1048576, inputLimit: 262144, outputLimit: 32768 });
+if (largeWindowCheck.max !== 1048576) throw new Error(`Large context window was incorrectly reduced: ${largeWindowCheck.max}`);
+if (largeWindowCheck.output !== 32768) throw new Error(`Unexpected optimized output budget for 1M model: ${largeWindowCheck.output}`);
 
 function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
   const alias = `lazydev/${pc.model}`;

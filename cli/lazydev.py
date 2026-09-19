@@ -83,9 +83,9 @@ DEFAULT_MODEL_CONTEXT = 16384
 DEFAULT_MODEL_OUTPUT = 8192
 CONTEXT_SAFETY_MARGIN = 1024
 CONTEXT_UNKNOWN_OUTPUT_FRACTION = 0.25
-CONTEXT_ABSOLUTE_OUTPUT_CAP = 16384
+CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768
 CONTEXT_EXTRA_MULTIPLIER = max(1.25, min(4.0, float(os.environ.get("LAZYDEV_CONTEXT_EXTRA_MULTIPLIER", "2.0") or 2.0)))
-CONTEXT_FIT_RATIO = max(0.58, min(0.82, float(os.environ.get("LAZYDEV_CONTEXT_FIT_RATIO", "0.70") or 0.70)))
+CONTEXT_FIT_RATIO = 1.0
 CONTEXT_RECENT_MESSAGES = max(4, min(20, int(os.environ.get("LAZYDEV_CONTEXT_RECENT_MESSAGES", "10") or 10)))
 CONTEXT_ARCHIVE_SNIPPET_CHARS = max(80, min(800, int(os.environ.get("LAZYDEV_CONTEXT_ARCHIVE_SNIPPET_CHARS", "240") or 240)))
 CONTEXT_TOOL_RESULT_CHARS = max(400, min(6000, int(os.environ.get("LAZYDEV_CONTEXT_TOOL_RESULT_CHARS", "1200") or 1200)))
@@ -142,7 +142,14 @@ def known_model_limits(provider: dict[str, Any], model: str) -> dict[str, Any]:
 def apply_model_limits(model_info: dict[str, Any], provider: dict[str, Any], model: str) -> dict[str, Any]:
     info = dict(model_info or {})
     known = known_model_limits(provider, model)
-    live_context = _positive_int(info.get("context")) or _positive_int(info.get("contextLimit")) or _positive_int(info.get("context_length")) or _positive_int(info.get("inputTokenLimit")) or _positive_int(info.get("inputLimit"))
+    live_context = (_positive_int(info.get("context"))
+                   or _positive_int(info.get("contextLimit"))
+                   or _positive_int(info.get("context_length"))
+                   or _positive_int(info.get("contextWindow"))
+                   or _positive_int(info.get("context_window"))
+                   or _positive_int(info.get("max_context_size"))
+                   or _positive_int(info.get("inputTokenLimit"))
+                   or _positive_int(info.get("inputLimit")))
     live_output = _positive_int(info.get("output")) or _positive_int(info.get("outputLimit")) or _positive_int(info.get("max_completion_tokens"))
     if live_context:
         info["context"] = live_context
@@ -330,8 +337,8 @@ def fetch_openrouter_endpoint_limits(model_id: str, api_key: str = "") -> dict[s
     outputs = [x for x in outputs if x]
     result = {}
     if contexts:
-        result["context"] = min(contexts)
-        result["contextSource"] = "endpoint-min"
+        result["endpointMinContext"] = min(contexts)
+        result["endpointContextSource"] = "endpoint-min"
     if outputs:
         result["output"] = min(outputs)
         result["outputSource"] = "endpoint-min"
@@ -787,9 +794,10 @@ def _fit_messages_to_context(messages: list[Any], context: int, output_cap: int)
     if not source:
         return source, {"changed": False, "before": 0, "after": 0, "virtualMultiplier": CONTEXT_EXTRA_MULTIPLIER}
     physical = max(1024, int(context or DEFAULT_MODEL_CONTEXT))
-    safe_output = max(256, min(int(output_cap or DEFAULT_MODEL_OUTPUT), max(256, physical // 4), CONTEXT_ABSOLUTE_OUTPUT_CAP))
-    target = max(1024, int(physical * CONTEXT_FIT_RATIO))
-    target = min(target, max(1024, physical - safe_output - 512))
+    safe_output = max(256, min(int(output_cap or DEFAULT_MODEL_OUTPUT), max(256, int(physical * 0.25)), CONTEXT_ABSOLUTE_OUTPUT_CAP))
+    # Keep the model's full declared context window. Only reserve space for the
+    # optimized response and a small serialization margin.
+    target = max(1024, physical - safe_output - 512)
     before = _estimate_messages_tokens(source)
     if before <= target:
         return source, {"changed": False, "before": before, "after": before, "virtualMultiplier": CONTEXT_EXTRA_MULTIPLIER}
@@ -824,7 +832,7 @@ def _fit_messages_to_context(messages: list[Any], context: int, output_cap: int)
             paths = re.findall(r"(?:/storage/emulated/0/|storage/emulated/0/|lazydevfile/)[^\s<>\"']+", text, re.I)
             hint = f" files={', '.join(paths[-3:])}" if paths else ""
             archive_lines.append(f"[{role}]{hint} {_compact_message_text(text, CONTEXT_ARCHIVE_SNIPPET_CHARS)}")
-        archive = "[LazyDev context archive — older conversation retained outside the physical model window]\n" + "\n".join(archive_lines)
+        archive = "[LazyDev context archive — older conversation kept outside the physical model window]\n" + "\n".join(archive_lines)
         # Archive capacity scales with the physical window, while never becoming the majority of it.
         archive_chars = max(600, int(max(600, target * 3.6 * 0.18)))
         archive = _compact_message_text(archive, archive_chars)
@@ -1485,9 +1493,12 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     provider_type = "google-genai" if provider["id"] == "gemini" else "anthropic" if provider["id"] == "anthropic" else "openai"
     context = model_context_size(provider, pc)
     output = model_output_size(provider, pc)
-    safe_output = max(256, min(output, max(256, context // 4), CONTEXT_ABSOLUTE_OUTPUT_CAP))
-    reserve = min(max(1024, safe_output), max(1024, context // 4)) if context > 4096 else max(512, context // 6)
+    output_fraction = 0.20 if context <= 8192 else 0.25 if context <= 131072 else 0.20
+    safe_output = max(256, min(output, max(256, int(context * output_fraction)), CONTEXT_ABSOLUTE_OUTPUT_CAP))
+    dynamic_ratio = 0.07 if context <= 16384 else 0.06 if context <= 32768 else 0.05 if context <= 65536 else 0.04
+    reserve = max(768, min(int(context * 0.10), int(context * dynamic_ratio)))
     input_limit = max(1024, context - reserve)
+    compaction_trigger = 0.52 if context <= 16384 else 0.60 if context <= 32768 else 0.68 if context <= 65536 else 0.76
     native_tools = native_tool_capability(pc)
     tool_use = True if proxy is not None else native_tools is not False
     capabilities = []
@@ -1551,7 +1562,7 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         'max_attempts_per_step = 10',
         'max_steps_per_turn = 0',
         f'reserved_context_size = {reserve}',
-        f'compaction_trigger_ratio = {max(0.60, min(0.90, (context - reserve - 512) / max(1, context))):.2f}',
+        f'compaction_trigger_ratio = {compaction_trigger:.2f}',
         'compaction_max_attempts = 2',
         '',
         '[token_counting]',
@@ -1611,7 +1622,13 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     config_path = KIMI_HOME / "config.toml"
     tui_path = KIMI_HOME / "tui.toml"
     config_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-    tui_path.write_text(textwrap.dedent('''\
+    node_exe = shutil.which("node") or "node"
+    if IS_WINDOWS:
+        status_command = toml_quote(f'"{node_exe}" "{ROOT / "hooks" / "lazydev-statusline.mjs"}"')
+    else:
+        import shlex
+        status_command = toml_quote(f'{shlex.quote(node_exe)} {shlex.quote(str(ROOT / "hooks" / "lazydev-statusline.mjs"))}')
+    tui_text = textwrap.dedent(f'''\
         theme = "dark"
         render_latex = true
         disable_paste_burst = false
@@ -1626,8 +1643,9 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         notification_condition = "unfocused"
 
         [status_line]
-        items = ["mode", "model", "tasks", "cwd", "git", "tips"]
-    ''').strip() + "\n", encoding="utf-8")
+        command = {status_command}
+    ''').strip() + "\n"
+    tui_path.write_text(tui_text, encoding="utf-8")
     write_runtime_system(provider, model)
     return config_path, tui_path
 
@@ -1671,7 +1689,7 @@ def write_runtime_system(provider: dict[str, Any], model: str) -> None:
         f"- Current date: {today}. Treat this only as the current calendar date; never use it as a historical event year.",
         f"- Active provider: {provider['label']}; model: {model}.",
         f"- Standalone artifacts must be saved under the exact canonical directory: {ARTIFACT_DIR}.",
-        f"- Virtual context archive: retain up to about {CONTEXT_EXTRA_MULTIPLIER:.1f}× conversation history locally, but only send a fitted slice that stays inside the model context window.",
+        f"- Local context archive: retain older history outside the physical model window; send only the fitted messages required for the current request.",
         "- File search: Glob uses path=<real directory> and pattern=<relative glob>; never put an absolute path or wildcard into pattern, and never scan OS/system roots.",
         "- Read: max_chars is optional and may be small; use the configured default for normal source files and pagination for large files. Do not emit an artificial minimum-max_chars error.",
         "- Large files: create or edit them through file tools instead of pasting the whole file into normal assistant output; split large writes into bounded chunks and use append mode when the tool supports it.",
@@ -1732,7 +1750,8 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
             env.pop(name, None)
     context = model_context_size(provider, pc)
     output = model_output_size(provider, pc)
-    safe_output = max(256, min(output, max(256, context // 4), CONTEXT_ABSOLUTE_OUTPUT_CAP))
+    output_fraction = 0.20 if context <= 8192 else 0.25 if context <= 131072 else 0.20
+    safe_output = max(256, min(output, max(256, int(context * output_fraction)), CONTEXT_ABSOLUTE_OUTPUT_CAP))
     env["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(context)
     env["KIMI_MODEL_MAX_COMPLETION_TOKENS"] = str(safe_output)
     env["KIMI_MODEL_MAX_TOKENS"] = str(safe_output)

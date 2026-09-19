@@ -7,8 +7,8 @@
   "compaction_trigger_ratio": 0.82,
   "max_steps_per_turn": 0,
   "max_attempts_per_step": 2,
-  "strategy": "compact skills; keep total CLI static hot-path under 25% of the stored baseline; keep model context adaptive; use unlimited turn steps and rely on task-scoped verification.",
+  "strategy": "progressive-disclosure; preserve the model context window; optimize per-request input/output budgets; compact only when the real window is under pressure.",
   "max_cli_hot_path_fraction": 0.25,
   "max_cli_hot_path_tokens": 1010,
-  "max_output_tokens_hard_cap": 16384
+  "max_output_tokens_hard_cap": 32768
 }

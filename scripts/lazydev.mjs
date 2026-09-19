@@ -45,9 +45,9 @@ const TOKEN_CODEC_TEMPLATE_MODE = (() => {
   return ['on','true','1','auto','off','false','0','disabled'].includes(value) ? (value === 'true' || value === '1' ? 'on' : value === 'false' || value === '0' || value === 'disabled' ? 'off' : value) : 'auto';
 })();
 const TOKEN_CODEC_TEMPLATE_PRESSURE = Math.max(0.55, Math.min(0.95, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_PRESSURE || 0.78)));
-const CONTEXT_ABSOLUTE_OUTPUT_CAP = 16384;
+const CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768;
 const CONTEXT_EXTRA_MULTIPLIER = Math.max(1.25, Math.min(4, Number(process.env.LAZYDEV_CONTEXT_EXTRA_MULTIPLIER || 2)));
-const CONTEXT_FIT_RATIO = Math.max(0.58, Math.min(0.82, Number(process.env.LAZYDEV_CONTEXT_FIT_RATIO || 0.70)));
+const CONTEXT_FIT_RATIO = 1;
 const CONTEXT_RECENT_MESSAGES = Math.max(4, Math.min(20, Number(process.env.LAZYDEV_CONTEXT_RECENT_MESSAGES || 10)));
 const CONTEXT_ARCHIVE_SNIPPET_CHARS = Math.max(80, Math.min(800, Number(process.env.LAZYDEV_CONTEXT_ARCHIVE_SNIPPET_CHARS || 240)));
 const CONTEXT_TOOL_RESULT_CHARS = Math.max(400, Math.min(6000, Number(process.env.LAZYDEV_CONTEXT_TOOL_RESULT_CHARS || 1200)));
@@ -290,7 +290,7 @@ async function fetchOpenRouterEndpointLimits(modelId, apiKey) {
     const outputs = endpoints.map((x) => Number(x?.max_completion_tokens) || 0).filter((x) => x > 0);
     const supportedFlags = endpoints.map((x) => Array.isArray(x?.supported_parameters) ? x.supported_parameters.includes('tools') : null).filter((x) => x !== null);
     const out = {};
-    if (contexts.length) { out.contextLimit = Math.min(...contexts); out.inputLimit = Math.min(...contexts); out.contextSource = 'endpoint-min'; }
+    if (contexts.length) { out.endpointMinContext = Math.min(...contexts); out.endpointContextSource = 'endpoint-min'; }
     if (outputs.length) { out.outputLimit = Math.min(...outputs); out.outputSource = 'endpoint-min'; }
     if (supportedFlags.length) { out.toolUse = supportedFlags.every(Boolean); out.toolUseSource = 'endpoint'; }
     return out;
@@ -422,8 +422,9 @@ function knownModelInfo(id, providerId = '') {
 function applyKnownModelLimits(info, provider) {
   const out = { ...(info || {}) };
   const known = knownModelInfo(out.id || out.model || '', provider?.id || provider?.kind || '');
-  if (!Number(out.contextLimit) && known.contextLimit) out.contextLimit = known.contextLimit;
-  if (!Number(out.inputLimit) && known.contextLimit) out.inputLimit = known.contextLimit;
+  const liveContext = Number(out.contextLimit) || Number(out.context_length) || Number(out.max_context_size) || 0;
+  if (!liveContext && known.contextLimit) out.contextLimit = known.contextLimit;
+  if (!Number(out.inputLimit) && (Number(out.contextLimit) || known.contextLimit)) out.inputLimit = Number(out.contextLimit) || known.contextLimit;
   if (!Number(out.outputLimit) && known.outputLimit) out.outputLimit = known.outputLimit;
   if (known.toolUse !== undefined) out.toolUse = known.toolUse;
   if (known.offEffort) out.offEffort = known.offEffort;
@@ -523,8 +524,9 @@ function messageContentText(message) {
 function fitMessagesToContext(messages, context, outputCap) {
   const source = Array.isArray(messages) ? messages.map(m => (m && typeof m === 'object' ? { ...m } : m)) : [];
   const physical = Math.max(1024, Number(context) || 16384);
-  const safeOutput = Math.max(256, Math.min(Number(outputCap) || 8192, Math.max(256, Math.floor(physical / 4)), CONTEXT_ABSOLUTE_OUTPUT_CAP));
-  const target = Math.min(Math.max(1024, Math.floor(physical * CONTEXT_FIT_RATIO)), Math.max(1024, physical - safeOutput - 512));
+  const safeOutput = Math.max(256, Math.min(Number(outputCap) || 8192, Math.max(256, Math.floor(physical * 0.25)), CONTEXT_ABSOLUTE_OUTPUT_CAP));
+  // Keep the model's full declared context window; trim only for output headroom.
+  const target = Math.max(1024, physical - safeOutput - 512);
   const before = estimateMessagesTokens(source);
   if (before <= target) return { messages: source, changed: false, before, after: before, virtualMultiplier: CONTEXT_EXTRA_MULTIPLIER };
   const working = source;
@@ -549,7 +551,7 @@ function fitMessagesToContext(messages, context, outputCap) {
       const paths = [...text.matchAll(/(?:\/storage\/emulated\/0\/|storage\/emulated\/0\/|lazydevfile\/)[^\s<>"']+/ig)].slice(-3).map(m => m[0]);
       lines.push(`[${message.role || 'message'}]${paths.length ? ` files=${paths.join(',')}` : ''} ${compactMessageText(text, CONTEXT_ARCHIVE_SNIPPET_CHARS)}`);
     }
-    const archive = compactMessageText(`[LazyDev context archive — older conversation retained outside the physical model window]\n${lines.join('\n')}`, Math.max(600, Math.floor(Math.max(600, target * 3.6 * 0.18))));
+    const archive = compactMessageText(`[LazyDev context archive — older conversation kept outside the physical model window]\n${lines.join('\n')}`, Math.max(600, Math.floor(Math.max(600, target * 3.6 * 0.18))));
     const systems = working.filter(m => m && typeof m === 'object' && m.role === 'system');
     working.splice(0, working.length, ...systems, ...(lines.length ? [{ role: 'user', content: archive }] : []), ...recent);
   }
@@ -896,10 +898,10 @@ function outputLimitFromError(detail) {
 }
 function requestOutputCap(body, provider, pc) {
   const info = effectiveModelInfo(provider, pc);
-  const context = Math.max(1024, Number(info.contextLimit) || Number(info.inputLimit) || 16384);
+  const context = Math.max(1024, Number(info.contextLimit) || Number(info.context_length) || Number(info.max_context_size) || Number(info.inputLimit) || 16384);
   const declared = Math.max(256, Number(info.outputLimit) || 8192);
   const hardCap = Math.min(PROVIDER_OUTPUT_HARD_CAPS[provider.id] || 32768, CONTEXT_ABSOLUTE_OUTPUT_CAP);
-  const remaining = Math.max(256, context - estimateRequestTokens(body) - 1024);
+  const remaining = Math.max(256, context - estimateRequestTokens(body) - 512);
   const fractionCap = Math.max(256, Math.floor(context * 0.25));
   return Math.max(256, Math.min(declared, hardCap, fractionCap, remaining));
 }
@@ -1636,14 +1638,14 @@ function effectiveModelInfo(provider, pc) {
 }
 
 function contextBudget(modelInfo = {}) {
-  const rawMax = Math.max(1024, Number(modelInfo?.contextLimit) || Number(modelInfo?.inputLimit) || 16384);
-  const cap = Number(process.env.LAZYDEV_CONTEXT_CAP || 0);
-  const max = cap > 0 ? Math.max(1024, Math.min(rawMax, cap)) : rawMax;
-  const rawOutput = Math.max(256, Number(modelInfo?.outputLimit) || 8192);
-  const output = Math.max(256, Math.min(rawOutput, Math.max(256, Math.floor(max * 0.25)), CONTEXT_ABSOLUTE_OUTPUT_CAP));
-  const reserve = max > 4096 ? Math.min(Math.max(1024, output), Math.max(1024, Math.floor(max / 4))) : Math.max(512, Math.floor(max / 6));
+  // `max` remains the provider-declared model context. No artificial smaller context cap.
+  const max = Math.max(1024, Number(modelInfo?.contextLimit) || Number(modelInfo?.context_length) || Number(modelInfo?.maxContextSize) || Number(modelInfo?.max_context_size) || Number(modelInfo?.inputLimit) || 16384);
+  const rawOutput = Math.max(256, Number(modelInfo?.outputLimit) || Number(modelInfo?.max_completion_tokens) || 8192);
+  const outputFraction = max <= 8192 ? 0.20 : max <= 131072 ? 0.25 : 0.20;
+  const output = Math.max(256, Math.min(rawOutput, Math.max(256, Math.floor(max * outputFraction)), CONTEXT_ABSOLUTE_OUTPUT_CAP));
+  const reserve = Math.max(768, Math.min(output, Math.floor(max * 0.25)));
   const input = Math.max(1024, max - reserve);
-  const ratio = Math.max(0.60, Math.min(0.90, (max - reserve - 512) / Math.max(1, max)));
+  const ratio = 0.90;
   return { max, output, reserve, input, ratio };
 }
 
@@ -1820,7 +1822,7 @@ function buildTuiConfig() {
     `notification_condition = "unfocused"`,
     ``,
     `[status_line]`,
-    `items = ["mode", "model", "tasks", "cwd", "git", "tips"]`,
+    `command = ${tomlQuote(shellQuoteCommand(process.execPath, [path.join(root, 'hooks', 'lazydev-statusline.mjs')]))}`,
   ].join('\n') + '\n';
 }
 
@@ -2181,7 +2183,7 @@ async function chat() {
     LAZYDEV_VERSION: version,
     LAZYDEV_MODEL: pc.model,
     LAZYDEV_CONTEXT_EXTRA_MULTIPLIER: String(CONTEXT_EXTRA_MULTIPLIER),
-    LAZYDEV_CONTEXT_FIT_RATIO: String(CONTEXT_FIT_RATIO),
+    LAZYDEV_CONTEXT_FIT_RATIO: '1',
     LAZYDEV_CONTEXT_RECENT_MESSAGES: String(CONTEXT_RECENT_MESSAGES),
   };
   const child = spawn(invocation.command, launchArgs, {

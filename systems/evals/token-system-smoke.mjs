@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 const budget = computeTokenBudget({ maxContext: 65536, maxOutput: 8192 });
 assert.ok(budget.reserve > 0);
-assert.ok(budget.output <= 16384);
+assert.ok(budget.output <= 32768);
 assert.ok(budget.input + budget.reserve <= budget.max);
 assert.equal(shouldCompact({ max: 10000, used: 9000, reserve: 500 }), true);
 assert.deepEqual(Object.keys(allocateTokenBudget(1000, { core: 4, history: 1 })).sort(), ['core', 'history']);
