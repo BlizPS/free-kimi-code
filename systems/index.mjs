@@ -6,6 +6,7 @@ import { buildAgentFrame } from './agent/subagent-router.mjs';
 import { buildRecoveryFrame } from './recovery/retry-policy.mjs';
 import { buildVerificationFrame } from './verification/check-plan.mjs';
 import { buildResponseContractFrame } from './communication/response-contract.mjs';
+import { buildLanguageFrame, getLanguageReport } from './languages/index.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -37,6 +38,7 @@ export function buildExecutionFrames(task = {}) {
     buildVerificationFrame(task),
     buildRecoveryFrame(),
     buildResponseContractFrame(task),
+    buildLanguageFrame({ cwd: task.cwd || process.cwd(), primary: task.language || null }),
   ].join(' ');
 }
 
@@ -125,6 +127,13 @@ export function buildSystemStats() {
       'serialization/safe-json.mjs',
       'communication/response-contract.md',
       'communication/response-contract.mjs',
+    'languages/README.md',
+    'languages/index.mjs',
+    'languages/detect.mjs',
+    'languages/typescript/index.mjs',
+    'languages/typescript/profile.ts',
+    'languages/golang/index.mjs',
+    'languages/golang/profile.go',
     ],
   };
 }

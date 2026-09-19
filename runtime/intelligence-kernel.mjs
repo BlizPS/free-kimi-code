@@ -1,5 +1,6 @@
 import { buildUiTaskContext } from './ui-intelligence.mjs';
 import { buildExecutionFrames } from '../systems/index.mjs';
+import { buildLanguageFrame } from '../systems/languages/index.mjs';
 
 const MODEL_PROFILES = [];
 
@@ -111,7 +112,8 @@ export function buildTaskContext(task) {
     ...(uiContext ? [uiContext] : []),
     `plan=${task.plan ? 'required' : 'skip unless needed'}; verify=required; artifact=${task.artifact ? 'canonical-path' : 'repo-native'}`,
     `rules=minimal,no-assumptions,no-random-changes,double-check; apply=inspect→minimal change→evidence→verify; aliases=${aliases.join(',')}`,
-    buildExecutionFrames(task),
+    buildLanguageFrame({ cwd: task.cwd || process.cwd(), primary: task.language || null }),
+    buildExecutionFrames({ ...task, cwd: task.cwd || process.cwd() }),
   ];
   return parts.join(' ');
 }

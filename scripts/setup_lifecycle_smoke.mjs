@@ -13,6 +13,11 @@ assert.match(source, /const rl = readline\.createInterface\(\{[\s\S]*?input: pro
 assert.match(source, /try \{ process\.stdin\.pause\(\); \} catch \{\}/);
 assert.match(source, /process\.stdin\.setRawMode\(false\)/);
 assert.match(source, /readline\.emitKeypressEvents\(process\.stdin\)/);
+assert.match(source, /class InputInterruptedError extends Error/);
+assert.match(source, /code = 'LAZYDEV_INPUT_INTERRUPTED'/);
+assert.match(source, /if \(error\?\.code === 'LAZYDEV_INPUT_INTERRUPTED'\) return;/);
+assert.match(source, /if \(error\?\.code === 'LAZYDEV_INPUT_INTERRUPTED'\) \{\s*process\.exitCode = 130;/);
+assert.doesNotMatch(source, /reject\(new Error\('Input interrupted\.'\)\)/);
 
 const child = spawnSync(process.execPath, [entry, 'setup'], {
   input: '99\n',

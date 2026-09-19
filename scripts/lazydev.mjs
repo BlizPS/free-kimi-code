@@ -18,6 +18,8 @@ import { buildKimiTokenConfig } from '../systems/token/adapters/kimi.mjs';
 import { extractSessionModelAliases } from '../runtime/session-model-compat.mjs';
 import { repairOpenAIHistory } from '../runtime/openai-history.mjs';
 import { generateDesignSystem } from '../systems/ui/pro/index.mjs';
+import { buildLanguageFrame, getLanguageReport } from '../systems/languages/index.mjs';
+import { buildGeminiRetryRequest, chunkFinishReason, chunkHasVisibleOutput, geminiOpenAIEndpoint, parseSseEvent, prepareGeminiRequest, responseHasUsableOutput, streamNeedsGeminiRetry } from '../runtime/gemini-resilience.mjs';
 
 const version = '1.0.0';
 const TOKEN_SAVINGS_FLOOR = 0.75;
@@ -92,6 +94,36 @@ function parseUiArgs(argv) {
   }
   return { opts, query: queryParts.join(' ').trim() };
 }
+function languageCommand(argv) {
+  const json = argv.includes('--json');
+  const projectIndex = argv.indexOf('--project');
+  const cwd = projectIndex >= 0 && argv[projectIndex + 1] ? path.resolve(argv[projectIndex + 1]) : process.cwd();
+  const report = getLanguageReport(cwd);
+  if (json) return console.log(JSON.stringify(report, null, 2));
+  clearScreen();
+  title('LazyDev language systems');
+  line(`Workspace     ${cwd}`);
+  line(`Primary       ${report.primary.id}${report.primary.id !== 'unknown' ? ` · ${(report.primary.confidence * 100).toFixed(0)}% confidence` : ''}`);
+  line();
+  if (!report.languages.length) {
+    line(dim('No dedicated TypeScript or Go project detected.'));
+    line();
+    line(buildLanguageFrame({ cwd }));
+    return;
+  }
+  for (const lang of report.languages) {
+    line(`${ansi('36', '◆')} ${lang.id} · ${(lang.confidence * 100).toFixed(0)}%`);
+    line(`  evidence: ${lang.evidence.slice(0, 8).join(', ')}`);
+  }
+  line();
+  for (const contract of report.contracts) {
+    line(`${ansi('36', contract.id)} checks:`);
+    for (const [key, command] of Object.entries(contract.commands)) line(`  ${key}: ${command}`);
+  }
+  line();
+  line(dim('The selected language contract is also injected into the active CLI agent session.'));
+}
+
 function uiCommand(argv) {
   const { opts, query } = parseUiArgs(argv);
   if (!query) throw new Error('Usage: lazydev ui "<product + interface brief>" [--json] [--persist] [--page <name>]');
@@ -228,6 +260,15 @@ function yellow(text) { return ansi('33', text); }
 function red(text) { return ansi('31', text); }
 function dim(text) { return ansi('2', text); }
 
+class InputInterruptedError extends Error {
+  constructor(source = 'input') {
+    super('Input interrupted.');
+    this.name = 'InputInterruptedError';
+    this.code = 'LAZYDEV_INPUT_INTERRUPTED';
+    this.source = source;
+  }
+}
+
 async function prompt(question) {
   return new Promise((resolve, reject) => {
     const rl = readline.createInterface({
@@ -245,7 +286,7 @@ async function prompt(question) {
     const onSigint = () => {
       cleanup();
       process.stdout.write('\n');
-      reject(new Error('Input interrupted.'));
+      reject(new InputInterruptedError('prompt'));
     };
     rl.once('SIGINT', onSigint);
     rl.question(question, (answer) => {
@@ -516,6 +557,8 @@ async function createProxy(provider, pc, proxyOptions = {}) {
       }
       body.model = pc.model;
       if (Array.isArray(body.messages)) body.messages = repairOpenAIHistory(body.messages);
+      const preparedBody = provider.id === 'gemini' ? prepareGeminiRequest(body, pc.model) : body;
+      if (preparedBody !== body) body = preparedBody;
       if (provider.id === 'openrouter') {
         const providerOptions = body.provider && typeof body.provider === 'object' && !Array.isArray(body.provider) ? body.provider : {};
         body.provider = { ...providerOptions, require_parameters: true, allow_fallbacks: true };
@@ -532,8 +575,7 @@ async function createProxy(provider, pc, proxyOptions = {}) {
       // reject the request outright with 400 Validation errors. Strip anything
       // not part of the standard chat completions schema before forwarding.
       for (const field of UNSUPPORTED_PASSTHROUGH_FIELDS) delete body[field];
-      const payload = JSON.stringify(body);
-      const chatUrl = provider.id === 'ollama' ? ollamaChatUrl(pc.baseUrl) : (provider.chatUrl || provider.chatUrls?.[0]);
+      const chatUrl = provider.id === 'ollama' ? ollamaChatUrl(pc.baseUrl) : provider.id === 'gemini' ? geminiOpenAIEndpoint(pc.model) : (provider.chatUrl || provider.chatUrls?.[0]);
       if (!chatUrl) {
         res.writeHead(500, {'content-type':'application/json'});
         res.end(JSON.stringify({error:{message:'Provider chat endpoint is not configured.'}}));
@@ -544,18 +586,42 @@ async function createProxy(provider, pc, proxyOptions = {}) {
         'content-type': 'application/json',
         'accept': req.headers.accept || 'application/json',
         ...(provider.id === 'ollama' ? {} : {'authorization': `Bearer ${pc.apiKey}`}),
-        'user-agent': `lazydev/${version}`,
-        'content-length': Buffer.byteLength(payload)
+        'user-agent': `lazydev/${version}`
       };
       const transport = target.protocol === 'http:' ? http : https;
-      const upstream = transport.request({
-        protocol: target.protocol,
-        hostname: target.hostname,
-        port: target.port || (target.protocol === 'http:' ? 80 : 443),
-        path: `${target.pathname}${target.search}`,
-        method: 'POST',
-        headers
-      }, upstreamRes => {
+      const sendUpstream = (requestBody, onResponse) => {
+        const requestPayload = JSON.stringify(requestBody);
+        const requestHeaders = { ...headers, 'content-length': Buffer.byteLength(requestPayload) };
+        const upstream = transport.request({
+          protocol: target.protocol,
+          hostname: target.hostname,
+          port: target.port || (target.protocol === 'http:' ? 80 : 443),
+          path: `${target.pathname}${target.search}`,
+          method: 'POST',
+          headers: requestHeaders
+        }, onResponse);
+        upstream.on('error', err => {
+          if (!res.headersSent) {
+            res.writeHead(502, {'content-type':'application/json'});
+            res.end(JSON.stringify({error:{message:err.message}}));
+          } else {
+            try { res.destroy(err); } catch {}
+          }
+        });
+        upstream.write(requestPayload);
+        upstream.end();
+        return upstream;
+      };
+      if (provider.id === 'gemini') {
+        handleGeminiProxyRequest({ res, body, target, headers, pc, sendUpstream }).catch(error => {
+          if (!res.headersSent) {
+            res.writeHead(502, {'content-type':'application/json'});
+            res.end(JSON.stringify({error:{message:error instanceof Error ? error.message : String(error)}}));
+          } else { try { res.destroy(error); } catch {} }
+        });
+        return;
+      }
+      const upstream = sendUpstream(body, upstreamRes => {
         res.statusCode = upstreamRes.statusCode || 502;
         const status = res.statusCode;
         if (status >= 400) {
@@ -598,16 +664,6 @@ async function createProxy(provider, pc, proxyOptions = {}) {
         }
         upstreamRes.pipe(res);
       });
-      upstream.on('error', err => {
-        if (!res.headersSent) {
-          res.writeHead(502, {'content-type':'application/json'});
-          res.end(JSON.stringify({error:{message:err.message}}));
-        } else {
-          try { res.destroy(err); } catch {}
-        }
-      });
-      upstream.write(payload);
-      upstream.end();
     });
   });
   await new Promise((resolve, reject) => {
@@ -621,6 +677,133 @@ async function createProxy(provider, pc, proxyOptions = {}) {
   const port = address && typeof address === 'object' ? address.port : 0;
   if (!port) { try { server.close(); } catch {} throw new Error('LazyDev proxy failed to bind a loopback port.'); }
   return { server, token, port };
+}
+
+
+async function handleGeminiProxyRequest({ res, body, target, headers, pc, sendUpstream }) {
+  const stream = body?.stream === true;
+  let attempt = 0;
+  let nextBody = buildGeminiRetryRequest(body, pc.model, attempt);
+  while (true) {
+    const result = await new Promise((resolve, reject) => {
+      let settled = false;
+      const upstream = sendUpstream(nextBody, upstreamRes => {
+        if ((upstreamRes.statusCode || 502) >= 400) {
+          let errorBody = '';
+          upstreamRes.setEncoding('utf8');
+          upstreamRes.on('data', chunk => { errorBody += chunk; });
+          upstreamRes.on('end', () => resolve({ type: 'http-error', status: upstreamRes.statusCode || 502, body: errorBody }));
+          upstreamRes.on('error', reject);
+          return;
+        }
+        if (!stream || !String(upstreamRes.headers['content-type'] || '').toLowerCase().includes('text/event-stream')) {
+          let raw = '';
+          upstreamRes.setEncoding('utf8');
+          upstreamRes.on('data', chunk => { raw += chunk; });
+          upstreamRes.on('end', () => {
+            let json = null;
+            try { json = JSON.parse(raw || '{}'); } catch {}
+            resolve({ type: 'json', status: upstreamRes.statusCode || 200, headers: upstreamRes.headers, raw, json });
+          });
+          upstreamRes.on('error', reject);
+          return;
+        }
+
+        let pending = '';
+        let held = '';
+        let visible = false;
+        let finishReason = '';
+        const forwardHeaders = () => {
+          res.statusCode = upstreamRes.statusCode || 200;
+          for (const [key, value] of Object.entries(upstreamRes.headers)) {
+            if (value != null && !['content-length','connection','transfer-encoding'].includes(key.toLowerCase())) res.setHeader(key, value);
+          }
+        };
+        const flushHeld = () => {
+          if (!held) return;
+          if (!res.headersSent) forwardHeaders();
+          res.write(held);
+          held = '';
+        };
+        const processBlock = block => {
+          const parsed = parseSseEvent(block);
+          if (parsed.json) {
+            if (chunkHasVisibleOutput(parsed.json)) {
+              visible = true;
+              flushHeld();
+            }
+            const reason = chunkFinishReason(parsed.json);
+            if (reason) finishReason = reason;
+          }
+          const serialized = `${block}\n\n`;
+          if (visible) {
+            if (!res.headersSent) forwardHeaders();
+            res.write(serialized);
+          } else {
+            held += serialized;
+          }
+        };
+        upstreamRes.on('data', chunk => {
+          pending += String(chunk);
+          const blocks = pending.split(/\r?\n\r?\n/);
+          pending = blocks.pop() || '';
+          for (const block of blocks) processBlock(block);
+        });
+        upstreamRes.on('end', () => {
+          if (pending.trim()) processBlock(pending);
+          const retry = streamNeedsGeminiRetry({ finishReason, visibleOutput: visible, retried: attempt > 0 });
+          if (retry) {
+            held = '';
+            resolve({ type: 'retry', reason: finishReason });
+            return;
+          }
+          if (!res.headersSent) forwardHeaders();
+          flushHeld();
+          if (!res.writableEnded) res.end();
+          resolve({ type: 'streamed' });
+        });
+        upstreamRes.on('error', reject);
+      });
+      if (settled) return;
+      upstream?.on?.('close', () => { settled = true; });
+    });
+
+    if (result.type === 'retry' && attempt < 2) {
+      attempt += 1;
+      nextBody = buildGeminiRetryRequest(body, pc.model, attempt);
+      continue;
+    }
+    if (result.type === 'streamed') return;
+    if (result.type === 'http-error') {
+      if (result.status === 400 && attempt < 2) {
+        attempt += 1;
+        nextBody = buildGeminiRetryRequest(body, pc.model, attempt);
+        continue;
+      }
+      res.statusCode = result.status;
+      res.setHeader('content-type', 'application/json');
+      res.end(result.body || JSON.stringify({error:{message:`Gemini returned HTTP ${result.status}.`}}));
+      return;
+    }
+    if (result.type === 'json') {
+      if (responseHasUsableOutput(result.json) || attempt >= 2) {
+        if (result.headers) for (const [key, value] of Object.entries(result.headers)) if (value != null && !['content-length','connection','transfer-encoding'].includes(key.toLowerCase())) res.setHeader(key, value);
+        res.statusCode = result.status;
+        res.end(result.raw || JSON.stringify(result.json || {}));
+        return;
+      }
+      const reason = chunkFinishReason(result.json);
+      if (/max_tokens|length|truncated/.test(reason) && attempt < 2) {
+        attempt += 1;
+        nextBody = buildGeminiRetryRequest(body, pc.model, attempt);
+        continue;
+      }
+      res.statusCode = result.status;
+      res.end(result.raw || JSON.stringify(result.json || {}));
+      return;
+    }
+    return;
+  }
 }
 
 function ensureKimiInstalled() {
@@ -870,7 +1053,8 @@ function writeKimiAgentGuidance() {
   const aliasSystem = buildIntelligenceAliasSystem();
   const uiSystem = buildUiSystemPrompt();
   const nativeSystems = buildNativeSystemsPrompt();
-  fs.writeFileSync(system, `${bodyText}\n\n${nativeSystems}\n\n${uiSystem}\n\n${aliasSystem}\n`, { mode: 0o600 });
+  const languageSystem = buildLanguageFrame({ cwd: process.cwd() });
+  fs.writeFileSync(system, `${bodyText}\n\n${nativeSystems}\n\n${uiSystem}\n\n${languageSystem}\n\n${aliasSystem}\n`, { mode: 0o600 });
 }
 function basePromptPlaceholder() { return '${base_prompt}'; }
 function shellQuoteCommand(executable, args = []) {
@@ -912,7 +1096,8 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
   const context = budget.max;
   const output = budget.output;
   const antigravity = provider.id === 'gemini' && isAntigravityModel(pc.model) && proxy;
-  const providerType = antigravity ? 'openai' : provider.id === 'gemini' ? 'google-genai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
+  const geminiProxy = provider.id === 'gemini' && Boolean(proxy);
+  const providerType = antigravity || geminiProxy ? 'openai' : provider.id === 'gemini' ? 'google-genai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
   const intelligence = modelIntelligenceProfile(pc.model);
   const toolUse = modelSupportsKimiTools(provider, pc);
   const modelCapabilities = toolUse ? (provider.id === 'gemini' ? ['tool_use','thinking'] : ['tool_use']) : [];
@@ -921,7 +1106,7 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     '[tools]',
     `disabled = ${JSON.stringify(KIMI_BUILTIN_TOOLS)}`,
   ];
-  const providerLines = antigravity
+  const providerLines = antigravity || geminiProxy
     ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote(`http://127.0.0.1:${proxy.port}/v1`)}`,`api_key = ${tomlQuote(proxy.token)}`]
     : provider.id === 'gemini'
       ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`api_key = ${tomlQuote(pc.apiKey)}`]
@@ -1092,6 +1277,7 @@ async function setup() {
     }
     line();
   } catch (error) {
+    if (error?.code === 'LAZYDEV_INPUT_INTERRUPTED') return;
     line(red(error instanceof Error ? error.message : String(error)));
   }
 }
@@ -1127,7 +1313,7 @@ async function selectModel(models, initial = 0) {
       if (key.ctrl && key.name === 'c') {
         cleanup();
         process.stdout.write('\n');
-        reject(new Error('Model selection interrupted.'));
+        reject(new InputInterruptedError('model-selection'));
         return;
       }
       if (key.name === 'up') { index = (index - 1 + models.length) % models.length; render(); }
@@ -1228,6 +1414,8 @@ function doctor() {
   const modelName = String(providerConfig(cfg, active.id).model || '');
   const intelligence = modelIntelligenceProfile(modelName);
   line(`Intelligence  ${intelligence.label} · ${intelligence.strategy} · effort ${intelligence.effort}`);
+  const lang = getLanguageReport(process.cwd());
+  line(`Languages     ${lang.languages.length ? lang.languages.map((x) => `${x.id} ${(x.confidence * 100).toFixed(0)}%`).join(' · ') : 'generic'}`);
   const cb = contextBudget(providerConfig(cfg, activeProvider(cfg).id).modelInfo || {});
   line(`Context       ${cb.max} max · ${cb.input} input · ${cb.reserve} reserve · compact ${Math.round(cb.ratio * 100)}%`);
   line(`Artifacts     ${outputDirectory()}`);
@@ -1271,6 +1459,7 @@ async function help() {
   line(`  ${ansi('36','lazydev env'.padEnd(24))} Inspect the current runtime environment`);
   line(`  ${ansi('36','lazydev universal'.padEnd(24))} Show universal integration details`);
   line(`  ${ansi('36','lazydev ui <brief>'.padEnd(24))} Generate a searchable design system before UI implementation`);
+  line(`  ${ansi('36','lazydev lang'.padEnd(24))} Detect TypeScript/Go and show the active coding contract`);
   line(`  ${ansi('36','lazydev doctor'.padEnd(24))} Check installation and configuration`);
   line(`  ${ansi('36','lazydev version'.padEnd(24))} Show the installed version`);
   line();
@@ -1323,7 +1512,7 @@ async function chat() {
     line(red('That model is temporarily disabled in LazyDev. Choose another configured provider/model with `lazydev setup`.'));
     return;
   }
-  const proxy = !['gemini','openai','anthropic'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null;
+  const proxy = !['openai','anthropic'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null;
   pc.modelInfo = effectiveModelInfo(provider, pc);
   const sessionAliases = discoverSessionModelAliases(`lazydev/${pc.model}`);
   if (provider.id === 'ollama') assertHttpUrl(ollamaChatUrl(pc.baseUrl), 'Ollama API URL');
@@ -1392,6 +1581,7 @@ async function main() {
   if (cmd === 'doctor') return doctor();
   if (cmd === 'env' || cmd === 'info' || cmd === 'universal') return envInfo(process.argv.includes('--json'));
   if (cmd === 'ui') return uiCommand(process.argv.slice(3));
+  if (cmd === 'lang' || cmd === 'languages') return languageCommand(process.argv.slice(3));
   if (cmd === 'artifact' || cmd === 'artifacts') return artifactCommand(process.argv[3]);
   if (cmd === 'setup') return setup();
   if (cmd === 'chat') return chat();
@@ -1400,4 +1590,13 @@ async function main() {
   await help();
   process.exitCode = 1;
 }
-await main();
+try {
+  await main();
+} catch (error) {
+  if (error?.code === 'LAZYDEV_INPUT_INTERRUPTED') {
+    process.exitCode = 130;
+  } else {
+    console.error(error);
+    process.exitCode = 1;
+  }
+}
