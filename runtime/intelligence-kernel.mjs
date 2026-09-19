@@ -3,6 +3,9 @@ import { buildExecutionFrames } from '../systems/index.mjs';
 import { buildLanguageFrame } from '../systems/languages/index.mjs';
 import { buildReasoningScaffoldFrame, buildTaskMicroPlan } from '../systems/intelligence/reasoning-scaffold.mjs';
 import { generateDesignSystem } from '../systems/ui/pro/index.mjs';
+import { buildTasteTaskFrame, tasteDiagnostics } from '../systems/ui/taste/compiler.mjs';
+import { build3dTaskFrame, classify3dRequest } from '../systems/ui/3d/reference-gate.mjs';
+import { buildSeoTaskFrame, classifySeoRequest } from '../systems/seo/analyze.mjs';
 
 const MODEL_PROFILES = [];
 
@@ -58,6 +61,8 @@ const SIGNALS = {
   research: [/\b(latest|current|newest|research|compare|documentation|docs|look up|search|sejarah|historical|history|tahun|year|statistik|statistics|biography|biografi)\b/i],
   security: [/\b(auth|credential|secret|injection|xss|csrf|permission|sandbox)\b/i],
   factual: [/\b(sejarah|historical|history|tahun|year|statistic|statistics|data|biography|biografi|timeline|peristiwa|event)\b/i],
+  threeD: [/* handled by dedicated domain system */],
+  seo: [/* handled by dedicated domain system */],
   performance: [/\b(performance|latency|slow|memory|cpu|optimi[sz]e|benchmark)\b/i],
 };
 
@@ -76,7 +81,11 @@ export function modelIntelligenceProfile(model = '') {
 export function classifyTask(prompt = '', model = '') {
   const text = String(prompt || '').trim();
   const scores = Object.fromEntries(Object.entries(SIGNALS).map(([k, v]) => [k, hit(v, text)]));
-  const priority = ['debug', 'security', 'review', 'artifact', 'ui', 'performance', 'test', 'research', 'implementation'];
+  const priority = ['debug', 'security', 'review', 'artifact', 'threeD', 'seo', 'ui', 'performance', 'test', 'research', 'implementation'];
+  const domain3d = classify3dRequest(text);
+  const domainSeo = classifySeoRequest(text);
+  if (domain3d.is3d) scores.threeD = 1;
+  if (domainSeo.isSeo) scores.seo = 1;
   const primary = priority.find((key) => scores[key] > 0) || 'implementation';
   const complexity = Math.min(100,
     18 + Math.min(30, Math.floor(text.length / 160) * 4) +
@@ -84,11 +93,11 @@ export function classifyTask(prompt = '', model = '') {
     (scores.debug ? 12 : 0) + (scores.security ? 10 : 0) + (scores.ui ? 8 : 0) +
     (/(\b(and|also|then|plus)\b)/i.test(text) ? 8 : 0)
   );
-  const advancedSignals = scores.security > 0 || scores.debug > 0 || scores.review > 0 || scores.artifact > 0 || scores.ui > 0 || scores.performance > 0;
+  const advancedSignals = scores.security > 0 || scores.debug > 0 || scores.review > 0 || scores.artifact > 0 || scores.ui > 0 || scores.performance > 0 || scores.threeD > 0 || scores.seo > 0;
   const conjunction = /(\b(and|also|then|plus)\b)/i.test(text);
   const simple = text.length <= 180 && !advancedSignals && !conjunction;
   const deep = !simple && (complexity >= 62 || scores.security > 0 || scores.debug > 0 || scores.review > 0);
-  const plan = !simple && (complexity >= 45 || primary === 'debug' || primary === 'review' || primary === 'security' || primary === 'ui');
+  const plan = !simple && (complexity >= 45 || primary === 'debug' || primary === 'review' || primary === 'security' || primary === 'ui' || primary === 'seo');
   const verify = true;
   const artifact = scores.artifact > 0 && scores.ui === 0 && scores.review === 0 && scores.debug === 0;
   const profile = modelIntelligenceProfile(model);
@@ -123,12 +132,16 @@ export function buildTaskContext(task) {
   const aliases = resolveIntelligenceAliases(task);
   const mode = task.simple ? 'simple-direct' : task.depth;
   const uiContext = task.text ? buildUiTaskContext(task.text) : '';
-  const uiDesign = task.text && task.primary === 'ui' ? buildCompactUiDesignFrame(task.text, task.cwd || process.cwd()) : '';
+  const uiDesign = task.text && (task.primary === 'ui' || task.scores?.threeD > 0) ? buildCompactUiDesignFrame(task.text, task.cwd || process.cwd()) : '';
+  const taste = task.text && task.scores?.ui > 0 ? tasteDiagnostics(task.text) : null;
+  const domainFrames = task.text ? [buildTasteTaskFrame(task.text, { deep: task.depth === 'deep', maxChars: task.depth === 'deep' ? 16000 : 7000 }), build3dTaskFrame(task.text), buildSeoTaskFrame(task.text)].filter(Boolean) : [];
   const factual = task.scores?.factual > 0;
   const parts = [
     `[LZ] mode=${mode}; task=${task.primary}; complexity=${task.complexity}`,
     ...(uiContext ? [uiContext] : []),
     ...(uiDesign ? [uiDesign] : []),
+    ...(taste ? [`[TASTE] mode=${taste.mode}; variance=${taste.designVariance}; motion=${taste.motionIntensity}; density=${taste.visualDensity}; source=bundled-system`] : []),
+    ...domainFrames.map((frame) => `[DOMAIN] ${frame.replace(/\n/g, ' ')}`),
     ...(factual ? ['[FACT-CHECK] Research factual dates, historical claims, names, and statistics before writing; never invent year values.'] : []),
     buildReasoningScaffoldFrame(task.primary || 'implementation'),
     `[PLAN] ${buildTaskMicroPlan(task.primary || 'implementation').join(' → ')}`,

@@ -28,3 +28,9 @@ LazyDev owns provider/model routing. Native Kimi `/login` and `/logout` remain a
 
 # Token system
 Use the shared token system in `systems/token/`: progressive disclosure, bounded observations, deduplicated tool work, early compaction, compact handoffs, and result-first responses. Load detail only when the task requires it.
+
+
+## Domain execution systems
+Taste is integrated into the native UI system and is not exposed as an additional Skill. The discoverable LazyDev Skill set remains exactly four: lazy-developer, lazy-debug, lazy-review, lazy-test.
+For 3D/WebGL/Three.js, research a concrete working example and verify current API/version documentation before implementation.
+For SEO, research current search guidance and verify actual metadata, canonical, crawlability, indexability, structured data, and performance before claiming completion.

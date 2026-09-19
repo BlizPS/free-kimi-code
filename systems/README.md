@@ -12,3 +12,12 @@ Built-in runtime systems that improve agent execution without requiring a user-a
 - `evals/` contains lightweight contracts for the built-in systems.
 
 Detailed files are source material. The CLI compiles only compact runtime rules into the agent system prompt so the repository can be rich without making every turn expensive.
+
+
+## Built-in domain systems
+
+- `ui/taste/` contains the licensed Taste core and a progressive-disclosure compiler. It is a system source, not a discoverable Skill.
+- `ui/3d/` enforces working-example research, API verification, and performance gates for 3D/WebGL work.
+- `seo/` provides current-guidance-aware SEO rules and source auditing for metadata, crawlability, indexing, structured data, and performance.
+
+The user-facing Skill set remains exactly four: `lazy-developer`, `lazy-debug`, `lazy-review`, and `lazy-test`.

@@ -19,3 +19,10 @@ LazyDev owns provider/model routing. Native Kimi `/login` and `/logout` are allo
 ## Built-in UI execution
 
 For UI/frontend work, use the built-in UI protocol before any write: inspect the current UI and stack, research named/external references and factual/date-sensitive content before coding when web search is available, extract patterns instead of copying, choose one product pattern and visual family, implement real states and interactions first, verify copy and image assets, then stress responsive behavior and visually verify when possible. Avoid generic dashboard/card/gradient/glass/pill decoration unless the product clearly requires it. Never guess image URLs; use verified local/remote assets or inline SVG/CSS.
+
+
+# Domain systems
+
+- Taste is a built-in UI system, not a fifth Skill. Use its bundled design compiler and anti-slop gates for frontend work.
+- Any 3D/WebGL/Three.js task must research a concrete working example and verify the current API/version before the first code write.
+- Any SEO task must research current search guidance and inspect real rendered HTML, metadata, crawlability, indexability, structured data, and performance before claiming optimization.

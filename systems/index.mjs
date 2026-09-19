@@ -7,6 +7,9 @@ import { buildRecoveryFrame } from './recovery/retry-policy.mjs';
 import { buildVerificationFrame } from './verification/check-plan.mjs';
 import { buildResponseContractFrame } from './communication/response-contract.mjs';
 import { buildLanguageFrame, getLanguageReport } from './languages/index.mjs';
+import { buildTasteSystemPrompt, buildTasteTaskFrame, tasteDiagnostics } from './ui/taste/compiler.mjs';
+import { build3dSystemPrompt, build3dTaskFrame, classify3dRequest } from './ui/3d/reference-gate.mjs';
+import { buildSeoSystemPrompt, buildSeoTaskFrame, classifySeoRequest } from './seo/analyze.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -31,6 +34,14 @@ export const NATIVE_SYSTEM_PROMPT = Object.freeze([
 
 export function buildNativeSystemsPrompt() {
   return NATIVE_SYSTEM_PROMPT;
+}
+
+export function buildDomainSystemsPrompt() {
+  return [buildTasteSystemPrompt(), build3dSystemPrompt(), buildSeoSystemPrompt()].join('\n\n');
+}
+
+export function buildDomainTaskFrames(prompt = '') {
+  return [buildTasteTaskFrame(prompt, { deep: false, maxChars: 9000 }), build3dTaskFrame(prompt), buildSeoTaskFrame(prompt)].filter(Boolean).join(' ');
 }
 
 export function buildExecutionFrames(task = {}) {
@@ -83,6 +94,15 @@ export function buildSystemStats() {
       'workflows/lean-build.md',
       'workflows/verify-and-stop.md',
       'ui/ui-generation.md',
+      'ui/taste/taste-core.md',
+      'ui/taste/compiler.mjs',
+      'ui/taste/LICENSE',
+      'ui/taste/NOTICE.md',
+      'ui/3d/policy.md',
+      'ui/3d/reference-gate.mjs',
+      'seo/policy.md',
+      'seo/analyze.mjs',
+      'seo/index.mjs',
       'ui/ui-quality.md',
       'ui/pro/README.md',
       'ui/pro/index.mjs',

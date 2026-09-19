@@ -23,6 +23,14 @@ const TASK_RULES = Object.freeze({
   test: [
     'map acceptance to deterministic checks; distinguish passed, failed, blocked, and skipped',
   ],
+  threeD: [
+    'before editing 3D/WebGL code, search a concrete working example and verify the exact API/version; treat mobile performance as part of correctness',
+    'trace scene ownership, asset loading, render lifecycle, draw-call/geometry cost, and continuous-state updates before optimizing by guesswork',
+  ],
+  seo: [
+    'before SEO implementation, inspect routes and rendered HTML and research current search guidance; never claim ranking guarantees',
+    'verify metadata, canonical, indexability, semantic crawlable links, structured data, sitemap/robots behavior, and performance after the change',
+  ],
   artifact: [
     'verify exact output path, file existence, and openability before claiming delivery',
   ],
@@ -39,7 +47,9 @@ export function buildReasoningScaffoldFrame(primary = 'implementation') {
 
 export function buildTaskMicroPlan(primary = 'implementation') {
   const common = ['understand request + constraints', 'inspect relevant source', 'plan if non-trivial', 'implement minimal complete change', 'verify behavior', 'report proof + caveats'];
-  if (primary === 'ui') return [...common.slice(0, 2), 'compile design system + interaction contract', ...common.slice(3)];
+  if (primary === 'ui') return [...common.slice(0, 2), 'compile design system + interaction contract + Taste anti-slop gate', ...common.slice(3)];
+  if (primary === 'threeD') return ['inspect scene + stack', 'research working 3D example + verify API/version', 'plan camera/assets/performance', 'implement minimal scene', 'test mobile + reduced motion + lifecycle', 'report proof + caveats'];
+  if (primary === 'seo') return ['inspect routes + rendered HTML', 'research current search guidance', 'plan technical + content signals', 'implement minimal complete SEO changes', 'validate metadata/indexability/structured data/performance', 'report proof + caveats'];
   if (primary === 'debug') return ['reproduce', 'trace ownership + evidence', 'plan causal fix', 'patch', 'run regression proof', 'report proof + caveats'];
   return common;
 }

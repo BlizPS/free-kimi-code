@@ -13,6 +13,8 @@ const UI_PRESERVE = /\b(keep|preserve|don't redesign|do not redesign|existing de
 const UI_COMPLEX = /\b(multi-page|multiple pages|full app|complete app|production|polished|professional|interactive|animation|responsive|mobile|desktop|states|accessibility|design system)\b/i;
 const UI_BUILD = /\b(build|create|make|implement|design|redesign|polish|improve|fix|refactor|generate)\b/i;
 const UI_FACTUAL = /\b(history|historical|sejarah|tahun|year|statistic|statistics|data|biography|biografi|timeline|event|peristiwa)\b/i;
+const UI_3D = /\b(3d|three(?:\.js)?|webgl|webgpu|canvas 3d|gltf|glb|shader|babylon)\b/i;
+const UI_SEO = /\b(seo|search engine|google search|indexing|crawl|sitemap|robots\.txt|canonical|structured data|schema\.org|meta description|title tag|open graph|og:)\b/i;
 
 export const UI_INTELLIGENCE_RULES = Object.freeze([
   'Design for the actual product; preserve existing identity unless redesign is requested.',
@@ -35,6 +37,8 @@ export function classifyUiRequest(prompt = '') {
   const complex = UI_COMPLEX.test(text);
   const build = UI_BUILD.test(text);
   const factual = UI_FACTUAL.test(text);
+  const threeD = UI_3D.test(text);
+  const seo = UI_SEO.test(text);
   const designIntelligence = isUi && (build || reference || complex);
   return Object.freeze({
     isUi,
@@ -45,7 +49,9 @@ export function classifyUiRequest(prompt = '') {
     build,
     designIntelligence,
     factual,
-    researchFirst: isUi && (reference || complex || factual),
+    threeD,
+    seo,
+    researchFirst: isUi && (reference || complex || factual || threeD || seo),
   });
 }
 
@@ -60,6 +66,8 @@ export function buildUiTaskContext(prompt = '') {
     `content=${task.factual ? 'fact-check-first' : 'implementation-copy'}`,
     `complexity=${task.complex ? 'non-trivial' : 'focused'}`,
     `design-engine=${task.designIntelligence ? 'required-first' : 'off'}`,
+    `3d=${task.threeD ? 'research-mandatory' : 'off'}`,
+    `seo=${task.seo ? 'research-mandatory' : 'off'}`,
   ];
   return `[UI] ${flags.join('; ')}`;
 }

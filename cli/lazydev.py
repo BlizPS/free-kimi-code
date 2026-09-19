@@ -899,7 +899,18 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         '',
         '[[hooks]]',
         'event = "UserPromptSubmit"',
+        f'command = {toml_quote(_hook_command(ROOT / "hooks" / "lazydev-research-gate.py"))}',
+        'timeout = 3',
+        '',
+        '[[hooks]]',
+        'event = "UserPromptSubmit"',
         f'command = {toml_quote(_hook_command(ROOT / "hooks" / "lazydev-prompt-context.py"))}',
+        'timeout = 3',
+        '',
+        '[[hooks]]',
+        'event = "PreToolUse"',
+        'matcher = "Write|WriteFile|Edit|StrReplaceFile|MultiEdit|NotebookEdit"',
+        f'command = {toml_quote(_hook_command(ROOT / "hooks" / "lazydev-research-gate.py"))}',
         'timeout = 3',
         '',
         '[[hooks]]',
@@ -924,6 +935,12 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         'event = "PostToolUse"',
         'matcher = "Write|WriteFile|Edit|StrReplaceFile"',
         f'command = {toml_quote(_hook_command(ROOT / "hooks" / "lazydev-ui-audit.py"))}',
+        'timeout = 3',
+        '',
+        '[[hooks]]',
+        'event = "PostToolUse"',
+        'matcher = "WebSearch|FetchURL|browser_open|search_web"',
+        f'command = {toml_quote(_hook_command(ROOT / "hooks" / "lazydev-research-gate.py"))}',
         'timeout = 3',
         '',
     ]
@@ -1167,6 +1184,18 @@ def ui_command(query: str, as_json: bool = False) -> int:
             component_hits.append(item)
     if not component_hits:
         component_hits = components[:4]
+    taste = {
+        "integrated": True,
+        "mode": "landing" if any(w in query.lower() for w in ["landing", "portfolio", "marketing", "homepage"]) else "redesign" if "redesign" in query.lower() else "product",
+        "dials": {
+            "designVariance": 5 if any(w in query.lower() for w in ["minimal", "clean", "calm", "editorial"]) else 9 if any(w in query.lower() for w in ["wild", "experimental", "awwwards", "creative"]) else 7,
+            "motionIntensity": 8 if any(w in query.lower() for w in ["kinetic", "cinematic", "gsap"]) else 2 if "reduced motion" in query.lower() else 6,
+            "visualDensity": 7 if any(w in query.lower() for w in ["dense", "dashboard", "analytics", "cockpit"]) else 3 if any(w in query.lower() for w in ["airy", "editorial", "portfolio", "premium"]) else 4,
+        },
+        "gates": ["brief inference", "one visual family", "anti-slop", "real states", "responsive stress", "asset verification", "pre-flight"],
+    }
+    three_d = any(re.search(r"\b(3d|three(?:\.js)?|webgl|webgpu|gltf|glb|shader)\b", query, re.I) for _ in [0])
+    seo = bool(re.search(r"\b(seo|search engine|indexing|crawl|sitemap|robots\.txt|canonical|structured data|schema\.org|meta description)\b", query, re.I))
     result = {
         "query": query,
         "product": product,
@@ -1179,6 +1208,9 @@ def ui_command(query: str, as_json: bool = False) -> int:
         "components": [{"id": x.get("id"), "rules": x.get("rules", [])[:4]} for x in component_hits[:6]],
         "uxRules": [x for x in ux[:8]],
         "antiSlop": ["card soup", "decorative gradient", "hero oversized for app workflows", "icon-only controls", "fake loading/activity states"],
+        "tasteSystem": taste,
+        "3dPolicy": {"enabled": three_d, "researchRequired": three_d, "reference": "working example + current API docs before implementation"},
+        "seoPolicy": {"enabled": seo, "researchRequired": seo, "checks": ["title/meta", "canonical", "semantic crawlable links", "indexability", "structured data", "sitemap/robots", "rendered HTML", "performance"]},
     }
     if as_json:
         print(json.dumps(result, indent=2))
@@ -1191,6 +1223,11 @@ def ui_command(query: str, as_json: bool = False) -> int:
         print(f"Typography {typeface.get('heading')} / {typeface.get('body')}")
         print(f"Density    {result['density']}/10")
         print(f"Motion     {motion_profile.get('id')}")
+        print(f"Taste      integrated · variance {taste['dials']['designVariance']} · motion {taste['dials']['motionIntensity']} · density {taste['dials']['visualDensity']}")
+        if three_d:
+            print("3D         research required: working example + current API docs")
+        if seo:
+            print("SEO        research required: metadata + crawlability + indexability + structured data + performance")
         print("\nUX priorities")
         for item in result["uxRules"]:
             print(f"- {item.get('rule')}")
@@ -1199,6 +1236,65 @@ def ui_command(query: str, as_json: bool = False) -> int:
             print(f"- {item}")
     return 0
 
+
+def seo_command(query: str, as_json: bool = False, project: Path | None = None) -> int:
+    source = ''
+    if project and project.exists():
+        candidates = [project / 'index.html', project / 'src' / 'index.html', project / 'app' / 'page.tsx', project / 'app' / 'page.jsx']
+        for candidate in candidates:
+            if candidate.is_file():
+                try:
+                    source = candidate.read_text(encoding='utf-8', errors='ignore')
+                    break
+                except Exception:
+                    pass
+    checks = [
+        ('title', bool(re.search(r'<title\b[^>]*>\s*[^<\n]+\s*</title>', source, re.I)) if source else None),
+        ('meta description', bool(re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=', source, re.I)) if source else None),
+        ('canonical', bool(re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=', source, re.I)) if source else None),
+        ('document lang', bool(re.search(r'<html[^>]+lang=', source, re.I)) if source else None),
+        ('semantic main', bool(re.search(r'<main\b', source, re.I)) if source else None),
+        ('crawlable links', bool(re.search(r'<a\b[^>]+href=', source, re.I)) if source else None),
+        ('image alt', bool(re.search(r'<img\b[^>]+alt=["\']', source, re.I)) if source else None),
+        ('structured data', bool(re.search(r'application/ld\+json', source, re.I)) if source else None),
+    ]
+    result = {
+        'query': query,
+        'researchRequired': True,
+        'project': str(project) if project else None,
+        'rules': ['unique title/meta', 'single canonical intent', 'semantic crawlable links', 'explicit indexability', 'accurate structured data', 'sitemap/robots verification', 'rendered JS content', 'mobile performance'],
+        'checks': [{'id': name, 'status': 'pass' if value is True else 'fail' if value is False else 'not-inspected'} for name, value in checks],
+        'sources': ['Google Search Central SEO Starter Guide', 'Google Search Central JavaScript SEO Basics', 'Google Search Central sitemaps', 'Google Search Central structured data'],
+    }
+    if as_json:
+        print(json.dumps(result, indent=2))
+    else:
+        title('LazyDev SEO system')
+        print('Research   required before implementation')
+        print('Target     crawlable, understandable, indexable when intended')
+        if project:
+            for item in result['checks']:
+                print(f"{item['id'].ljust(20)} {item['status']}")
+    return 0
+
+
+def three_d_command(query: str, as_json: bool = False) -> int:
+    result = {
+        'query': query,
+        'researchRequired': True,
+        'referenceGate': ['working example', 'current official docs', 'exact library version'],
+        'performanceGate': ['draw calls', 'geometry/triangles', 'DPR', 'resource disposal', 'mobile', 'reduced motion'],
+        'implementationOrder': ['inspect', 'research', 'extract patterns', 'implement', 'profile', 'verify'],
+    }
+    if as_json:
+        print(json.dumps(result, indent=2))
+    else:
+        title('LazyDev 3D system')
+        print('Research   mandatory')
+        print('Reference  working example + current API/version docs')
+        print('Performance draw calls · geometry · DPR · disposal · mobile')
+        print('Order      inspect → research → extract → implement → profile → verify')
+    return 0
 
 def doctor() -> int:
     cfg = read_config()
@@ -1268,6 +1364,8 @@ def help_command() -> int:
         ("lazydev env", "Inspect the native CLI environment"),
         ("lazydev ui <brief>", "Generate a data-driven UI design system"),
         ("lazydev lang", "Detect TypeScript/Go and show coding contracts"),
+        ("lazydev 3d <brief>", "Show the mandatory 3D reference/performance contract"),
+        ("lazydev seo <brief>", "Show the SEO research and verification contract"),
         ("lazydev doctor", "Check installation and configuration"),
         ("lazydev version", "Show installed version"),
     ]
@@ -1306,6 +1404,13 @@ def main(argv: list[str]) -> int:
     if cmd == "ui":
         parts = [x for x in argv[1:] if x not in {"--json"}]
         return ui_command(" ".join(parts).strip(), "--json" in argv)
+    if cmd == "3d":
+        parts = [x for x in argv[1:] if x not in {"--json"}]
+        return three_d_command(" ".join(parts).strip(), "--json" in argv)
+    if cmd == "seo":
+        project = Path(argv[argv.index("--project") + 1]).resolve() if "--project" in argv and argv.index("--project") + 1 < len(argv) else None
+        parts = [x for x in argv[1:] if x not in {"--json"} and x != "--project" and not ("--project" in argv and argv.index("--project") + 1 < len(argv) and x == argv[argv.index("--project") + 1])]
+        return seo_command(" ".join(parts).strip(), "--json" in argv, project)
     if cmd == "setup":
         return setup()
     if cmd == "chat":

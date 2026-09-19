@@ -21,12 +21,14 @@ checks = {
     "test": r"\b(test|verify|validation|coverage|smoke)\b",
     "research": r"\b(latest|current|documentation|docs|research|search|sejarah|historical|history|tahun|year|statistik|data|biography|biografi)\b",
     "security": r"\b(auth|credential|secret|xss|csrf|permission|sandbox)\b",
+    "3d": r"\b(3d|three(?:\.js)?|webgl|webgpu|gltf|glb|shader)\b",
+    "seo": r"\b(seo|search engine|indexing|crawl|sitemap|robots\.txt|canonical|structured data|schema\.org|meta description|title tag|open graph)\b",
 }
 scores = {name: len(re.findall(pattern, prompt, re.I)) for name, pattern in checks.items()}
-priority = ["debug", "security", "review", "artifact", "ui", "test", "research"]
+priority = ["debug", "security", "review", "artifact", "3d", "seo", "ui", "test", "research"]
 primary = next((name for name in priority if scores[name]), "implementation")
 complexity = min(100, 18 + min(30, len(prompt) // 160 * 4) + sum(6 for v in scores.values() if v))
-record = {"event": data.get("hook_event_name", "UserPromptSubmit"), "sessionId": data.get("session_id"), "cwd": data.get("cwd") or os.getcwd(), "prompt": prompt, "model": data.get("model") or os.getenv("LAZYDEV_MODEL", ""), "task": {"primary": primary, "scores": scores, "complexity": complexity, "verify": True}, "at": int(time.time() * 1000)}
+record = {"event": data.get("hook_event_name", "UserPromptSubmit"), "sessionId": data.get("session_id"), "cwd": data.get("cwd") or os.getcwd(), "prompt": prompt, "model": data.get("model") or os.getenv("LAZYDEV_MODEL", ""), "task": {"primary": primary, "scores": scores, "complexity": complexity, "verify": True, "researchRequired": bool(scores.get("3d") or scores.get("seo") or scores.get("research"))}, "at": int(time.time() * 1000)}
 dir_path = Path(os.getenv("LAZYDEV_CONTEXT_DIR", Path.home() / ".lazydev"))
 dir_path.mkdir(parents=True, exist_ok=True)
 (dir_path / "last-prompt.json").write_text(json.dumps(record), encoding="utf-8")

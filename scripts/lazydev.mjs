@@ -15,7 +15,7 @@ import { modelIntelligenceProfile, buildIntelligenceAliasSystem } from '../runti
 import { buildReasoningScaffoldFrame } from '../systems/intelligence/reasoning-scaffold.mjs';
 import { isTransientProviderFailure, shouldRetryTransient, transientRetryDelayMs, retryAfterMs, buildTransientFailureMessage } from '../runtime/provider-resilience.mjs';
 import { buildUiSystemPrompt } from '../runtime/ui-intelligence.mjs';
-import { buildNativeSystemsPrompt } from '../systems/index.mjs';
+import { buildNativeSystemsPrompt, buildDomainSystemsPrompt } from '../systems/index.mjs';
 import { buildKimiTokenConfig } from '../systems/token/adapters/kimi.mjs';
 import { extractSessionModelAliases } from '../runtime/session-model-compat.mjs';
 import { repairOpenAIHistory } from '../runtime/openai-history.mjs';
@@ -1243,7 +1243,9 @@ function writeKimiAgentGuidance() {
   const dir = kimiHome();
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const agents = path.join(dir, 'AGENTS.md');
-  const block = `<!-- lazydev-runtime:start -->\n# LazyDev Runtime\n\n- Keep simple requests simple; no unnecessary architecture, files, abstractions, or prose.\n- When requirements/evidence are unclear, ask one focused question or state uncertainty; never invent assumptions.\n- Do not make unrelated or random changes; preserve working behavior and relevant scope only.\n- Always double-check the smallest meaningful result before saying the task is complete.\n- For the first user turn of a new session, respond in English unless another language is explicitly requested.\n- Repository source stays in the active workspace.\n- Standalone deliverables use ${outputDirectory()} only.\n- Use descriptive filenames, not index.* by default; never overwrite a standalone artifact—if the target exists, retry with the lowest free numeric suffix before the extension.\n- Never report a file as saved until the exact final path is verified.\n- Use the relevant LazyDev Skill when it materially applies; keep its use compact.\n- Prefer RTK for supported shell commands to reduce terminal-output tokens; use the raw command when RTK has no equivalent.\n<!-- lazydev-runtime:end -->`;
+  const block = `<!-- lazydev-runtime:start -->\n# LazyDev Runtime\n\n- Keep simple requests simple; no unnecessary architecture, files, abstractions, or prose.\n- When requirements/evidence are unclear, ask one focused question or state uncertainty; never invent assumptions.\n- Do not make unrelated or random changes; preserve working behavior and relevant scope only.\n- Always double-check the smallest meaningful result before saying the task is complete.\n- For the first user turn of a new session, respond in English unless another language is explicitly requested.\n- Repository source stays in the active workspace.\n- Standalone deliverables use ${outputDirectory()} only.\n- Use descriptive filenames, not index.* by default; never overwrite a standalone artifact—if the target exists, retry with the lowest free numeric suffix before the extension.\n- Never report a file as saved until the exact final path is verified.\n- Use the relevant LazyDev Skill when it materially applies; keep its use compact. The four bundled Skills are the only discoverable LazyDev Skills. Taste, 3D reference-gating, and SEO systems are built-in execution systems, not extra Skills.
+- For any 3D/WebGL/Three.js task, research a concrete working example and verify the current API/version before the first implementation write; the native research gate blocks writes until evidence exists.
+- For any SEO task, research current search guidance and inspect the real rendered metadata/indexability/crawlability before claiming optimization; the native research gate blocks writes until evidence exists.\n- Prefer RTK for supported shell commands to reduce terminal-output tokens; use the raw command when RTK has no equivalent.\n<!-- lazydev-runtime:end -->`;
   mergeManagedMarkdown(agents, '<!-- lazydev-runtime:start -->', '<!-- lazydev-runtime:end -->', block);
 
   const system = path.join(dir, 'SYSTEM.md');
@@ -1252,8 +1254,9 @@ function writeKimiAgentGuidance() {
   const aliasSystem = buildIntelligenceAliasSystem();
   const uiSystem = buildUiSystemPrompt();
   const nativeSystems = buildNativeSystemsPrompt();
+  const domainSystems = buildDomainSystemsPrompt();
   const languageSystem = buildLanguageFrame({ cwd: process.cwd() });
-  fs.writeFileSync(system, `${bodyText}\n\n${nativeSystems}\n\n${uiSystem}\n\n${languageSystem}\n\n${aliasSystem}\n`, { mode: 0o600 });
+  fs.writeFileSync(system, `${bodyText}\n\n${nativeSystems}\n\n${domainSystems}\n\n${uiSystem}\n\n${languageSystem}\n\n${aliasSystem}\n`, { mode: 0o600 });
 }
 function basePromptPlaceholder() { return '${base_prompt}'; }
 function shellQuoteCommand(executable, args = []) {
@@ -1311,11 +1314,13 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
   const shellHook = path.join(root, 'hooks', 'lazydev-shell-guard.mjs');
   const artifactRouterHook = path.join(root, 'hooks', 'lazydev-artifact-router.mjs');
   const uiAuditHook = path.join(root, 'hooks', 'lazydev-ui-audit.py');
+  const researchGateHook = path.join(root, 'hooks', 'lazydev-research-gate.py');
   const promptCommand = shellQuoteCommand(process.execPath, [promptHook]);
   const artifactCommand = shellQuoteCommand(process.execPath, [artifactHook]);
   const shellCommand = shellQuoteCommand(process.execPath, [shellHook]);
   const artifactRouterCommand = shellQuoteCommand(process.execPath, [artifactRouterHook]);
   const uiAuditCommand = `${JSON.stringify(process.platform === 'win32' ? process.env.PYTHON || 'python' : process.env.PYTHON || 'python3')} ${JSON.stringify(uiAuditHook)}`;
+  const researchGateCommand = `${JSON.stringify(process.platform === 'win32' ? process.env.PYTHON || 'python' : process.env.PYTHON || 'python3')} ${JSON.stringify(researchGateHook)}`;
   const tokenConfig = buildKimiTokenConfig({ maxContext: context, maxOutput: output, reserveRatio: 0.08 });
   return [
     `default_model = ${tomlQuote(alias)}`,
@@ -1381,6 +1386,23 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     `[[hooks]]`,
     `event = ${tomlQuote('TurnStarted')}`,
     `command = ${tomlQuote(promptCommand)}`,
+    `timeout = 3`,
+    ``,
+    `[[hooks]]`,
+    `event = ${tomlQuote('UserPromptSubmit')}`,
+    `command = ${tomlQuote(researchGateCommand)}`,
+    `timeout = 3`,
+    ``,
+    `[[hooks]]`,
+    `event = ${tomlQuote('PreToolUse')}`,
+    `matcher = ${tomlQuote('Write|WriteFile|Edit|StrReplaceFile|MultiEdit|NotebookEdit')}`,
+    `command = ${tomlQuote(researchGateCommand)}`,
+    `timeout = 3`,
+    ``,
+    `[[hooks]]`,
+    `event = ${tomlQuote('PostToolUse')}`,
+    `matcher = ${tomlQuote('WebSearch|FetchURL|browser_open|search_web')}`,
+    `command = ${tomlQuote(researchGateCommand)}`,
     `timeout = 3`,
     ``,
     `[[hooks]]`,
