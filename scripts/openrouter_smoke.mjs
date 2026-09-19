@@ -10,7 +10,7 @@ const required = [
   "const OPENROUTER_FREE_MODEL = 'openrouter/free';",
   'function syntheticOpenRouterFreeModel()',
   'const fallbacks = Array.from(new Set(freeFallbacks)).filter((id) => id && id !== pc.model).slice(0, OPENROUTER_MODEL_FALLBACK_LIMIT)',
-  'require_parameters: true, allow_fallbacks: true',
+  'require_parameters: false, allow_fallbacks: true',
   "res.statusCode === 404 || res.statusCode === 429",
   'OPENROUTER_FREE_MODEL} included',
   'buildOpenRouterFreeFallbacks(pc.model, openRouterModels)',
@@ -23,6 +23,11 @@ if (missing.length) {
 }
 if (!source.includes('const OPENROUTER_MODEL_FALLBACK_LIMIT = 3;')) {
   console.error('FAIL: OpenRouter model fallback limit must be exactly 3.');
+  process.exit(1);
+}
+
+if (!source.includes('body.provider = { ...providerOptions, require_parameters: false, allow_fallbacks: true };')) {
+  console.error('FAIL: OpenRouter routing must not require every optional Kimi parameter from providers.');
   process.exit(1);
 }
 if (!source.includes('if (fallbacks.length) body.models = fallbacks;')) {

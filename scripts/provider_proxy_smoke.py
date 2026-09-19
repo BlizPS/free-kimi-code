@@ -87,6 +87,24 @@ try:
     assert seen, "upstream did not receive requests"
     assert all("prompt_cache_key" not in item["body"] for item in seen), seen
     assert all(item["body"]["model"] for item in seen), seen
+
+    # OpenRouter must not use strict parameter matching for Kimi's agent turns.
+    # Kimi may send optional OpenAI-style fields that some providers omit even
+    # though they support tool calling; strict routing can turn that into a
+    # misleading 404 "no endpoints found that support tool use".
+    openrouter_body = mod._normalize_provider_request(
+        {
+            "model": "openrouter/free",
+            "messages": [],
+            "tools": [{"type": "function", "function": {"name": "noop", "parameters": {"type": "object"}}}],
+            "reasoning_effort": "low",
+        },
+        {"id": "openrouter", "label": "OpenRouter", "kind": "openai"},
+        {"model": "openrouter/free", "modelInfo": {"context": 200000, "output": 8192}},
+    )
+    assert openrouter_body["provider"]["require_parameters"] is False, openrouter_body
+    assert openrouter_body["provider"]["allow_fallbacks"] is True, openrouter_body
+
     for pid, (_, model) in providers.items():
         matching = [item for item in seen if item["body"]["model"] == model]
         assert matching, f"missing upstream traffic for {pid}"

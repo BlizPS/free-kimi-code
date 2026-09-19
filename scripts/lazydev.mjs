@@ -669,7 +669,7 @@ async function createProxy(provider, pc, proxyOptions = {}) {
       if (preparedBody !== body) body = preparedBody;
       if (provider.id === 'openrouter') {
         const providerOptions = body.provider && typeof body.provider === 'object' && !Array.isArray(body.provider) ? body.provider : {};
-        body.provider = { ...providerOptions, require_parameters: true, allow_fallbacks: true };
+        body.provider = { ...providerOptions, require_parameters: false, allow_fallbacks: true };
         const freeFallbacks = Array.isArray(proxyOptions.freeFallbacks) ? proxyOptions.freeFallbacks : [];
         if (pc.model === OPENROUTER_FREE_MODEL || /:free$/i.test(pc.model)) {
           const fallbacks = Array.from(new Set(freeFallbacks)).filter((id) => id && id !== pc.model).slice(0, OPENROUTER_MODEL_FALLBACK_LIMIT);

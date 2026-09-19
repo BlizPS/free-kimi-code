@@ -534,6 +534,17 @@ def _normalize_provider_request(body: dict[str, Any], provider: dict[str, Any], 
                 normalized.pop(key, None)
     if "max_tokens" not in normalized and "max_completion_tokens" not in normalized:
         normalized["max_tokens"] = output_cap
+    if pid == "openrouter":
+        # Kimi Code sends several optional OpenAI-style parameters for agent/tool
+        # turns. Requiring every one of those parameters to be supported by a
+        # provider can eliminate otherwise tool-capable OpenRouter endpoints and
+        # surface a misleading 404: "no endpoints found that support tool use".
+        # OpenRouter should still enforce feature compatibility for the tool
+        # payload itself, while allowing provider-side parameter variance.
+        provider_options = normalized.get("provider")
+        if not isinstance(provider_options, dict):
+            provider_options = {}
+        normalized["provider"] = {**provider_options, "require_parameters": False, "allow_fallbacks": True}
     if pid == "nvidia":
         # NVIDIA Nemotron 3 Super controls reasoning through chat-template kwargs,
         # not OpenAI's generic reasoning_effort field. Strip the generic field and
