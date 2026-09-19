@@ -12,6 +12,8 @@ import { spawnSync } from 'node:child_process';
 import readline from 'node:readline';
 import { platformPaths } from '../runtime/platform-policy.mjs';
 import { modelIntelligenceProfile, buildIntelligenceAliasSystem } from '../runtime/intelligence-kernel.mjs';
+import { buildReasoningScaffoldFrame } from '../systems/intelligence/reasoning-scaffold.mjs';
+import { isTransientProviderFailure, shouldRetryTransient, transientRetryDelayMs, retryAfterMs, buildTransientFailureMessage } from '../runtime/provider-resilience.mjs';
 import { buildUiSystemPrompt } from '../runtime/ui-intelligence.mjs';
 import { buildNativeSystemsPrompt } from '../systems/index.mjs';
 import { buildKimiTokenConfig } from '../systems/token/adapters/kimi.mjs';
@@ -20,6 +22,7 @@ import { repairOpenAIHistory } from '../runtime/openai-history.mjs';
 import { generateDesignSystem } from '../systems/ui/pro/index.mjs';
 import { buildLanguageFrame, getLanguageReport } from '../systems/languages/index.mjs';
 import { buildGeminiRetryRequest, chunkFinishReason, chunkHasVisibleOutput, geminiOpenAIEndpoint, parseSseEvent, prepareGeminiRequest, responseHasUsableOutput, streamNeedsGeminiRetry } from '../runtime/gemini-resilience.mjs';
+import { compressAgenticMessages, FOVEANCE_DEFAULTS } from '../systems/token/foveance.mjs';
 
 const version = '1.0.0';
 const TOKEN_SAVINGS_FLOOR = 0.75;
@@ -30,6 +33,18 @@ const KIMI_VERSION = '2.0.0';
 const OPENROUTER_FREE_MODEL = 'openrouter/free';
 const OPENROUTER_MODEL_FALLBACK_LIMIT = 3;
 const GEMINI_NO_TOOL_MODELS = [];
+const PROVIDER_TRANSIENT_MAX_RETRIES = Math.max(0, Math.min(4, Number(process.env.LAZYDEV_TRANSIENT_RETRIES || 2)));
+const PROVIDER_TRANSIENT_BASE_MS = Math.max(250, Math.min(5000, Number(process.env.LAZYDEV_TRANSIENT_BASE_MS || 800)));
+const PROVIDER_TRANSIENT_MAX_MS = Math.max(PROVIDER_TRANSIENT_BASE_MS, Math.min(30000, Number(process.env.LAZYDEV_TRANSIENT_MAX_MS || 8000)));
+const TOKEN_CODEC_ENABLED = !['0','false','off','disabled'].includes(String(process.env.LAZYDEV_TOKEN_CODEC || 'auto').trim().toLowerCase());
+const TOKEN_CODEC_PROTECT_LAST = Math.max(4, Math.min(12, Number(process.env.LAZYDEV_TOKEN_CODEC_PROTECT_LAST || FOVEANCE_DEFAULTS.protectLast)));
+const TOKEN_CODEC_MIN_CHARS = Math.max(256, Math.min(20000, Number(process.env.LAZYDEV_TOKEN_CODEC_MIN_CHARS || FOVEANCE_DEFAULTS.minChars)));
+const TOKEN_CODEC_TEMPLATE_MODE = (() => {
+  const value = String(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE || 'auto').trim().toLowerCase();
+  return ['on','true','1','auto','off','false','0','disabled'].includes(value) ? (value === 'true' || value === '1' ? 'on' : value === 'false' || value === '0' || value === 'disabled' ? 'off' : value) : 'auto';
+})();
+const TOKEN_CODEC_TEMPLATE_PRESSURE = Math.max(0.55, Math.min(0.95, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_PRESSURE || 0.78)));
+const TOKEN_CODEC_TEMPLATE_MIN_SAVED = Math.max(64, Math.min(4096, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_MIN_SAVED || 128)));
 const ANTIGRAVITY_AGENT = 'antigravity-preview-09-2026';
 const KIMI_BUILTIN_TOOLS = [
   'Read','Write','Edit','Grep','Glob','ReadMediaFile','Bash',
@@ -535,7 +550,8 @@ async function createProxy(provider, pc, proxyOptions = {}) {
       return;
     }
     const url = new URL(req.url || '/', 'http://127.0.0.1');
-    if (req.method !== 'POST' || url.pathname !== '/v1/chat/completions') {
+    const expectedPath = provider.id === 'anthropic' ? '/v1/messages' : '/v1/chat/completions';
+    if (req.method !== 'POST' || url.pathname !== expectedPath) {
       res.writeHead(404, {'content-type':'application/json'});
       res.end(JSON.stringify({error:{message:'Not found'}}));
       return;
@@ -569,13 +585,31 @@ async function createProxy(provider, pc, proxyOptions = {}) {
           else delete body.models;
         }
       }
+      let tokenCodecStats = { changed: false, savedTokens: 0, beforeChars: 0, afterChars: 0, references: 0, replacedLines: 0, eligiblePayloads: 0, templateSavedTokens: 0, templateReferences: 0, cacheBoundary: -1 };
+      if (TOKEN_CODEC_ENABLED && Array.isArray(body.messages)) {
+        const compressed = compressAgenticMessages(body.messages, {
+          protectLast: TOKEN_CODEC_PROTECT_LAST,
+          minChars: TOKEN_CODEC_MIN_CHARS,
+          template: shouldUseTemplateCodec(body, pc),
+        });
+        tokenCodecStats = compressed;
+        if (compressed.changed) body.messages = compressed.messages;
+      }
+      // The codec only rewrites old tool-result text; tool-call IDs, arguments, ordering, and
+      // recent context remain untouched. A small response header exposes the local estimate.
+      if (tokenCodecStats.savedTokens > 0) {
+        res.setHeader('x-lazydev-token-codec', 'foveance-inspired');
+        res.setHeader('x-lazydev-token-saved-estimate', String(tokenCodecStats.savedTokens));
+        res.setHeader('x-lazydev-token-references', String(tokenCodecStats.references || 0));
+      }
+
       // Kimi Code attaches OpenAI-only extras (e.g. prompt caching hints) to every
       // request regardless of backend. OpenRouter ignores fields it doesn't
       // recognize, but stricter OpenAI-compatible validators (e.g. NVIDIA's)
       // reject the request outright with 400 Validation errors. Strip anything
       // not part of the standard chat completions schema before forwarding.
       for (const field of UNSUPPORTED_PASSTHROUGH_FIELDS) delete body[field];
-      const chatUrl = provider.id === 'ollama' ? ollamaChatUrl(pc.baseUrl) : provider.id === 'gemini' ? geminiOpenAIEndpoint(pc.model) : (provider.chatUrl || provider.chatUrls?.[0]);
+      const chatUrl = provider.id === 'ollama' ? ollamaChatUrl(pc.baseUrl) : provider.id === 'gemini' ? geminiOpenAIEndpoint(pc.model) : provider.id === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : (provider.chatUrl || provider.chatUrls?.[0]);
       if (!chatUrl) {
         res.writeHead(500, {'content-type':'application/json'});
         res.end(JSON.stringify({error:{message:'Provider chat endpoint is not configured.'}}));
@@ -585,7 +619,7 @@ async function createProxy(provider, pc, proxyOptions = {}) {
       const headers = {
         'content-type': 'application/json',
         'accept': req.headers.accept || 'application/json',
-        ...(provider.id === 'ollama' ? {} : {'authorization': `Bearer ${pc.apiKey}`}),
+        ...(provider.id === 'ollama' ? {} : provider.id === 'anthropic' ? { 'x-api-key': pc.apiKey, 'anthropic-version': '2023-06-01' } : {'authorization': `Bearer ${pc.apiKey}`}),
         'user-agent': `lazydev/${version}`
       };
       const transport = target.protocol === 'http:' ? http : https;
@@ -621,15 +655,47 @@ async function createProxy(provider, pc, proxyOptions = {}) {
         });
         return;
       }
-      const upstream = sendUpstream(body, upstreamRes => {
-        res.statusCode = upstreamRes.statusCode || 502;
-        const status = res.statusCode;
-        if (status >= 400) {
-          let errorBody = '';
-          upstreamRes.setEncoding('utf8');
-          upstreamRes.on('data', chunk => { errorBody += chunk; });
-          upstreamRes.on('end', () => {
-            const lower = errorBody.toLowerCase();
+      const transientFailure = async () => {
+        let attempt = 0;
+        while (true) {
+          const result = await new Promise((resolve, reject) => {
+            let responseSettled = false;
+            const upstream = sendUpstream(body, upstreamRes => {
+              const status = upstreamRes.statusCode || 502;
+              if (status >= 400) {
+                let errorBody = '';
+                upstreamRes.setEncoding('utf8');
+                upstreamRes.on('data', chunk => { errorBody += chunk; });
+                upstreamRes.on('end', () => resolve({ ok: false, status, body: errorBody, headers: upstreamRes.headers }));
+                upstreamRes.on('error', reject);
+                return;
+              }
+              responseSettled = true;
+              for (const [key, value] of Object.entries(upstreamRes.headers)) {
+                if (value != null && !['content-length','connection','transfer-encoding'].includes(key.toLowerCase())) res.setHeader(key, value);
+              }
+              res.statusCode = status;
+              upstreamRes.pipe(res);
+              resolve({ ok: true, status });
+            });
+            upstream.on('error', reject);
+            upstream.on('close', () => {
+              if (!responseSettled && !res.headersSent) return;
+            });
+          }).catch(error => ({ ok: false, status: 502, body: error instanceof Error ? error.message : String(error), headers: {} }));
+
+          if (result.ok) return;
+          const retriable = shouldRetryTransient({ status: result.status, body: result.body, attempt, maxRetries: PROVIDER_TRANSIENT_MAX_RETRIES, committed: false });
+          if (retriable) {
+            const delay = transientRetryDelayMs(attempt, result.headers, { baseMs: PROVIDER_TRANSIENT_BASE_MS, maxMs: PROVIDER_TRANSIENT_MAX_MS, jitter: 0.20 });
+            await new Promise(resolve => setTimeout(resolve, delay));
+            attempt += 1;
+            continue;
+          }
+          if (!res.headersSent) {
+            const parsed = (() => { try { return JSON.parse(result.body || '{}'); } catch { return null; } })();
+            const detail = parsed?.error?.message || parsed?.message || result.body || '';
+            const lower = String(result.body || '').toLowerCase();
             const openRouterFallbackStatus = provider.id === 'openrouter' && (res.statusCode === 404 || res.statusCode === 429);
             if (provider.id === 'openrouter' && lower.includes('no endpoints found') && lower.includes('tool use')) {
               res.statusCode = 503;
@@ -637,33 +703,34 @@ async function createProxy(provider, pc, proxyOptions = {}) {
               res.end(JSON.stringify({ error: { message: `OpenRouter has no live endpoint for ${pc.model} that satisfies Kimi Code tool use. Use openrouter/free or rerun lazydev setup.` } }));
               return;
             }
-            if (openRouterFallbackStatus && status === 429) {
-              const retryAfter = upstreamRes.headers['retry-after'];
-              res.statusCode = 503;
-              res.setHeader('content-type', 'application/json');
+            if (openRouterFallbackStatus && result.status === 429) {
+              const retryAfter = result.headers?.['retry-after'];
               const retryHint = retryAfter ? ` Retry-After: ${retryAfter}s.` : '';
               const fallbackHint = /:free$/i.test(pc.model) || pc.model === OPENROUTER_FREE_MODEL
                 ? ' Free-model fallbacks were requested; all eligible endpoints may currently be rate-limited.'
                 : ' OpenRouter provider failover was enabled for this model.';
+              res.statusCode = 503;
+              res.setHeader('content-type', 'application/json');
               res.end(JSON.stringify({ error: { message: `OpenRouter is rate-limited for ${pc.model}.${retryHint}${fallbackHint}` } }));
               return;
             }
-            res.statusCode = status;
-            res.setHeader('content-type', 'application/json');
-            if (errorBody.trim()) {
-              res.end(errorBody);
+            const overloaded = isTransientProviderFailure({ status: result.status, body: result.body });
+            if (overloaded) {
+              res.statusCode = 503;
+              res.setHeader('content-type', 'application/json');
+              res.end(JSON.stringify({ error: { message: buildTransientFailureMessage({ provider: provider.label, model: pc.model, status: result.status, attempts: attempt + 1, detail }) } }));
               return;
             }
-            const detail = `Provider ${provider.label} returned HTTP ${status} for model ${pc.model}. No response body was provided by the upstream API.`;
-            res.end(JSON.stringify({ error: { message: detail } }));
-          });
+            res.statusCode = result.status;
+            res.setHeader('content-type', 'application/json');
+            if (result.body.trim()) res.end(result.body);
+            else res.end(JSON.stringify({ error: { message: `Provider ${provider.label} returned HTTP ${result.status} for model ${pc.model}.` } }));
+          }
           return;
         }
-        for (const [key, value] of Object.entries(upstreamRes.headers)) {
-          if (value != null && !['content-length','connection','transfer-encoding'].includes(key.toLowerCase())) res.setHeader(key, value);
-        }
-        upstreamRes.pipe(res);
-      });
+      };
+      transientFailure();
+
     });
   });
   await new Promise((resolve, reject) => {
@@ -775,14 +842,28 @@ async function handleGeminiProxyRequest({ res, body, target, headers, pc, sendUp
     }
     if (result.type === 'streamed') return;
     if (result.type === 'http-error') {
+      const transient = isTransientProviderFailure({ status: result.status, body: result.body });
+      if (transient && attempt < PROVIDER_TRANSIENT_MAX_RETRIES) {
+        const delay = transientRetryDelayMs(attempt, result.headers, { baseMs: PROVIDER_TRANSIENT_BASE_MS, maxMs: PROVIDER_TRANSIENT_MAX_MS, jitter: 0.20 });
+        await new Promise(resolve => setTimeout(resolve, delay));
+        attempt += 1;
+        nextBody = buildGeminiRetryRequest(body, pc.model, attempt);
+        continue;
+      }
       if (result.status === 400 && attempt < 2) {
         attempt += 1;
         nextBody = buildGeminiRetryRequest(body, pc.model, attempt);
         continue;
       }
-      res.statusCode = result.status;
+      res.statusCode = transient ? 503 : result.status;
       res.setHeader('content-type', 'application/json');
-      res.end(result.body || JSON.stringify({error:{message:`Gemini returned HTTP ${result.status}.`}}));
+      if (transient) {
+        const parsed = (() => { try { return JSON.parse(result.body || '{}'); } catch { return null; } })();
+        const detail = parsed?.error?.message || parsed?.message || result.body || '';
+        res.end(JSON.stringify({ error: { message: buildTransientFailureMessage({ provider: 'Gemini', model: pc.model, status: result.status, attempts: attempt + 1, detail }) } }));
+      } else {
+        res.end(result.body || JSON.stringify({error:{message:`Gemini returned HTTP ${result.status}.`}}));
+      }
       return;
     }
     if (result.type === 'json') {
@@ -826,6 +907,16 @@ function assertHttpUrl(value, label = 'URL') {
   }
   return parsed;
 }
+function estimateMessageTokens(messages) {
+  try { return Math.max(1, Math.ceil(JSON.stringify(messages || []).length / 4)); } catch { return 0; }
+}
+function shouldUseTemplateCodec(body, pc) {
+  if (TOKEN_CODEC_TEMPLATE_MODE === 'on') return true;
+  if (TOKEN_CODEC_TEMPLATE_MODE !== 'auto') return false;
+  const limit = Math.max(32768, Number(pc?.modelInfo?.contextLimit) || Number(pc?.modelInfo?.inputLimit) || 131072);
+  return estimateMessageTokens(body?.messages) / limit >= TOKEN_CODEC_TEMPLATE_PRESSURE;
+}
+
 function activeProviderEnvKeys(provider) {
   if (provider.id === 'gemini') return ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GEMINI_BASE_URL', 'GEMINI_BASE_URL'];
   if (provider.id === 'anthropic') return ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL'];
@@ -861,7 +952,7 @@ function buildKimiModelEnv(provider, pc, proxy, budget) {
   if (provider.id === 'gemini' && !isAntigravityModel(pc.model)) env.KIMI_MODEL_THINKING_EFFORT = 'low';
 
   if (proxy) {
-    env.KIMI_MODEL_PROVIDER_TYPE = 'openai';
+    env.KIMI_MODEL_PROVIDER_TYPE = provider.id === 'anthropic' && !isAntigravityModel(pc.model) ? 'anthropic' : 'openai';
     env.KIMI_MODEL_BASE_URL = `http://127.0.0.1:${proxy.port}/v1`;
   } else if (provider.id === 'gemini') {
     // Google exposes Gemini through an OpenAI-compatible endpoint. This keeps
@@ -1097,7 +1188,7 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
   const output = budget.output;
   const antigravity = provider.id === 'gemini' && isAntigravityModel(pc.model) && proxy;
   const geminiProxy = provider.id === 'gemini' && Boolean(proxy);
-  const providerType = antigravity || geminiProxy ? 'openai' : provider.id === 'gemini' ? 'google-genai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
+  const providerType = antigravity || geminiProxy ? 'openai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
   const intelligence = modelIntelligenceProfile(pc.model);
   const toolUse = modelSupportsKimiTools(provider, pc);
   const modelCapabilities = toolUse ? (provider.id === 'gemini' ? ['tool_use','thinking'] : ['tool_use']) : [];
@@ -1106,15 +1197,13 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     '[tools]',
     `disabled = ${JSON.stringify(KIMI_BUILTIN_TOOLS)}`,
   ];
-  const providerLines = antigravity || geminiProxy
+  const providerLines = proxy
     ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote(`http://127.0.0.1:${proxy.port}/v1`)}`,`api_key = ${tomlQuote(proxy.token)}`]
     : provider.id === 'gemini'
       ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`api_key = ${tomlQuote(pc.apiKey)}`]
       : provider.id === 'anthropic'
-      ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote('https://api.anthropic.com')}`,`api_key = ${tomlQuote(pc.apiKey)}`]
-      : provider.id === 'openai'
-        ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote('https://api.openai.com/v1')}`,`api_key = ${tomlQuote(pc.apiKey)}`]
-        : [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote(`http://127.0.0.1:${proxy?.port}/v1`)}`,`api_key = ${tomlQuote(proxy?.token || '')}`];
+        ? [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote('https://api.anthropic.com')}`,`api_key = ${tomlQuote(pc.apiKey)}`]
+        : [`[providers.lazydev]`,`type = ${tomlQuote(providerType)}`,`base_url = ${tomlQuote('https://api.openai.com/v1')}`,`api_key = ${tomlQuote(pc.apiKey)}`];
   const artifactHook = path.join(root, 'hooks', 'lazydev-path-guard.mjs');
   const promptHook = path.join(root, 'hooks', 'lazydev-prompt-context.mjs');
   const shellHook = path.join(root, 'hooks', 'lazydev-shell-guard.mjs');
@@ -1130,6 +1219,7 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     `builtin_product_skills = false`,
     `telemetry = false`,
     `show_thinking_stream = false`,
+    ``,
     `database.base = true`,
     `database.search = true`,
     `extra_skill_dirs = [${tomlQuote(path.join(root, 'skills'))}]`,
@@ -1165,7 +1255,7 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     ...(provider.id === 'gemini' && !antigravity ? [`effort = ${tomlQuote('low')}`] : []),
     ``,
     `[loop_control]`,
-    `max_attempts_per_step = 2`,
+    `max_attempts_per_step = 10`,
     `max_steps_per_turn = 0`,
     `reserved_context_size = ${budget.reserve}`,
     `compaction_trigger_ratio = ${budget.ratio.toFixed(2)}`,
@@ -1512,7 +1602,12 @@ async function chat() {
     line(red('That model is temporarily disabled in LazyDev. Choose another configured provider/model with `lazydev setup`.'));
     return;
   }
-  const proxy = !['openai','anthropic'].includes(provider.id) ? await createProxy(provider, pc, { freeFallbacks }) : null;
+  // Route every remote provider through the same loopback proxy so transient retry, request
+  // normalization, and token compression apply consistently. Ollama stays direct because it is
+  // local by design and has no provider-side availability or billing layer to protect.
+  const proxy = provider.id !== 'ollama'
+    ? await createProxy(provider, pc, { freeFallbacks })
+    : null;
   pc.modelInfo = effectiveModelInfo(provider, pc);
   const sessionAliases = discoverSessionModelAliases(`lazydev/${pc.model}`);
   if (provider.id === 'ollama') assertHttpUrl(ollamaChatUrl(pc.baseUrl), 'Ollama API URL');
@@ -1545,10 +1640,7 @@ async function chat() {
   else launchArgs.push('--agent', 'default');
   const budget = contextBudget(pc.modelInfo);
   const authBridgeStop = startKimiAuthBridge({ configPath, provider, pc, proxy, sessionAliases });
-  // Native Kimi provider config is the source of truth for direct providers.
-  // The runtime model override is retained only for LazyDev compatibility-proxy
-  // routes, where it prevents native /login or /logout reloads from replacing
-  // the loopback inference route during the same TUI process.
+  // The runtime model override keeps the selected LazyDev route stable during the child TUI.
   const modelEnv = proxy ? buildKimiModelEnv(provider, pc, proxy, budget) : {};
   const childEnv = {
     ...sanitizeKimiChildEnv(provider),

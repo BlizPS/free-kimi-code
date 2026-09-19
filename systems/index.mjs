@@ -22,10 +22,11 @@ export const NATIVE_SYSTEM_PROMPT = Object.freeze([
   'Investigation: separate symptom from hypothesis; trace ownership/evidence; edit after a credible mechanism is established.',
   'Build: derive acceptance + non-goals; deliver a coherent end-to-end path; add structure only when acceptance/lifecycle requires it.',
   'Verify: run the smallest sufficient proof; distinguish pass/fail/unavailable/blocked; stop when acceptance is proven.',
-  'Token economy: progressive disclosure; bounded observations; targeted reads/search; deduplicate repeated work; compact before overflow; preserve exact technical literals and negation/order.',
-  'Agent mechanics: isolate exploration, plan multi-file work, implement one coherent change, classify failures before recovery, verify acceptance, and stop on proof.',
+  'Token economy: progressive disclosure; bounded observations; targeted reads/search; deduplicate repeated work; compact before overflow; preserve exact technical literals and negation/order. Old repeated tool-output lines may use [lazy-repeat N @m#:L#] references; treat them as repeats of the earlier referenced lines. Near context pressure, repeated tool-output rows may also use [lazy-template N "prefix"] followed by N suffix rows; reconstruct each row as prefix + suffix, without inventing or deleting facts.',
+  'Agent mechanics: isolate exploration, keep a short micro-plan for non-trivial work, implement one coherent change, observe each result, classify failures before recovery, verify acceptance, and stop on proof.',
+  'Model-agnostic scaffold: assume uneven reasoning; use decomposition, source-of-truth inspection, bounded tools, causal repair, and deterministic verification.',
   'Response: lead with the result or next action; never narrate Skill activation, tool mechanics, hidden reasoning, or a progress diary; compress repetition but preserve technical literals, negation, order, caveats, and proof.',
-  'UI: inspect → run local design-intelligence search first → research named external references when warranted → define hierarchy/system → implement real states → stress responsive behavior → verify visually → polish observed mismatches only.',
+  'UI: inspect → compile the local personal Pro design system → research named external references when warranted → define hierarchy/system → implement real states → stress responsive behavior → verify visually → polish observed mismatches only.',
 ].join('\n'));
 
 export function buildNativeSystemsPrompt() {
@@ -49,6 +50,9 @@ export function buildSystemStats() {
     tokenFrame: buildTokenEconomyFrame({ budget: 0, used: 0 }),
     sources: [
       'core/native-core.md',
+      'intelligence/SYSTEM.md',
+      'intelligence/reasoning-scaffold.mjs',
+      'recovery/retry-policy.mjs',
       'token/token-economy.md',
       'token/SYSTEM.md',
       'token/manifest.json',
@@ -61,6 +65,7 @@ export function buildSystemStats() {
       'token/handoff.mjs',
       'token/metrics.mjs',
       'token/bridge.mjs',
+      'token/foveance.mjs',
       'token/loader.mjs',
       'token/adapters/index.mjs',
       'token/adapters/kimi.mjs',

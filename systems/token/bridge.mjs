@@ -6,6 +6,7 @@ import { buildPromptCacheKey } from './cachekey.mjs';
 import { buildCompactHandoff } from './handoff.mjs';
 import { TokenLedger } from './metrics.mjs';
 import { dedupeCalls } from './dedupe.mjs';
+import { compressAgenticMessages, FOVEANCE_DEFAULTS } from './foveance.mjs';
 
 export function createTokenSystem(options = {}) {
   const ledger = new TokenLedger();
@@ -22,6 +23,8 @@ export function createTokenSystem(options = {}) {
     buildPromptCacheKey,
     buildCompactHandoff,
     dedupeCalls,
+    compressAgenticMessages,
+    foveanceDefaults: FOVEANCE_DEFAULTS,
     frame: (stats = {}) => buildTokenEconomyFrame(stats),
   });
 }

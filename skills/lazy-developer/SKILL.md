@@ -6,32 +6,22 @@ metadata:
 ---
 # Lazy Developer
 
-**RESEARCH → UNDERSTAND → ACT → VERIFY → SHIP.**
-
-Native systems remain active.
+**RESEARCH → UNDERSTAND → PLAN → ACT → OBSERVE → VERIFY → SHIP.** Native systems remain active; do not assume model quality.
 
 ## Core
 
-- Inspect scope, stack, patterns, relevant files, and tests before edits.
-- For current facts or named/external references, **RESEARCH** first when search is available.
-- Derive acceptance, constraints, non-goals, and the **smallest complete repo-native** change. Never invent APIs, behavior, assets, or evidence. Ask only **blocking questions**.
-- Reuse existing code; preserve behavior; trace **source → validation → sink**.
+Inspect relevant scope/stack/files/tests. For current or named/external facts, **RESEARCH** first when search is available. Define acceptance, constraints, non-goals, and the **smallest complete repo-native** change. Never invent APIs, behavior, assets, evidence, or tests; ask only **blocking questions**. Reuse code, preserve behavior, trace **source → validation → sink**.
 
 ## UI / UX
 
-Use a **design system** for hierarchy, type, spacing, color, states, responsiveness, accessibility, and performance. Implement real interaction states.
+Use **LazyDev Personal Pro UI**: visual anchor, hierarchy, type, spacing, color roles, components, states, responsiveness, accessibility, motion, performance. Compile/search the design system before UI code. Extract patterns, not copies. Reject **anti-patterns**: card soup, pill-everything, gradients/glass, icon piles, fake controls/data, filler, oversized heroes, invented content. Prefer visual proof; test narrow/medium/wide, overflow, long text, touch, reduced motion.
 
-Extract reference patterns, not copies. Reject AI-slop **anti-patterns**: card soup, pill-everything, gradients/glass, icon piles, fake controls, filler, oversized heroes, arbitrary shadows, invented content. Visually verify when possible; test mobile/tablet/desktop, long text, missing data, overflow.
+For **3D-viz mode**, prefer CSS/SVG/canvas when sufficient; use Three.js/WebGL when useful; check **mobile performance**.
 
-For **3D-viz mode**, use CSS/SVG/canvas when sufficient; use Three.js/WebGL when useful; check **mobile performance**.
+## Model-agnostic scaffold
 
-## Verification + communication
+Non-trivial work: inspect evidence → short plan → one change → observe → targeted **proof** → repair observed failures. When uncertain, read the source of truth and use smaller evidence-producing steps.
 
-Ambiguity: investigate first. Run the smallest meaningful **proof** and stop; `skipped ≠ passed`.
+## Verification
 
-**Response:** lead with the result or required action. Never narrate skill activation, tool mechanics, hidden reasoning, or filler. State decisions/blockers/proof once; expand only when needed.
-
-**Anti-yap:** target 75% less avoidable prose; keep context lean; preserve exact code, commands, paths, URLs, identifiers, versions, errors, negation, and ordering.
-
-For long token-heavy work, load `references/token-efficiency.md`.
-
+Run the smallest meaningful proof and stop; `skipped ≠ passed`. **Anti-yap:** 75% less prose; preserve exact paths, commands, URLs, versions, errors, negation, and ordering.

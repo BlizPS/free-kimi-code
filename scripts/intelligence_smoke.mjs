@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { classifyTask, buildTaskContext, modelIntelligenceProfile, resolveIntelligenceAliases, buildIntelligenceAliasSystem, buildHardRulesContext } from '../runtime/intelligence-kernel.mjs';
+import { buildReasoningScaffoldFrame } from '../systems/intelligence/reasoning-scaffold.mjs';
 
 const generic = modelIntelligenceProfile('provider/model');
 assert.equal(generic.id, 'adaptive');
@@ -18,6 +19,8 @@ const debug = classifyTask('Fix the crash after refactor and add regression proo
 assert.equal(debug.primary, 'debug');
 assert.equal(debug.depth, 'deep');
 assert.match(buildTaskContext(debug), /inspect→minimal change→evidence→verify/);
+assert.match(buildTaskContext(debug), /COGNITIVE-SCAFFOLD/);
+assert.match(buildReasoningScaffoldFrame('debug'), /reproduce/);
 assert.ok(resolveIntelligenceAliases(debug).includes('evidence_first'));
 assert.match(buildIntelligenceAliasSystem(), /LazyDev Intelligence Aliases/);
 assert.doesNotMatch(buildIntelligenceAliasSystem(), /(?:respond|reply|answer|write) (?:in|using) [a-z]+/i);

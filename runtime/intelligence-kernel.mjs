@@ -1,6 +1,8 @@
 import { buildUiTaskContext } from './ui-intelligence.mjs';
 import { buildExecutionFrames } from '../systems/index.mjs';
 import { buildLanguageFrame } from '../systems/languages/index.mjs';
+import { buildReasoningScaffoldFrame, buildTaskMicroPlan } from '../systems/intelligence/reasoning-scaffold.mjs';
+import { generateDesignSystem } from '../systems/ui/pro/index.mjs';
 
 const MODEL_PROFILES = [];
 
@@ -103,13 +105,30 @@ export function classifyTask(prompt = '', model = '') {
   };
 }
 
+function buildCompactUiDesignFrame(prompt, cwd) {
+  try {
+    const ds = generateDesignSystem(prompt, { cwd });
+    const r = ds.resolution;
+    const components = ds.components.slice(0, 4).map((item) => item.id);
+    const ux = ds.uxRules.slice(0, 5).map((item) => String(item).split(':')[0]);
+    const avoid = (r.antiPatterns || []).slice(0, 6);
+    return `[UI-DESIGN] product=${r.product.id}; pattern=${r.pattern.id}; style=${r.style.id}; palette=${r.palette.id}; type=${r.type.id}; density=${r.density}/10; motion=${r.motion.id}; components=${components.join(',')}; ux=${ux.join(',')}; avoid=${avoid.join('|')}; stack=${ds.stack.id}`;
+  } catch {
+    return '';
+  }
+}
+
 export function buildTaskContext(task) {
   const aliases = resolveIntelligenceAliases(task);
   const mode = task.simple ? 'simple-direct' : task.depth;
   const uiContext = task.text ? buildUiTaskContext(task.text) : '';
+  const uiDesign = task.text && task.primary === 'ui' ? buildCompactUiDesignFrame(task.text, task.cwd || process.cwd()) : '';
   const parts = [
     `[LZ] mode=${mode}; task=${task.primary}; complexity=${task.complexity}`,
     ...(uiContext ? [uiContext] : []),
+    ...(uiDesign ? [uiDesign] : []),
+    buildReasoningScaffoldFrame(task.primary || 'implementation'),
+    `[PLAN] ${buildTaskMicroPlan(task.primary || 'implementation').join(' → ')}`,
     `plan=${task.plan ? 'required' : 'skip unless needed'}; verify=required; artifact=${task.artifact ? 'canonical-path' : 'repo-native'}`,
     `rules=minimal,no-assumptions,no-random-changes,double-check; apply=inspect→minimal change→evidence→verify; aliases=${aliases.join(',')}`,
     buildLanguageFrame({ cwd: task.cwd || process.cwd(), primary: task.language || null }),

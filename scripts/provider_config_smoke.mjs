@@ -40,8 +40,12 @@ const result = spawnSync(process.execPath, [lazydev, 'chat'], { env, encoding: '
 assert.equal(result.status, 0, `chat smoke failed: ${result.stderr || result.stdout}`);
 assert.ok(fs.existsSync(captured), 'Kimi config was not generated');
 const config = fs.readFileSync(captured, 'utf8');
-assert.ok(config.includes('base_url = "https://api.openai.com/v1"'), config);
+assert.ok(config.includes('base_url = "http://127.0.0.1:'), config);
+assert.ok(config.includes('provider = "lazydev"'), config);
+assert.ok(config.includes('max_attempts_per_step = 10'), config);
+assert.equal((config.match(/\[loop_control\]/g) || []).length, 1, config);
 
 assert.doesNotMatch(config, /undefined/);
 assert.equal(fs.readFileSync(capturedEnv, 'utf8'), '', 'stale OPENAI_BASE_URL leaked into Kimi environment');
+assert.match(config, /\[providers\.lazydev\][\s\S]*base_url = "http:\/\/127\.0\.0\.1:/);
 console.log('provider config smoke: PASS');

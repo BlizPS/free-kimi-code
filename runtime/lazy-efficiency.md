@@ -15,3 +15,5 @@ ACTIVE BY DEFAULT on every agent response. Goal: remove ~75% of avoidable prose,
 Pattern: `[thing] [action]. [reason]. [next step].`
 
 - For simple tasks, prefer one short paragraph or a few high-signal bullets; expand only when required by risk, ambiguity, evidence, or the user.
+
+- Transport codec: when enabled, old repeated tool-output lines may be represented as `[lazy-repeat N @m#:L#]`; resolve them against the earlier visible message instead of inventing missing text. Under high context pressure, repeated tool-output rows may additionally use `[lazy-template N "prefix"]` followed by suffix rows; reconstruct them as `prefix + suffix`.
