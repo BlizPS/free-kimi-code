@@ -979,7 +979,9 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
         raise
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     workspace = _workspace_for_chat()
-    args = ["--work-dir", str(workspace), "--add-dir", str(ARTIFACT_DIR)]
+    # Kimi Code uses the child process working directory as its workspace root.
+    # Do not pass --work-dir: that flag is not supported by every standalone Kimi Code build.
+    args = ["--add-dir", str(ARTIFACT_DIR)]
     if sessions:
         args.append("--session")
     elif continue_session:

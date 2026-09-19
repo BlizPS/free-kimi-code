@@ -1718,8 +1718,6 @@ async function chat() {
   // The config written above is therefore the canonical runtime configuration.
   const artifactDir = ensureOutputDirectory();
   const launchArgs = [...invocation.args, '--add-dir', artifactDir];
-  const workDirIndex = process.argv.indexOf('--work-dir');
-  if (workDirIndex >= 0 && process.argv[workDirIndex + 1]) launchArgs.push('--work-dir', process.argv[workDirIndex + 1]);
   const mode = process.argv.includes('--new') ? 'new' : process.argv.includes('--sessions') || process.argv.includes('--session') ? 'sessions' : process.argv.includes('--resume') || process.argv.includes('--continue') ? 'continue' : 'new';
   if (mode === 'sessions') launchArgs.push('--session');
   else if (mode === 'continue') launchArgs.push('--continue');

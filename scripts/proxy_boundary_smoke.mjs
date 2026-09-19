@@ -8,7 +8,9 @@ const launcher = fs.readFileSync(path.join(root, 'scripts', 'lazydev.mjs'), 'utf
 const agent = fs.readFileSync(path.join(root, 'agents', 'lazydev.md'), 'utf8');
 const policy = JSON.parse(fs.readFileSync(path.join(root, 'runtime', 'token-policy.json'), 'utf8'));
 
-assert.match(launcher, /const artifactDir = ensureOutputDirectory\(\);\n  const workspaceDir = path\.resolve\(process\.cwd\(\)\);\n  const launchArgs = \[\.\.\.invocation\.args, '--work-dir', workspaceDir, '--add-dir', artifactDir\];/);
+assert.match(launcher, /const artifactDir = ensureOutputDirectory\(\);[\s\S]*const workspaceDir = path\.resolve\(process\.cwd\(\)\);[\s\S]*const launchArgs = \[\.\.\.invocation\.args, '--add-dir', artifactDir\];/);
+assert.doesNotMatch(launcher, /['"]--work-dir['"]/);
+assert.match(launcher, /Kimi Code derives its workspace from the child process cwd/);
 assert.match(launcher, /else launchArgs\.push\('--agent', 'default'\);/);
 assert.match(launcher, /KIMI_LOOP_MAX_STEPS_PER_TURN: '0'/);
 assert.match(launcher, /`max_steps_per_turn = 0`,/);

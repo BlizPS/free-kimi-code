@@ -1729,10 +1729,10 @@ async function chat() {
   // resolve their runtime config from KIMI_CODE_HOME instead.
   // The config written above is therefore the canonical runtime configuration.
   const artifactDir = ensureOutputDirectory();
+  // Kimi Code derives its workspace from the child process cwd. Avoid --work-dir because
+  // standalone Kimi Code builds do not all expose that option.
   const workspaceDir = path.resolve(process.cwd());
-  const launchArgs = [...invocation.args, '--work-dir', workspaceDir, '--add-dir', artifactDir];
-  const workDirIndex = process.argv.indexOf('--work-dir');
-  if (workDirIndex >= 0 && process.argv[workDirIndex + 1]) launchArgs.push('--work-dir', process.argv[workDirIndex + 1]);
+  const launchArgs = [...invocation.args, '--add-dir', artifactDir];
   const mode = process.argv.includes('--new') ? 'new' : process.argv.includes('--sessions') || process.argv.includes('--session') ? 'sessions' : process.argv.includes('--resume') || process.argv.includes('--continue') ? 'continue' : 'new';
   if (mode === 'sessions') launchArgs.push('--session');
   else if (mode === 'continue') launchArgs.push('--continue');
@@ -1752,7 +1752,7 @@ async function chat() {
     LAZYDEV_MODEL: pc.model,
   };
   const child = spawn(invocation.command, launchArgs, {
-    cwd: process.cwd(),
+    cwd: workspaceDir,
     stdio: 'inherit',
     env: childEnv,
     windowsHide: false,
