@@ -40,6 +40,8 @@ checks += [
 ]
 checks += [
     ('install.sh', 'TERMUX_LINUX=0', sh),
+    ('install.sh', 'Node.js $NODE_VERSION or newer is required for Lazy Developer', sh),
+    ('install.ps1', 'Node.js $NodeVersion or newer is required for Lazy Developer', ps),
     ('install.sh', 'glibc Linux userland', sh),
     ('install.sh', 'LAZYDEV_BIN_DIR=\"${LAZYDEV_BIN_DIR:-${PREFIX:-$HOME/.local}/bin}\"', sh),
     ('install.sh', 'if [ -L \"$LAZYDEV_LAUNCHER\" ]; then rm -f \"$LAZYDEV_LAUNCHER\"; fi', sh),
@@ -70,6 +72,8 @@ if 'for dir in "$HOME/.local/bin" "${PREFIX:-}/bin"' in sh:
 for name, text in [('install.sh', sh), ('install.ps1', ps)]:
     if 'npm install' in text.lower() or 'npm.cmd install' in text.lower():
         errors.append(f'{name}: installer must not install through npm')
+    if 'Installing private Node.js' in text or 'install_private_node' in text or 'nodejs.org/dist' in text or 'NODE_BASE_URL' in text:
+        errors.append(f'{name}: private Node.js installation/download must not be present')
 if 'ScriptBlock]::Create' in ps or 'scriptblock]::Create' in ps:
     errors.append('install.ps1: must not parse downloaded bytes with ScriptBlock.Create')
 if 'scriptblock]::Create' in (ROOT/'scripts/lazydev.mjs').read_text(encoding='utf-8').lower():

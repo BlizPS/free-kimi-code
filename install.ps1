@@ -9,13 +9,12 @@ $Repo = 'BlizPS/lazy-developer-free-kimi-code'
 $Branch = if ($env:LAZYDEV_BRANCH) { $env:LAZYDEV_BRANCH } else { 'main' }
 $LazyDevVersion = '1.0.0'
 $KimiVersion = '2.0.0'
-$NodeVersion = '22.19.0'
+$NodeVersion = '22.16.0'
 $KimiInstallUrl = 'https://code.kimi.com/kimi-code/install.ps1'
 $ArchiveUrl = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
 $GitHubApiUrl = "https://api.github.com/repos/$Repo/commits/$Branch"
 $RtkApiUrl = 'https://api.github.com/repos/rtk-ai/rtk/releases/latest'
 $RtkInstallRepo = 'https://github.com/rtk-ai/rtk'
-$NodeBaseUrl = "https://nodejs.org/dist/v$NodeVersion"
 $InstallRoot = if ($env:LAZYDEV_HOME) { $env:LAZYDEV_HOME } else { Join-Path $HOME '.local\share\lazydev' }
 $BinRoot = if ($env:LAZYDEV_BIN_DIR) { $env:LAZYDEV_BIN_DIR } else { Join-Path $HOME '.local\bin' }
 $ConfigRoot = if ($env:LAZYDEV_CONFIG_DIR) { $env:LAZYDEV_CONFIG_DIR } else { Join-Path $env:APPDATA 'lazydev' }
@@ -92,45 +91,20 @@ function Get-InstalledLazyRevision {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return '' }
     try { return ([IO.File]::ReadAllText($file)).Trim() } catch { return '' }
 }
-function Get-NodeExecutable {
-    $script:NodeIsPrivate = $false
+function Get-SystemNodeExecutable {
     $cmd = Get-Command node.exe -ErrorAction SilentlyContinue
-    if ($cmd) {
-        try {
-            if (Test-VersionAtLeast (Get-VersionFromText ((& node.exe --version 2>$null) -join "`n")) $NodeVersion) { return $cmd.Source }
-        } catch {}
+    if (-not $cmd) {
+        Fail "Node.js $NodeVersion or newer is required for Lazy Developer. Install Node.js separately and rerun the installer. No private Node.js runtime is installed by Lazy Developer."
     }
-    $private = Join-Path $InstallRoot 'runtime-node\node.exe'
-    if (Test-Path -LiteralPath $private -PathType Leaf) {
-        try {
-            if (Test-VersionAtLeast (Get-VersionFromText ((& $private --version 2>$null) -join "`n")) $NodeVersion) { $script:NodeIsPrivate = $true; return $private }
-        } catch {}
-    }
-    $archName = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
-    $asset = switch ($archName.ToUpperInvariant()) {
-        'AMD64' { "node-v$NodeVersion-win-x64.zip" }
-        'ARM64' { "node-v$NodeVersion-win-arm64.zip" }
-        default { Fail "Unsupported Windows architecture: $archName" }
-    }
-    Step "Installing private Node.js $NodeVersion runtime"
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-node-" + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
     try {
-        $archive = Join-Path $tmp $asset
-        Invoke-WebRequest -UseBasicParsing -Uri "$NodeBaseUrl/$asset" -OutFile $archive
-        $hashFile = Join-Path $tmp 'SHASUMS256.txt'
-        Invoke-WebRequest -UseBasicParsing -Uri "$NodeBaseUrl/SHASUMS256.txt" -OutFile $hashFile
-        $expected = ((Get-Content -LiteralPath $hashFile | Where-Object { $_ -match [regex]::Escape($asset) } | Select-Object -First 1) -split '\s+')[0]
-        if (-not $expected) { Fail "Could not find checksum for $asset." }
-        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash
-        if ($actual -ne $expected) { Fail 'Node.js checksum verification failed.' }
-        $extract = Join-Path $tmp 'extract'
-        Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
-        $node = Get-ChildItem -LiteralPath $extract -Filter 'node.exe' -Recurse -File | Select-Object -First 1
-        if (-not $node) { Fail 'Node.js binary was not found after extraction.' }
-        $script:NodeIsPrivate = $true
-        return $node.FullName
-    } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+        $current = Get-VersionFromText ((& $cmd.Source --version 2>$null) -join "`n")
+        if (-not (Test-VersionAtLeast $current $NodeVersion)) {
+            Fail "Node.js $NodeVersion or newer is required for Lazy Developer. Found $current. Upgrade Node.js separately and rerun the installer. No private Node.js runtime is installed by Lazy Developer."
+        }
+    } catch {
+        Fail "Could not execute the system Node.js runtime at $($cmd.Source). No private Node.js runtime is installed by Lazy Developer."
+    }
+    return $cmd.Source
 }
 function Install-Rtk {
     $latest = Get-RtkLatestVersion
@@ -224,6 +198,11 @@ if ($InstalledLazyVersion -and $InstalledLazyVersion -ne $LazyDevVersion) {
     Write-Host "Lazy Developer changed or is missing — update required."
 }
 
+if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Container) {
+    $LazyDevNeedsUpdate = $true
+    Write-Host 'Legacy private Node.js runtime detected — migrating to the system Node.js runtime.'
+}
+
 $RtkExe = Find-Rtk
 $RtkCurrentVersion = Get-RtkVersion $RtkExe
 $RtkLatestVersion = Get-RtkLatestVersion
@@ -304,7 +283,7 @@ function Refresh-ExistingLazyDevLaunchers {
 }
 
 if ($LazyDevNeedsUpdate) {
-    $NodeExe = Get-NodeExecutable
+    $NodeExe = Get-SystemNodeExecutable
     Step "Installing/updating Lazy Developer $LazyDevVersion"
     $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-" + [guid]::NewGuid().ToString('N'))
     $archive = Join-Path $tempRoot 'lazydev.zip'
@@ -323,10 +302,6 @@ if ($LazyDevNeedsUpdate) {
         if ($sourceVersion -ne $LazyDevVersion) { Fail "Repository version is $sourceVersion; expected $LazyDevVersion." }
         Get-ChildItem -LiteralPath $sourceDir.FullName -Force | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse -Force }
         Set-Content -LiteralPath (Join-Path $stage '.lazydev-revision') -Value $RemoteRevision -Encoding ASCII
-        if ($script:NodeIsPrivate) {
-            New-Item -ItemType Directory -Path (Join-Path $stage 'runtime-node') -Force | Out-Null
-            Copy-Item -LiteralPath $NodeExe -Destination (Join-Path $stage 'runtime-node\node.exe') -Force
-        }
         if (Test-Path -LiteralPath $InstallRoot) {
             Remove-Item -LiteralPath "$InstallRoot.previous" -Recurse -Force -ErrorAction SilentlyContinue
             Move-Item -LiteralPath $InstallRoot -Destination "$InstallRoot.previous" -Force
@@ -336,19 +311,19 @@ if ($LazyDevNeedsUpdate) {
         Remove-Item -LiteralPath "$InstallRoot.previous" -Recurse -Force -ErrorAction SilentlyContinue
 
         New-Item -ItemType Directory -Path $BinRoot -Force | Out-Null
-        $nodeForLauncher = if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node\node.exe')) { Join-Path $InstallRoot 'runtime-node\node.exe' } else { $NodeExe }
         $launcherContent = @"
 @echo off
 setlocal
 set "LAZYDEV_ROOT=$InstallRoot"
 set "PATH=$BinRoot;$(Join-Path $HOME '.kimi-code\bin');%PATH%"
-if exist "%LAZYDEV_ROOT%\runtime-node\node.exe" (
-  set "NODE_BIN=%LAZYDEV_ROOT%\runtime-node\node.exe"
-) else (
-  set "NODE_BIN=$nodeForLauncher"
+where node.exe >nul 2>&1
+if errorlevel 1 (
+  echo Node.js $NodeVersion or newer is required for Lazy Developer. 1>&2
+  exit /b 1
 )
-"%NODE_BIN%" "%LAZYDEV_ROOT%\scripts\lazydev.mjs" %*
-endlocal
+node.exe "%LAZYDEV_ROOT%\scripts\lazydev.mjs" %*
+set "EXIT_CODE=%ERRORLEVEL%"
+endlocal & exit /b %EXIT_CODE%
 "@
         Set-Content -LiteralPath $Launcher -Value $launcherContent -Encoding ASCII
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')

@@ -5,7 +5,7 @@ REPO="BlizPS/lazy-developer-free-kimi-code"
 BRANCH="${LAZYDEV_BRANCH:-main}"
 LAZYDEV_VERSION="1.0.0"
 KIMI_VERSION="2.0.0"
-NODE_VERSION="22.19.0"
+NODE_VERSION="22.16.0"
 KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"
 RTK_INSTALL_URL="https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh"
 REPO_ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz"
@@ -380,48 +380,16 @@ elif [ -n "$RTK_COMMAND" ]; then
   say "RTK Kimi integration already current — skipped."
 fi
 
+if [ -d "$LAZYDEV_HOME/runtime-node" ]; then
+  LAZYDEV_NEEDS_UPDATE=1
+  say "Legacy private Node.js runtime detected — migrating to the system Node.js runtime."
+fi
+
 if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
   NODE_BIN="$(command -v node 2>/dev/null || true)"
-  NODE_IS_PRIVATE=0
-  if [ -n "$NODE_BIN" ]; then
-    CURRENT_NODE="$($NODE_BIN --version 2>/dev/null || true)"
-    if ! version_at_least "$CURRENT_NODE" "$NODE_VERSION"; then NODE_BIN=""; fi
-  fi
-  if [ -z "$NODE_BIN" ] && [ -x "$LAZYDEV_HOME/runtime-node/node" ]; then
-    PRIVATE_NODE="$LAZYDEV_HOME/runtime-node/node"
-    PRIVATE_NODE_VERSION="$($PRIVATE_NODE --version 2>/dev/null || true)"
-    if version_at_least "$PRIVATE_NODE_VERSION" "$NODE_VERSION"; then
-      NODE_BIN="$PRIVATE_NODE"; NODE_IS_PRIVATE=1
-    fi
-  fi
-
-  install_private_node() {
-    os="$(uname -s)"; arch="$(uname -m)"
-    case "$os:$arch" in
-      Darwin:arm64|Darwin:aarch64) node_asset="node-v${NODE_VERSION}-darwin-arm64.tar.gz" ;;
-      Darwin:x86_64) node_asset="node-v${NODE_VERSION}-darwin-x64.tar.gz" ;;
-      Linux:aarch64|Linux:arm64) node_asset="node-v${NODE_VERSION}-linux-arm64.tar.xz" ;;
-      Linux:x86_64|Linux:amd64) node_asset="node-v${NODE_VERSION}-linux-x64.tar.xz" ;;
-      *) fatal "Unsupported platform/architecture for Node.js $NODE_VERSION: $os/$arch" ;;
-    esac
-    step "Installing private Node.js $NODE_VERSION runtime"
-    archive="$TMP_DIR/$node_asset"
-    checksums="$TMP_DIR/SHASUMS256.txt"
-    curl -fsSL "$NODE_BASE_URL/$node_asset" -o "$archive"
-    curl -fsSL "$NODE_BASE_URL/SHASUMS256.txt" -o "$checksums"
-    expected="$(awk -v n="$node_asset" '$2==n {print $1; exit}' "$checksums")"
-    [ -n "$expected" ] || fatal "Could not find the Node.js checksum for $node_asset."
-    actual="$(sha256sum "$archive" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$archive" | awk '{print $1}')"
-    [ "$actual" = "$expected" ] || fatal "Node.js checksum verification failed."
-    node_extract="$TMP_DIR/node"
-    mkdir -p "$node_extract"
-    tar -xf "$archive" -C "$node_extract"
-    NODE_BIN="$(find "$node_extract" -type f -name node -perm -111 -print | head -n 1)"
-    [ -n "$NODE_BIN" ] || fatal "Node.js binary was not found after extraction."
-    NODE_IS_PRIVATE=1
-  }
-
-  if [ -z "$NODE_BIN" ]; then install_private_node; fi
+  [ -n "$NODE_BIN" ] || fatal "Node.js $NODE_VERSION or newer is required for Lazy Developer. Install Node.js separately and rerun the installer. No private Node.js runtime is installed by Lazy Developer."
+  CURRENT_NODE="$($NODE_BIN --version 2>/dev/null || true)"
+  version_at_least "$CURRENT_NODE" "$NODE_VERSION" || fatal "Node.js $NODE_VERSION or newer is required for Lazy Developer. Found $CURRENT_NODE. Upgrade Node.js separately and rerun the installer. No private Node.js runtime is installed by Lazy Developer."
 
   SOURCE_ARCHIVE="$TMP_DIR/lazydev.tar.gz"
   SOURCE_EXTRACT="$TMP_DIR/source"
@@ -432,16 +400,10 @@ if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
   tar -xzf "$SOURCE_ARCHIVE" -C "$SOURCE_EXTRACT"
   SOURCE_DIR="$(find "$SOURCE_EXTRACT" -type f -name package.json -print | head -n 1 | sed 's#/package.json$##')"
   [ -n "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/package.json" ] || fatal "Downloaded Lazy Developer source could not be located."
-  SOURCE_VERSION="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SOURCE_DIR/package.json" | head -n 1)"
+  SOURCE_VERSION="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"\]*\)".*/\1/p' "$SOURCE_DIR/package.json" | head -n 1)"
   [ "$SOURCE_VERSION" = "$LAZYDEV_VERSION" ] || fatal "Repository version is $SOURCE_VERSION; expected $LAZYDEV_VERSION."
   cp -R "$SOURCE_DIR/." "$INSTALL_STAGE/"
   printf '%s\n' "$REMOTE_REVISION" > "$INSTALL_STAGE/.lazydev-revision"
-
-  if [ "$NODE_IS_PRIVATE" -eq 1 ]; then
-    mkdir -p "$INSTALL_STAGE/runtime-node"
-    cp "$NODE_BIN" "$INSTALL_STAGE/runtime-node/node"
-    chmod 755 "$INSTALL_STAGE/runtime-node/node"
-  fi
 
   mkdir -p "$LAZYDEV_BIN_DIR"
   if [ -e "$LAZYDEV_HOME" ]; then
@@ -452,7 +414,6 @@ if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
   mv "$INSTALL_STAGE" "$LAZYDEV_HOME"
   rm -rf "$LAZYDEV_HOME.previous" 2>/dev/null || true
 
-  if [ -x "$LAZYDEV_HOME/runtime-node/node" ]; then RUN_NODE="$LAZYDEV_HOME/runtime-node/node"; else RUN_NODE="$NODE_BIN"; fi
   LAZYDEV_LAUNCHER="$LAZYDEV_BIN_DIR/lazydev"
   if [ -L "$LAZYDEV_LAUNCHER" ]; then rm -f "$LAZYDEV_LAUNCHER"; fi
   cat > "$LAZYDEV_LAUNCHER" <<EOF
@@ -460,10 +421,10 @@ if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
 # Lazy Developer managed launcher
 set -eu
 LAZYDEV_ROOT="$(printf '%s' "$LAZYDEV_HOME" | sed 's/[\\&]/\\&/g')"
-if [ -x "\$LAZYDEV_ROOT/runtime-node/node" ]; then
-  NODE_BIN="\$LAZYDEV_ROOT/runtime-node/node"
-else
-  NODE_BIN="$(printf '%s' "$RUN_NODE" | sed 's/[\\&]/\\&/g')"
+NODE_BIN="\$(command -v node 2>/dev/null || true)"
+if [ -z "\$NODE_BIN" ]; then
+  echo "Node.js $NODE_VERSION or newer is required for Lazy Developer." >&2
+  exit 1
 fi
 export PATH="$HOME/.kimi-code/bin:$LAZYDEV_BIN_DIR:\$PATH"
 exec "\$NODE_BIN" "\$LAZYDEV_ROOT/scripts/lazydev.mjs" "\$@"
