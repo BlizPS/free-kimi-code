@@ -40,8 +40,8 @@ checks += [
 ]
 checks += [
     ('install.sh', 'TERMUX_LINUX=0', sh),
-    ('install.sh', 'Node.js $NODE_VERSION or newer is required for Lazy Developer', sh),
-    ('install.ps1', 'Node.js $NodeVersion or newer is required for Lazy Developer', ps),
+    ('install.sh', 'The installer itself does not require or install Node.js', sh),
+    ('install.ps1', 'The installer does not require Node.js', ps),
     ('install.sh', 'glibc Linux userland', sh),
     ('install.sh', 'LAZYDEV_BIN_DIR=\"${LAZYDEV_BIN_DIR:-${PREFIX:-$HOME/.local}/bin}\"', sh),
     ('install.sh', 'if [ -L \"$LAZYDEV_LAUNCHER\" ]; then rm -f \"$LAZYDEV_LAUNCHER\"; fi', sh),
@@ -74,10 +74,23 @@ for name, text in [('install.sh', sh), ('install.ps1', ps)]:
         errors.append(f'{name}: installer must not install through npm')
     if 'Installing private Node.js' in text or 'install_private_node' in text or 'nodejs.org/dist' in text or 'NODE_BASE_URL' in text:
         errors.append(f'{name}: private Node.js installation/download must not be present')
+    if 'Get-SystemNodeExecutable' in text or 'NODE_BIN="$(command -v node' in text or 'Node.js $NodeVersion or newer is required' in text:
+        errors.append(f'{name}: installer must not require a host Node.js runtime during installation')
 if 'ScriptBlock]::Create' in ps or 'scriptblock]::Create' in ps:
     errors.append('install.ps1: must not parse downloaded bytes with ScriptBlock.Create')
 if 'scriptblock]::Create' in (ROOT/'scripts/lazydev.mjs').read_text(encoding='utf-8').lower():
     errors.append('scripts/lazydev.mjs: Windows installer hint still uses ScriptBlock.Create')
+for name, text in [('install.sh', sh), ('install.ps1', ps)]:
+    forbidden_install_checks = [
+        'Get-SystemNodeExecutable',
+        'NODE_BIN=\"$(command -v node',
+        'current = Get-VersionFromText ((& $cmd.Source --version',
+        'Node.js $NodeVersion or newer is required for Lazy Developer',
+    ]
+    for needle in forbidden_install_checks:
+        if needle in text:
+            errors.append(f'{name}: install-time Node.js gate remains: {needle}')
+
 if pkg.get('version') != '1.0.0': errors.append('package version is not 1.0.0')
 if pkg.get('homepage') != 'https://github.com/BlizPS/lazy-developer-free-kimi-code': errors.append('package homepage mismatch')
 if pkg.get('repository',{}).get('url') != 'git+https://github.com/BlizPS/lazy-developer-free-kimi-code.git': errors.append('package repository URL mismatch')

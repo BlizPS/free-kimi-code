@@ -9,7 +9,6 @@ $Repo = 'BlizPS/lazy-developer-free-kimi-code'
 $Branch = if ($env:LAZYDEV_BRANCH) { $env:LAZYDEV_BRANCH } else { 'main' }
 $LazyDevVersion = '1.0.0'
 $KimiVersion = '2.0.0'
-$NodeVersion = '22.16.0'
 $KimiInstallUrl = 'https://code.kimi.com/kimi-code/install.ps1'
 $ArchiveUrl = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
 $GitHubApiUrl = "https://api.github.com/repos/$Repo/commits/$Branch"
@@ -91,21 +90,6 @@ function Get-InstalledLazyRevision {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return '' }
     try { return ([IO.File]::ReadAllText($file)).Trim() } catch { return '' }
 }
-function Get-SystemNodeExecutable {
-    $cmd = Get-Command node.exe -ErrorAction SilentlyContinue
-    if (-not $cmd) {
-        Fail "Node.js $NodeVersion or newer is required for Lazy Developer. Install Node.js separately and rerun the installer. No private Node.js runtime is installed by Lazy Developer."
-    }
-    try {
-        $current = Get-VersionFromText ((& $cmd.Source --version 2>$null) -join "`n")
-        if (-not (Test-VersionAtLeast $current $NodeVersion)) {
-            Fail "Node.js $NodeVersion or newer is required for Lazy Developer. Found $current. Upgrade Node.js separately and rerun the installer. No private Node.js runtime is installed by Lazy Developer."
-        }
-    } catch {
-        Fail "Could not execute the system Node.js runtime at $($cmd.Source). No private Node.js runtime is installed by Lazy Developer."
-    }
-    return $cmd.Source
-}
 function Install-Rtk {
     $latest = Get-RtkLatestVersion
     if (-not $latest) { Fail 'Could not determine the latest RTK release.' }
@@ -154,7 +138,8 @@ if ($Help) {
 @"
 Lazy Developer installer
 
-Installs or updates Kimi Code $KimiVersion, RTK, and Lazy Developer $LazyDevVersion without npm.
+Installs or updates Kimi Code $KimiVersion, RTK, and Lazy Developer $LazyDevVersion without npm or a private Node.js runtime.
+The installer does not require Node.js; the LazyDev CLI uses the host Node.js only when the CLI is run.
 Run the same command again to update only components that changed.
 Existing Kimi sessions are left alone during updates.
 "@ | Write-Host
@@ -200,7 +185,7 @@ if ($InstalledLazyVersion -and $InstalledLazyVersion -ne $LazyDevVersion) {
 
 if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Container) {
     $LazyDevNeedsUpdate = $true
-    Write-Host 'Legacy private Node.js runtime detected — migrating to the system Node.js runtime.'
+    Write-Host 'Legacy private Node.js runtime detected — it will be removed during the Lazy Developer update.'
 }
 
 $RtkExe = Find-Rtk
@@ -283,7 +268,6 @@ function Refresh-ExistingLazyDevLaunchers {
 }
 
 if ($LazyDevNeedsUpdate) {
-    $NodeExe = Get-SystemNodeExecutable
     Step "Installing/updating Lazy Developer $LazyDevVersion"
     $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-" + [guid]::NewGuid().ToString('N'))
     $archive = Join-Path $tempRoot 'lazydev.zip'
@@ -318,7 +302,7 @@ set "LAZYDEV_ROOT=$InstallRoot"
 set "PATH=$BinRoot;$(Join-Path $HOME '.kimi-code\bin');%PATH%"
 where node.exe >nul 2>&1
 if errorlevel 1 (
-  echo Node.js $NodeVersion or newer is required for Lazy Developer. 1>&2
+  echo LazyDev CLI requires Node.js 22.16.0 or newer at runtime. The installer does not install Node.js. 1>&2
   exit /b 1
 )
 node.exe "%LAZYDEV_ROOT%\scripts\lazydev.mjs" %*

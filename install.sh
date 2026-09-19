@@ -5,7 +5,6 @@ REPO="BlizPS/lazy-developer-free-kimi-code"
 BRANCH="${LAZYDEV_BRANCH:-main}"
 LAZYDEV_VERSION="1.0.0"
 KIMI_VERSION="2.0.0"
-NODE_VERSION="22.16.0"
 KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"
 RTK_INSTALL_URL="https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh"
 REPO_ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz"
@@ -382,15 +381,10 @@ fi
 
 if [ -d "$LAZYDEV_HOME/runtime-node" ]; then
   LAZYDEV_NEEDS_UPDATE=1
-  say "Legacy private Node.js runtime detected — migrating to the system Node.js runtime."
+  say "Legacy private Node.js runtime detected — it will be removed during the Lazy Developer update."
 fi
 
 if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
-  NODE_BIN="$(command -v node 2>/dev/null || true)"
-  [ -n "$NODE_BIN" ] || fatal "Node.js $NODE_VERSION or newer is required for Lazy Developer. Install Node.js separately and rerun the installer. No private Node.js runtime is installed by Lazy Developer."
-  CURRENT_NODE="$($NODE_BIN --version 2>/dev/null || true)"
-  version_at_least "$CURRENT_NODE" "$NODE_VERSION" || fatal "Node.js $NODE_VERSION or newer is required for Lazy Developer. Found $CURRENT_NODE. Upgrade Node.js separately and rerun the installer. No private Node.js runtime is installed by Lazy Developer."
-
   SOURCE_ARCHIVE="$TMP_DIR/lazydev.tar.gz"
   SOURCE_EXTRACT="$TMP_DIR/source"
   INSTALL_STAGE="$TMP_DIR/lazydev-stage"
@@ -423,7 +417,7 @@ set -eu
 LAZYDEV_ROOT="$(printf '%s' "$LAZYDEV_HOME" | sed 's/[\\&]/\\&/g')"
 NODE_BIN="\$(command -v node 2>/dev/null || true)"
 if [ -z "\$NODE_BIN" ]; then
-  echo "Node.js $NODE_VERSION or newer is required for Lazy Developer." >&2
+  echo "LazyDev CLI requires Node.js 22.16.0 or newer at runtime. The installer itself does not require or install Node.js." >&2
   exit 1
 fi
 export PATH="$HOME/.kimi-code/bin:$LAZYDEV_BIN_DIR:\$PATH"
