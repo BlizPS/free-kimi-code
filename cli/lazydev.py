@@ -269,12 +269,81 @@ def toml_quote(value: str) -> str:
     return json.dumps(str(value))
 
 
+def model_context_size(provider: dict[str, Any], pc: dict[str, Any]) -> int:
+    info = pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}
+    candidates = (
+        info.get("context"),
+        info.get("contextLimit"),
+        info.get("context_length"),
+        info.get("inputTokenLimit"),
+        info.get("inputLimit"),
+    )
+    for value in candidates:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            return max(1024, parsed)
+    # Kimi Code requires a positive model context declaration.
+    # Keep the unknown-model fallback conservative so providers without
+    # context metadata (notably Ollama) still start reliably.
+    return 32768
+
+
+def model_output_size(pc: dict[str, Any]) -> int:
+    info = pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}
+    for value in (info.get("output"), info.get("outputLimit"), info.get("max_completion_tokens")):
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            return max(256, parsed)
+    return 8192
+
+
+def is_antigravity_model_name(model: str) -> bool:
+    return bool(re.search(r"antigravity|gemini.*preview", str(model), re.I))
+
+
+def model_supports_tools(pc: dict[str, Any]) -> bool:
+    info = pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}
+    value = info.get("toolUse")
+    if value is None:
+        return True
+    return bool(value)
+
+
+def clear_terminal() -> None:
+    if not sys.stdout.isatty():
+        return
+    try:
+        # Clear the visible screen and scrollback before every fresh chat.
+        sys.stdout.write("\x1b[2J\x1b[3J\x1b[H")
+        sys.stdout.flush()
+    except Exception:
+        command = "cls" if IS_WINDOWS else "clear"
+        try:
+            subprocess.run(command, shell=True, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+
 def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any]) -> tuple[Path, Path]:
     KIMI_HOME.mkdir(parents=True, exist_ok=True)
     pc = provider_config(cfg, provider["id"])
     model = str(pc.get("model", ""))
     base = normalize_url(pc.get("baseUrl") or provider["base"])
     provider_type = "anthropic" if provider["id"] == "anthropic" else "openai"
+    context = model_context_size(provider, pc)
+    output = model_output_size(pc)
+    tool_use = model_supports_tools(pc)
+    capabilities = []
+    if tool_use:
+        capabilities.append("tool_use")
+    if provider["id"] == "gemini" and not is_antigravity_model_name(model):
+        capabilities.append("thinking")
     if provider["id"] == "ollama":
         base = normalize_url(pc.get("baseUrl") or provider["base"]) + "/v1"
     elif provider["id"] == "gemini":
@@ -301,7 +370,10 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any]) -> tuple[Pat
         f'[models.{json.dumps("lazydev/" + model)}]',
         'provider = "lazydev"',
         f'model = {toml_quote(model)}',
-        'capabilities = ["tool_use"]',
+        f'max_context_size = {context}',
+        f'max_input_size = {max(1024, context - min(output, max(256, context // 4)))}',
+        f'max_output_size = {min(output, max(256, context // 4))}',
+        f'capabilities = {json.dumps(capabilities)}',
         f'display_name = {toml_quote(provider["label"] + " · " + model)}',
         '',
         '[thinking]',
@@ -358,6 +430,7 @@ def write_runtime_system(provider: dict[str, Any], model: str) -> None:
 
 
 def chat(sessions: bool = False, continue_session: bool = False) -> int:
+    clear_terminal()
     kimi = find_kimi()
     if not kimi:
         print("Kimi Code launcher not found. Install Kimi Code 2.0.0 with the LazyDev installer.", file=sys.stderr)
