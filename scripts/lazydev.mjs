@@ -32,8 +32,8 @@ const KIMI_PACKAGE = '@moonshot-ai/kimi-code';
 const OPENROUTER_FREE_MODEL = 'openrouter/free';
 const SYNTHETIC_TOOL_OPEN = '<lazydev_tool_call>';
 const SYNTHETIC_TOOL_CLOSE = '</lazydev_tool_call>';
-const SYNTHETIC_TOOL_MAX_SCHEMA_CHARS = 24000;
-const SYNTHETIC_TOOL_MAX_RESULT_CHARS = 20000;
+const SYNTHETIC_TOOL_MAX_SCHEMA_CHARS = 12000;
+const SYNTHETIC_TOOL_MAX_RESULT_CHARS = 8000;
 const PROVIDER_TRANSIENT_MAX_RETRIES = Math.max(0, Math.min(4, Number(process.env.LAZYDEV_TRANSIENT_RETRIES || 2)));
 const PROVIDER_TRANSIENT_BASE_MS = Math.max(250, Math.min(5000, Number(process.env.LAZYDEV_TRANSIENT_BASE_MS || 800)));
 const PROVIDER_TRANSIENT_MAX_MS = Math.max(PROVIDER_TRANSIENT_BASE_MS, Math.min(30000, Number(process.env.LAZYDEV_TRANSIENT_MAX_MS || 8000)));
@@ -46,6 +46,11 @@ const TOKEN_CODEC_TEMPLATE_MODE = (() => {
 })();
 const TOKEN_CODEC_TEMPLATE_PRESSURE = Math.max(0.55, Math.min(0.95, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_PRESSURE || 0.78)));
 const CONTEXT_ABSOLUTE_OUTPUT_CAP = 16384;
+const CONTEXT_EXTRA_MULTIPLIER = Math.max(1.25, Math.min(4, Number(process.env.LAZYDEV_CONTEXT_EXTRA_MULTIPLIER || 2)));
+const CONTEXT_FIT_RATIO = Math.max(0.58, Math.min(0.82, Number(process.env.LAZYDEV_CONTEXT_FIT_RATIO || 0.70)));
+const CONTEXT_RECENT_MESSAGES = Math.max(4, Math.min(20, Number(process.env.LAZYDEV_CONTEXT_RECENT_MESSAGES || 10)));
+const CONTEXT_ARCHIVE_SNIPPET_CHARS = Math.max(80, Math.min(800, Number(process.env.LAZYDEV_CONTEXT_ARCHIVE_SNIPPET_CHARS || 240)));
+const CONTEXT_TOOL_RESULT_CHARS = Math.max(400, Math.min(6000, Number(process.env.LAZYDEV_CONTEXT_TOOL_RESULT_CHARS || 1200)));
 const TOKEN_CODEC_TEMPLATE_MIN_SAVED = Math.max(64, Math.min(4096, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_MIN_SAVED || 128)));
 const ANTIGRAVITY_AGENT = 'antigravity-preview-09-2026';
 const KIMI_BUILTIN_TOOLS = [
@@ -435,6 +440,139 @@ function nativeToolCapability(provider, pc) {
   return null;
 }
 function modelSupportsKimiTools(provider, pc) { return nativeToolCapability(provider, pc) !== false; }
+function canonicalToolPath(value) {
+  let text = String(value || '').trim().replace(/^['"]|['"]$/g, '');
+  if (!text) return text;
+  if (text.startsWith('file://')) { try { text = decodeURIComponent(text.slice(7)); } catch {} }
+  if (text.startsWith('~/')) {
+    const home = process.env.HOME || process.env.USERPROFILE || '';
+    text = path.join(home, text.slice(2));
+  }
+  text = text.replaceAll('\\', '/');
+  if (text.startsWith('storage/emulated/0/')) text = `/${text}`;
+  if (text === 'storage/emulated/0') text = '/storage/emulated/0';
+  const artifact = outputDirectory().replaceAll('\\', '/').replace(/\/+$/, '');
+  if (text === 'lazydevfile') text = artifact;
+  else if (text.startsWith('lazydevfile/')) text = `${artifact}/${text.slice('lazydevfile/'.length)}`;
+  return text;
+}
+function toolPathAlias(args = {}) {
+  for (const key of ['path','file','filepath','file_path','filename','target']) {
+    const value = args?.[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+function normalizeSyntheticCallArgs(name, args = {}, toolDefs = [], messages = [], pathHints = []) {
+  const normalized = { ...args };
+  const tool = toolDefs.find(item => item.name === name);
+  const parameters = tool?.parameters && typeof tool.parameters === 'object' ? tool.parameters : {};
+  const required = Array.isArray(parameters.required) ? parameters.required : [];
+  const properties = parameters.properties && typeof parameters.properties === 'object' ? parameters.properties : {};
+  const aliases = { path: ['file','filepath','file_path','filename','target'], content: ['text','body','data'], pattern: ['query'] };
+  const inferPath = () => {
+    if (pathHints.length) return pathHints[pathHints.length - 1];
+    const pattern = /(?:\/storage\/emulated\/0\/|storage\/emulated\/0\/|(?:^|\s)lazydevfile\/)[^\s<>"']+|[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\.(?:html?|css|js|mjs|json|md|txt|py|ts|tsx|jsx)/ig;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (!message || typeof message !== 'object') continue;
+      const content = Array.isArray(message.content) ? message.content.map(block => block?.text ?? block?.content ?? '').join('\n') : String(message.content || '');
+      const matches = [...content.matchAll(pattern)];
+      if (matches.length) return canonicalToolPath(matches[matches.length - 1][0]);
+    }
+    return null;
+  };
+  for (const key of required) {
+    if (normalized[key] !== undefined && normalized[key] !== null && normalized[key] !== '') continue;
+    for (const alias of aliases[key] || []) {
+      if (normalized[alias] !== undefined && normalized[alias] !== null && normalized[alias] !== '') { normalized[key] = normalized[alias]; break; }
+    }
+    if (key === 'path' && normalized[key] === undefined) normalized[key] = inferPath();
+  }
+  if (typeof normalized.path === 'string') normalized.path = canonicalToolPath(normalized.path);
+  if (required.some(key => normalized[key] === undefined || normalized[key] === null || normalized[key] === '')) return null;
+  if (Object.keys(properties).length) return Object.fromEntries(Object.entries(normalized).filter(([key]) => key in properties));
+  return normalized;
+}
+function rememberToolPath(pathHints, name, args) {
+  const allowed = new Set(['read','readfile','readmediafile','write','writefile','edit','strreplacefile','grep','notebookedit']);
+  if (!allowed.has(String(name || '').toLowerCase())) return;
+  const raw = toolPathAlias(args);
+  if (!raw) return;
+  const value = canonicalToolPath(raw);
+  const existing = pathHints.indexOf(value);
+  if (existing >= 0) pathHints.splice(existing, 1);
+  pathHints.push(value);
+  while (pathHints.length > 12) pathHints.shift();
+}
+function estimateMessagesTokens(messages = []) {
+  try { return Math.max(1, Math.ceil(JSON.stringify(messages).length / 3.6)); } catch { return 0; }
+}
+function compactMessageText(text, maxChars) {
+  const value = String(text || '');
+  if (value.length <= maxChars) return value;
+  const head = Math.max(80, Math.floor(maxChars / 2));
+  const tail = Math.max(40, maxChars - head - 32);
+  return `${value.slice(0, head).trimEnd()}\n… [LazyDev archived] …\n${value.slice(-tail).trimStart()}`;
+}
+function messageContentText(message) {
+  if (typeof message?.content === 'string') return message.content;
+  if (Array.isArray(message?.content)) return message.content.map(block => block?.text ?? block?.content ?? '').join('\n');
+  try { return message?.content == null ? '' : JSON.stringify(message.content); } catch { return String(message?.content || ''); }
+}
+function fitMessagesToContext(messages, context, outputCap) {
+  const source = Array.isArray(messages) ? messages.map(m => (m && typeof m === 'object' ? { ...m } : m)) : [];
+  const physical = Math.max(1024, Number(context) || 16384);
+  const safeOutput = Math.max(256, Math.min(Number(outputCap) || 8192, Math.max(256, Math.floor(physical / 4)), CONTEXT_ABSOLUTE_OUTPUT_CAP));
+  const target = Math.min(Math.max(1024, Math.floor(physical * CONTEXT_FIT_RATIO)), Math.max(1024, physical - safeOutput - 512));
+  const before = estimateMessagesTokens(source);
+  if (before <= target) return { messages: source, changed: false, before, after: before, virtualMultiplier: CONTEXT_EXTRA_MULTIPLIER };
+  const working = source;
+  const recentCut = Math.max(0, working.length - CONTEXT_RECENT_MESSAGES);
+  for (let i = 0; i < recentCut; i += 1) {
+    const message = working[i];
+    if (!message || typeof message !== 'object') continue;
+    const text = messageContentText(message);
+    if (!text) continue;
+    const limit = message.role === 'tool' || message.role === 'function' ? CONTEXT_TOOL_RESULT_CHARS : Math.max(700, CONTEXT_ARCHIVE_SNIPPET_CHARS * 3);
+    message.content = compactMessageText(text, limit);
+    if (estimateMessagesTokens(working) <= target) break;
+  }
+  if (estimateMessagesTokens(working) > target) {
+    const recent = working.slice(-CONTEXT_RECENT_MESSAGES);
+    const older = working.slice(0, -CONTEXT_RECENT_MESSAGES);
+    const lines = [];
+    for (const message of older) {
+      if (!message || typeof message !== 'object') continue;
+      const text = messageContentText(message);
+      if (!text) continue;
+      const paths = [...text.matchAll(/(?:\/storage\/emulated\/0\/|storage\/emulated\/0\/|lazydevfile\/)[^\s<>"']+/ig)].slice(-3).map(m => m[0]);
+      lines.push(`[${message.role || 'message'}]${paths.length ? ` files=${paths.join(',')}` : ''} ${compactMessageText(text, CONTEXT_ARCHIVE_SNIPPET_CHARS)}`);
+    }
+    const archive = compactMessageText(`[LazyDev context archive — older conversation retained outside the physical model window]\n${lines.join('\n')}`, Math.max(600, Math.floor(Math.max(600, target * 3.6 * 0.18))));
+    const systems = working.filter(m => m && typeof m === 'object' && m.role === 'system');
+    working.splice(0, working.length, ...systems, ...(lines.length ? [{ role: 'user', content: archive }] : []), ...recent);
+  }
+  while (estimateMessagesTokens(working) > target) {
+    const removable = working.findIndex((message, index) => message && typeof message === 'object' && message.role !== 'system' && index < working.length - 3);
+    if (removable < 0) break;
+    working.splice(removable, 1);
+  }
+  while (estimateMessagesTokens(working) > target) {
+    let changed = false;
+    for (const message of working) {
+      if (!message || typeof message !== 'object' || message.role === 'system') continue;
+      const text = messageContentText(message);
+      if (text.length <= 240) continue;
+      message.content = compactMessageText(text, Math.max(240, Math.floor(text.length / 2)));
+      changed = true;
+      if (estimateMessagesTokens(working) <= target) break;
+    }
+    if (!changed) break;
+  }
+  return { messages: working, changed: true, before, after: estimateMessagesTokens(working), virtualMultiplier: CONTEXT_EXTRA_MULTIPLIER };
+}
+
 function syntheticToolDefinitions(body = {}) {
   if (!Array.isArray(body.tools)) return [];
   return body.tools.map(item => {
@@ -445,15 +583,16 @@ function syntheticToolDefinitions(body = {}) {
   }).filter(Boolean);
 }
 function syntheticToolPrompt(tools) {
+  const maxChars = Math.max(2048, Number(arguments[1]) || SYNTHETIC_TOOL_MAX_SCHEMA_CHARS);
   if (!tools.length) return '';
   const catalog = tools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters }));
   let schema = JSON.stringify(catalog);
-  if (schema.length > SYNTHETIC_TOOL_MAX_SCHEMA_CHARS) {
+  if (schema.length > maxChars) {
     const trimmed = []; let size = 2;
-    for (const item of catalog) { const part = JSON.stringify(item); if (size + part.length + 1 > SYNTHETIC_TOOL_MAX_SCHEMA_CHARS) break; trimmed.push(item); size += part.length + 1; }
+    for (const item of catalog) { const part = JSON.stringify(item); if (size + part.length + 1 > maxChars) break; trimmed.push(item); size += part.length + 1; }
     schema = JSON.stringify(trimmed);
   }
-  return `\n\n[LazyDev Synthetic Tool Bridge]\nNative function/tool calling is unavailable for this model, but agent tools remain available through LazyDev. Do not say tools are unavailable. When a tool is needed, emit exactly one or more calls with valid JSON inside ${SYNTHETIC_TOOL_OPEN} and ${SYNTHETIC_TOOL_CLOSE}. JSON must contain name and an object-valued arguments. The name must exactly match an available tool. Do not use Markdown fences around the envelope. After a tool result, continue normally.\nAvailable tools: ${schema}`;
+  return `\n\n[LazyDev Synthetic Tool Bridge]\nNative function/tool calling is unavailable for this model, but agent tools remain available through LazyDev. Do not say tools are unavailable. When a tool is needed, emit exactly one or more calls with valid JSON inside ${SYNTHETIC_TOOL_OPEN} and ${SYNTHETIC_TOOL_CLOSE}. JSON must contain name and an object-valued arguments. The name must exactly match an available tool. Do not use Markdown fences around the envelope. After a tool result, continue normally. For large files, prefer bounded WriteFile/Write chunks with append mode instead of emitting the complete file in one response.\nAvailable tools: ${schema}`;
 }
 function injectSyntheticToolPrompt(messages, prompt) {
   const out = Array.isArray(messages) ? messages.map(m => (m && typeof m === 'object' ? { ...m } : m)) : [];
@@ -484,9 +623,11 @@ function prepareSyntheticMessages(messages) {
   return out;
 }
 function extractSyntheticToolCalls(content, toolDefs) {
+  const messages = arguments[2] || [];
+  const pathHints = arguments[3] || [];
   const text = String(content || ''); if (!text.includes(SYNTHETIC_TOOL_OPEN)) return []; const allowed = new Set(toolDefs.map(t => t.name));
   const pattern = new RegExp(SYNTHETIC_TOOL_OPEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*(\\{[\\s\\S]*?\\})\\s*' + SYNTHETIC_TOOL_CLOSE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-  const out = []; let match; while ((match = pattern.exec(text))) { try { const value = JSON.parse(match[1]); if (!value || typeof value !== 'object') continue; const name = String(value.name || '').trim(); let args = value.arguments ?? value.args; if (typeof args === 'string') args = JSON.parse(args); if (allowed.has(name) && args && typeof args === 'object' && !Array.isArray(args)) out.push({ name, arguments: args }); } catch {} } return out;
+  const out = []; let match; while ((match = pattern.exec(text))) { try { const value = JSON.parse(match[1]); if (!value || typeof value !== 'object') continue; const name = String(value.name || '').trim(); let args = value.arguments ?? value.args; if (typeof args === 'string') args = JSON.parse(args); if (allowed.has(name) && args && typeof args === 'object' && !Array.isArray(args)) { const normalized = normalizeSyntheticCallArgs(name, args, toolDefs, messages, pathHints); if (normalized) { rememberToolPath(pathHints, name, normalized); out.push({ name, arguments: normalized }); } } } catch {} } return out;
 }
 function syntheticToolResponse(model, completion, calls, stream) {
   const id = String(completion?.id || `chatcmpl-lazydev-${crypto.randomBytes(6).toString('hex')}`); const created = Number(completion?.created || Math.floor(Date.now() / 1000));
@@ -791,6 +932,7 @@ function normalizeOpenAICompatibleRequest(body, provider, pc, removed = new Set(
 async function createProxy(provider, pc) {
   const token = crypto.randomBytes(24).toString('hex');
   let learnedNoTools = false;
+  const pathHints = [];
   const server = http.createServer((req, res) => {
     const expected = `Bearer ${token}`;
     if (req.headers.authorization !== expected) {
@@ -916,10 +1058,14 @@ async function createProxy(provider, pc) {
           let requestBody = { ...body };
           const toolDefs = syntheticToolDefinitions(requestBody);
           if (syntheticToolsActive && toolDefs.length) {
-            requestBody.messages = injectSyntheticToolPrompt(prepareSyntheticMessages(requestBody.messages), syntheticToolPrompt(toolDefs));
+            const preparedMessages = prepareSyntheticMessages(requestBody.messages);
+            const schemaBudget = Math.max(4096, Math.min(SYNTHETIC_TOOL_MAX_SCHEMA_CHARS, Math.floor(((Number(effectiveModelInfo(provider, pc).contextLimit) || 16384) * 3.6) * 0.10)));
+            requestBody.messages = injectSyntheticToolPrompt(preparedMessages, syntheticToolPrompt(toolDefs, schemaBudget));
             requestBody = stripToolRequestFields(requestBody);
             requestBody.stream = false;
           }
+          const fit = fitMessagesToContext(requestBody.messages, Number(effectiveModelInfo(provider, pc).contextLimit) || 16384, Number(effectiveModelInfo(provider, pc).outputLimit) || 8192);
+          requestBody.messages = fit.messages;
           const outboundBody = normalizeOpenAICompatibleRequest(requestBody, provider, pc, removedFields);
           const result = await new Promise((resolve, reject) => {
             let responseSettled = false;
@@ -963,7 +1109,7 @@ async function createProxy(provider, pc) {
                 return;
               }
               const content = String(completion?.choices?.[0]?.message?.content || '');
-              const calls = extractSyntheticToolCalls(content, toolDefs);
+              const calls = extractSyntheticToolCalls(content, toolDefs, requestBody.messages || [], pathHints);
               const generated = syntheticToolResponse(attemptModel || pc.model, completion, calls, downstreamStream);
               res.statusCode = 200;
               res.setHeader('X-LazyDev-Synthetic-Tools', '1');
@@ -2034,6 +2180,9 @@ async function chat() {
     LAZYDEV_ARTIFACT_DIR: outputDirectory(),
     LAZYDEV_VERSION: version,
     LAZYDEV_MODEL: pc.model,
+    LAZYDEV_CONTEXT_EXTRA_MULTIPLIER: String(CONTEXT_EXTRA_MULTIPLIER),
+    LAZYDEV_CONTEXT_FIT_RATIO: String(CONTEXT_FIT_RATIO),
+    LAZYDEV_CONTEXT_RECENT_MESSAGES: String(CONTEXT_RECENT_MESSAGES),
   };
   const child = spawn(invocation.command, launchArgs, {
     cwd: workspaceDir,

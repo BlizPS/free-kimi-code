@@ -84,6 +84,11 @@ DEFAULT_MODEL_OUTPUT = 8192
 CONTEXT_SAFETY_MARGIN = 1024
 CONTEXT_UNKNOWN_OUTPUT_FRACTION = 0.25
 CONTEXT_ABSOLUTE_OUTPUT_CAP = 16384
+CONTEXT_EXTRA_MULTIPLIER = max(1.25, min(4.0, float(os.environ.get("LAZYDEV_CONTEXT_EXTRA_MULTIPLIER", "2.0") or 2.0)))
+CONTEXT_FIT_RATIO = max(0.58, min(0.82, float(os.environ.get("LAZYDEV_CONTEXT_FIT_RATIO", "0.70") or 0.70)))
+CONTEXT_RECENT_MESSAGES = max(4, min(20, int(os.environ.get("LAZYDEV_CONTEXT_RECENT_MESSAGES", "10") or 10)))
+CONTEXT_ARCHIVE_SNIPPET_CHARS = max(80, min(800, int(os.environ.get("LAZYDEV_CONTEXT_ARCHIVE_SNIPPET_CHARS", "240") or 240)))
+CONTEXT_TOOL_RESULT_CHARS = max(400, min(6000, int(os.environ.get("LAZYDEV_CONTEXT_TOOL_RESULT_CHARS", "1200") or 1200)))
 PROVIDER_OUTPUT_HARD_CAPS = {
     "nvidia": 32768,
     "gemini": 65536,
@@ -621,8 +626,8 @@ def native_tool_capability(pc: dict[str, Any]) -> bool | None:
 
 SYNTHETIC_TOOL_OPEN = "<lazydev_tool_call>"
 SYNTHETIC_TOOL_CLOSE = "</lazydev_tool_call>"
-SYNTHETIC_TOOL_MAX_SCHEMA_CHARS = 24000
-SYNTHETIC_TOOL_MAX_RESULT_CHARS = 20000
+SYNTHETIC_TOOL_MAX_SCHEMA_CHARS = 12000
+SYNTHETIC_TOOL_MAX_RESULT_CHARS = 8000
 
 def _tool_definitions(body: dict[str, Any]) -> list[dict[str, Any]]:
     raw = body.get("tools")
@@ -644,17 +649,226 @@ def _tool_definitions(body: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def _synthetic_tool_prompt(tools: list[dict[str, Any]]) -> str:
+def _tool_path_alias(args: dict[str, Any]) -> str | None:
+    for key in ("path", "file", "filepath", "file_path", "filename", "target"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _canonical_tool_path(value: str) -> str:
+    text = str(value or "").strip().strip('"\'')
+    if not text:
+        return text
+    if text.startswith("file://"):
+        text = urllib.parse.unquote(text[7:])
+    text = os.path.expanduser(text)
+    normalized = text.replace("\\", "/")
+    if normalized.startswith("storage/emulated/0/"):
+        normalized = "/" + normalized
+    elif normalized == "storage/emulated/0":
+        normalized = "/storage/emulated/0"
+    artifact = str(ARTIFACT_DIR).replace("\\", "/").rstrip("/")
+    if normalized == "lazydevfile":
+        normalized = artifact
+    elif normalized.startswith("lazydevfile/"):
+        normalized = artifact + "/" + normalized[len("lazydevfile/"):]
+    return normalized
+
+
+def _remember_tool_path(path_hints: list[str], tool_name: str, args: dict[str, Any]) -> None:
+    name = str(tool_name or "").lower()
+    if name not in {"read", "readfile", "readmediafile", "write", "writefile", "edit", "strreplacefile", "grep", "notebookedit"}:
+        return
+    path = _tool_path_alias(args)
+    if not path:
+        return
+    canonical = _canonical_tool_path(path)
+    if canonical and canonical not in path_hints:
+        path_hints.append(canonical)
+    elif canonical:
+        path_hints.remove(canonical)
+        path_hints.append(canonical)
+    del path_hints[:-12]
+
+
+def _infer_recent_path(messages: list[Any], path_hints: list[str]) -> str | None:
+    if path_hints:
+        return path_hints[-1]
+    pattern = re.compile(r"(?:/storage/emulated/0/|storage/emulated/0/|(?:^|[\\s])lazydevfile/)[^\\s<>\"']+|[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\\.(?:html?|css|js|mjs|json|md|txt|py|ts|tsx|jsx)", re.I)
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, list):
+            content = "\n".join(str(block.get("text") or block.get("content") or "") for block in content if isinstance(block, dict))
+        text = str(content or "")
+        matches = pattern.findall(text)
+        if matches:
+            return _canonical_tool_path(matches[-1])
+    return None
+
+
+def _normalize_synthetic_call_args(name: str, args: dict[str, Any], tool_defs: list[dict[str, Any]], messages: list[Any], path_hints: list[str]) -> dict[str, Any] | None:
+    normalized = dict(args or {})
+    tool = next((item for item in tool_defs if item.get("name") == name), None)
+    parameters = tool.get("parameters") if isinstance(tool, dict) and isinstance(tool.get("parameters"), dict) else {}
+    required = parameters.get("required") if isinstance(parameters.get("required"), list) else []
+    properties = parameters.get("properties") if isinstance(parameters.get("properties"), dict) else {}
+    aliases = {
+        "path": ("file", "filepath", "file_path", "filename", "target"),
+        "content": ("text", "body", "data"),
+        "pattern": ("query",),
+    }
+    for required_name in required:
+        if required_name in normalized and normalized[required_name] not in (None, ""):
+            continue
+        for alias in aliases.get(required_name, ()):
+            if alias in normalized and normalized[alias] not in (None, ""):
+                normalized[required_name] = normalized[alias]
+                break
+        if required_name == "path" and required_name not in normalized:
+            inferred = _infer_recent_path(messages, path_hints)
+            if inferred:
+                normalized[required_name] = inferred
+    if "path" in normalized and isinstance(normalized["path"], str):
+        normalized["path"] = _canonical_tool_path(normalized["path"])
+    # A malformed synthetic call must never reach Kimi's strict tool validator.
+    for required_name in required:
+        if required_name not in normalized or normalized[required_name] in (None, ""):
+            return None
+    # Keep only declared properties when a schema is strict enough to expose them.
+    if properties:
+        known = set(properties)
+        normalized = {key: value for key, value in normalized.items() if key in known}
+    return normalized
+
+
+def _message_content_text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                value = block.get("text") if block.get("text") is not None else block.get("content")
+                if value is not None:
+                    parts.append(str(value))
+        return "\n".join(parts)
+    if content is None:
+        return ""
+    try:
+        return json.dumps(content, ensure_ascii=False)
+    except Exception:
+        return str(content)
+
+
+def _compact_message_text(text: str, max_chars: int) -> str:
+    text = str(text or "")
+    if len(text) <= max_chars:
+        return text
+    head = max(80, max_chars // 2)
+    tail = max(40, max_chars - head - 32)
+    return text[:head].rstrip() + "\n… [LazyDev archived] …\n" + text[-tail:].lstrip()
+
+
+def _estimate_messages_tokens(messages: list[Any]) -> int:
+    try:
+        raw = json.dumps(messages, ensure_ascii=False, separators=(",", ":"))
+        return max(1, int((len(raw) + 2) / 3.6))
+    except Exception:
+        return 0
+
+
+def _fit_messages_to_context(messages: list[Any], context: int, output_cap: int) -> tuple[list[Any], dict[str, Any]]:
+    source = [dict(item) if isinstance(item, dict) else item for item in (messages or [])]
+    if not source:
+        return source, {"changed": False, "before": 0, "after": 0, "virtualMultiplier": CONTEXT_EXTRA_MULTIPLIER}
+    physical = max(1024, int(context or DEFAULT_MODEL_CONTEXT))
+    safe_output = max(256, min(int(output_cap or DEFAULT_MODEL_OUTPUT), max(256, physical // 4), CONTEXT_ABSOLUTE_OUTPUT_CAP))
+    target = max(1024, int(physical * CONTEXT_FIT_RATIO))
+    target = min(target, max(1024, physical - safe_output - 512))
+    before = _estimate_messages_tokens(source)
+    if before <= target:
+        return source, {"changed": False, "before": before, "after": before, "virtualMultiplier": CONTEXT_EXTRA_MULTIPLIER}
+
+    working = source
+    recent_cut = max(0, len(working) - CONTEXT_RECENT_MESSAGES)
+    for idx in range(recent_cut):
+        msg = working[idx]
+        if not isinstance(msg, dict):
+            continue
+        text = _message_content_text(msg)
+        if not text:
+            continue
+        limit = CONTEXT_TOOL_RESULT_CHARS if msg.get("role") in {"tool", "function"} else max(700, CONTEXT_ARCHIVE_SNIPPET_CHARS * 3)
+        compacted = _compact_message_text(text, limit)
+        if compacted != text:
+            msg["content"] = compacted
+        if _estimate_messages_tokens(working) <= target:
+            break
+
+    if _estimate_messages_tokens(working) > target:
+        recent = working[-CONTEXT_RECENT_MESSAGES:]
+        older = working[:-CONTEXT_RECENT_MESSAGES]
+        archive_lines = []
+        for msg in older:
+            if not isinstance(msg, dict):
+                continue
+            role = str(msg.get("role") or "message")
+            text = _message_content_text(msg)
+            if not text:
+                continue
+            paths = re.findall(r"(?:/storage/emulated/0/|storage/emulated/0/|lazydevfile/)[^\s<>\"']+", text, re.I)
+            hint = f" files={', '.join(paths[-3:])}" if paths else ""
+            archive_lines.append(f"[{role}]{hint} {_compact_message_text(text, CONTEXT_ARCHIVE_SNIPPET_CHARS)}")
+        archive = "[LazyDev context archive — older conversation retained outside the physical model window]\n" + "\n".join(archive_lines)
+        # Archive capacity scales with the physical window, while never becoming the majority of it.
+        archive_chars = max(600, int(max(600, target * 3.6 * 0.18)))
+        archive = _compact_message_text(archive, archive_chars)
+        system_msgs = [m for m in working if isinstance(m, dict) and m.get("role") == "system"]
+        candidate = system_msgs + ([{"role": "user", "content": archive}] if archive_lines else []) + recent
+        working = candidate
+
+    while _estimate_messages_tokens(working) > target:
+        removable = [i for i, m in enumerate(working) if isinstance(m, dict) and m.get("role") != "system"]
+        if len(removable) <= 3:
+            break
+        working.pop(removable[0])
+
+    while _estimate_messages_tokens(working) > target:
+        changed = False
+        for idx, msg in enumerate(working):
+            if not isinstance(msg, dict) or msg.get("role") == "system":
+                continue
+            text = _message_content_text(msg)
+            if len(text) <= 240:
+                continue
+            msg["content"] = _compact_message_text(text, max(240, len(text) // 2))
+            changed = True
+            if _estimate_messages_tokens(working) <= target:
+                break
+        if not changed:
+            break
+
+    after = _estimate_messages_tokens(working)
+    return working, {"changed": working != source, "before": before, "after": after, "virtualMultiplier": CONTEXT_EXTRA_MULTIPLIER}
+
+
+def _synthetic_tool_prompt(tools: list[dict[str, Any]], max_chars: int = SYNTHETIC_TOOL_MAX_SCHEMA_CHARS) -> str:
     if not tools:
         return ""
     catalog = [{"name": t["name"], "description": t["description"], "parameters": t["parameters"]} for t in tools]
     schema = json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
-    if len(schema) > SYNTHETIC_TOOL_MAX_SCHEMA_CHARS:
+    max_chars = max(2048, int(max_chars))
+    if len(schema) > max_chars:
         trimmed: list[dict[str, Any]] = []
         size = 2
         for item in catalog:
             encoded = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
-            if size + len(encoded) + 1 > SYNTHETIC_TOOL_MAX_SCHEMA_CHARS:
+            if size + len(encoded) + 1 > max_chars:
                 break
             trimmed.append(item)
             size += len(encoded) + 1
@@ -664,7 +878,7 @@ def _synthetic_tool_prompt(tools: list[dict[str, Any]]) -> str:
         "Native function/tool calling is unavailable for this model, but the agent tools remain available through LazyDev. "
         "Do not say that tools are unavailable. When a tool is needed, emit exactly one or more calls with valid JSON inside "
         f"{SYNTHETIC_TOOL_OPEN} and {SYNTHETIC_TOOL_CLOSE}. The JSON must contain `name` and an object-valued `arguments`. "
-        "The name must exactly match an available tool. Do not use Markdown fences around the envelope. After a tool result, continue normally.\n"
+        "The name must exactly match an available tool. Do not use Markdown fences around the envelope. After a tool result, continue normally. For large files, prefer bounded WriteFile/Write chunks with append mode instead of emitting the complete file in one response.\n"
         "Available tools: " + schema
     )
 
@@ -723,7 +937,7 @@ def _prepare_synthetic_messages(messages: list[Any]) -> list[Any]:
     return out
 
 
-def _extract_synthetic_tool_calls(content: str, tool_defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _extract_synthetic_tool_calls(content: str, tool_defs: list[dict[str, Any]], messages: list[Any] | None = None, path_hints: list[str] | None = None) -> list[dict[str, Any]]:
     text = str(content or "")
     if SYNTHETIC_TOOL_OPEN not in text:
         return []
@@ -745,7 +959,10 @@ def _extract_synthetic_tool_calls(content: str, tool_defs: list[dict[str, Any]])
             except Exception:
                 args = None
         if name in allowed and isinstance(args, dict):
-            found.append({"name": name, "arguments": args})
+            normalized = _normalize_synthetic_call_args(name, args, tool_defs, messages or [], path_hints or [])
+            if normalized is not None:
+                _remember_tool_path(path_hints if path_hints is not None else [], name, normalized)
+                found.append({"name": name, "arguments": normalized})
     return found
 
 
@@ -956,6 +1173,7 @@ class _ProviderProxy:
         self.provider = provider
         self.pc = pc
         self.learned_no_tools = False
+        self.path_hints: list[str] = []
         self.token = secrets.token_hex(24)
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self.thread = threading.Thread(target=self.server.serve_forever, name="lazydev-provider-proxy", daemon=True)
@@ -1054,9 +1272,19 @@ class _ProviderProxy:
                     request_body = dict(body)
                     tool_defs = _tool_definitions(request_body)
                     if synthetic_tools_active and tool_defs:
-                        request_body["messages"] = _inject_synthetic_tool_prompt(_prepare_synthetic_messages(request_body.get("messages") if isinstance(request_body.get("messages"), list) else []), _synthetic_tool_prompt(tool_defs))
+                        raw_messages = request_body.get("messages") if isinstance(request_body.get("messages"), list) else []
+                        prepared_messages = _prepare_synthetic_messages(raw_messages)
+                        schema_budget = max(4096, min(SYNTHETIC_TOOL_MAX_SCHEMA_CHARS, int((model_context_size(outer.provider, outer.pc) * 3.6) * 0.10)))
+                        request_body["messages"] = _inject_synthetic_tool_prompt(prepared_messages, _synthetic_tool_prompt(tool_defs, schema_budget))
                         request_body = _strip_tool_request_fields(request_body)
                         request_body["stream"] = False
+                    physical_context = model_context_size(outer.provider, outer.pc)
+                    physical_output = model_output_size(outer.provider, outer.pc)
+                    request_body["messages"], fit_stats = _fit_messages_to_context(
+                        request_body.get("messages") if isinstance(request_body.get("messages"), list) else [],
+                        physical_context,
+                        physical_output,
+                    )
                     normalized_body = _normalize_provider_request(request_body, outer.provider, outer.pc)
                     normalized_body["model"] = attempt_model
                     outbound, removed_now = _strip_request_fields(normalized_body, removed_fields)
@@ -1156,7 +1384,7 @@ class _ProviderProxy:
                             choices = completion.get("choices") if isinstance(completion, dict) else []
                             message = choices[0].get("message") if choices and isinstance(choices[0], dict) else {}
                             content = message.get("content") if isinstance(message, dict) else ""
-                            calls = _extract_synthetic_tool_calls(str(content or ""), tool_defs)
+                            calls = _extract_synthetic_tool_calls(str(content or ""), tool_defs, request_body.get("messages", []), outer.path_hints)
                             response_headers, raw_response = _synthetic_tool_completion(attempt_model, completion if isinstance(completion, dict) else {}, calls, downstream_stream)
                             self.send_response(200)
                             for key, value in response_headers.items():
@@ -1443,8 +1671,10 @@ def write_runtime_system(provider: dict[str, Any], model: str) -> None:
         f"- Current date: {today}. Treat this only as the current calendar date; never use it as a historical event year.",
         f"- Active provider: {provider['label']}; model: {model}.",
         f"- Standalone artifacts must be saved under the exact canonical directory: {ARTIFACT_DIR}.",
+        f"- Virtual context archive: retain up to about {CONTEXT_EXTRA_MULTIPLIER:.1f}× conversation history locally, but only send a fitted slice that stays inside the model context window.",
         "- File search: Glob uses path=<real directory> and pattern=<relative glob>; never put an absolute path or wildcard into pattern, and never scan OS/system roots.",
         "- Read: max_chars is optional and may be small; use the configured default for normal source files and pagination for large files. Do not emit an artificial minimum-max_chars error.",
+        "- Large files: create or edit them through file tools instead of pasting the whole file into normal assistant output; split large writes into bounded chunks and use append mode when the tool supports it.",
         f"- Factual UI content: research historical/current facts, years, statistics, names, and dates before writing. For current/latest/today claims, a displayed current year must match {today[:4]}; historical years require a source.",
         "- UI images: never guess URLs. Prefer inline SVG/CSS or verified local assets; use remote images only after checking the URL. A saved standalone UI must not depend on placeholder/broken image references.",
         "- After UI writes, inspect image src/background-image URLs, check local assets exist, and recheck date-sensitive copy before finishing.",
@@ -1494,6 +1724,9 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     env["LAZYDEV_VERSION"] = VERSION
     env["LAZYDEV_CONTEXT_DIR"] = str(HOME / ".lazydev")
     env["LAZYDEV_MODEL"] = str(pc.get("model"))
+    env["LAZYDEV_CONTEXT_EXTRA_MULTIPLIER"] = str(CONTEXT_EXTRA_MULTIPLIER)
+    env["LAZYDEV_CONTEXT_FIT_RATIO"] = str(CONTEXT_FIT_RATIO)
+    env["LAZYDEV_CONTEXT_RECENT_MESSAGES"] = str(CONTEXT_RECENT_MESSAGES)
     for name in list(env):
         if name.startswith("KIMI_MODEL_"):
             env.pop(name, None)
