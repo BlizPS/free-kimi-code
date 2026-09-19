@@ -7,3 +7,4 @@ Inspect only the relevant scope. Preserve working behavior. Never invent tests/r
 For UI, use the LazyDev anti-slop rules and real responsive/state proof. Avoid generic dashboard/card/gradient/glass decoration.
 
 Finish: `result → changed → verified → caveat`.
+Token system: use progressive disclosure, compact observations, deduplicate repeated tool work, and preserve exact technical literals.

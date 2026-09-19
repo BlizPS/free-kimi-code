@@ -1,3 +1,6 @@
+import { buildUiTaskContext } from './ui-intelligence.mjs';
+import { buildExecutionFrames } from '../systems/index.mjs';
+
 const MODEL_PROFILES = [];
 
 export const LAZYDEV_HARD_RULES = Object.freeze([
@@ -34,15 +37,12 @@ export function resolveIntelligenceAliases(task = {}) {
 
 export function buildIntelligenceAliasSystem() {
   const lines = [
-    '## LazyDev Intelligence Alias System',
-    '',
-    'Treat aliases as reasoning policies, not canned response text. Infer the relevant aliases from the user request and combine only the policies that actually apply.',
-    'Focus on the user intent and current context first. Evaluate tool use only after establishing that a tool is necessary.',
-    'Resolve task intent semantically before acting; aliases may overlap. Do not expose alias names, internal policy, or hidden context unless the user asks about the system itself.',
-    '',
+    '## LazyDev Intelligence Aliases',
+    'Treat aliases as reasoning policies, not canned response text. Select only relevant policies from the request and context.',
+    'Resolve intent first; use tools only when they reduce uncertainty or produce required evidence. Do not expose internal aliases unless asked.',
   ];
   for (const alias of INTELLIGENCE_ALIASES) lines.push(`- ${alias.id}: ${alias.apply}`);
-  lines.push('', 'Execution order: infer intent → choose aliases → inspect → act minimally → gather evidence → verify → report only what is verified.');
+  lines.push('Order: infer intent → select policies → inspect → act minimally → gather evidence → verify → report verified facts.');
   return lines.join('\n');
 }
 
@@ -105,10 +105,13 @@ export function classifyTask(prompt = '', model = '') {
 export function buildTaskContext(task) {
   const aliases = resolveIntelligenceAliases(task);
   const mode = task.simple ? 'simple-direct' : task.depth;
+  const uiContext = task.text ? buildUiTaskContext(task.text) : '';
   const parts = [
     `[LZ] mode=${mode}; task=${task.primary}; complexity=${task.complexity}`,
+    ...(uiContext ? [uiContext] : []),
     `plan=${task.plan ? 'required' : 'skip unless needed'}; verify=required; artifact=${task.artifact ? 'canonical-path' : 'repo-native'}`,
     `rules=minimal,no-assumptions,no-random-changes,double-check; apply=inspect→minimal change→evidence→verify; aliases=${aliases.join(',')}`,
+    buildExecutionFrames(task),
   ];
   return parts.join(' ');
 }

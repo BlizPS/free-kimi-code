@@ -6,7 +6,7 @@ import { classifyTask, buildTaskContext, modelIntelligenceProfile, resolveIntell
 const generic = modelIntelligenceProfile('provider/model');
 assert.equal(generic.id, 'adaptive');
 assert.equal(generic.effort, 'adaptive');
-assert.match(buildIntelligenceAliasSystem(), /focus on the user intent/i);
+assert.match(buildIntelligenceAliasSystem(), /select only relevant policies/i);
 assert.match(buildHardRulesContext(), /Keep simple requests simple/);
 assert.match(buildHardRulesContext(), /never invent assumptions/);
 assert.match(buildHardRulesContext(), /random/);
@@ -19,7 +19,7 @@ assert.equal(debug.primary, 'debug');
 assert.equal(debug.depth, 'deep');
 assert.match(buildTaskContext(debug), /inspect→minimal change→evidence→verify/);
 assert.ok(resolveIntelligenceAliases(debug).includes('evidence_first'));
-assert.match(buildIntelligenceAliasSystem(), /LazyDev Intelligence Alias System/);
+assert.match(buildIntelligenceAliasSystem(), /LazyDev Intelligence Aliases/);
 assert.doesNotMatch(buildIntelligenceAliasSystem(), /(?:respond|reply|answer|write) (?:in|using) [a-z]+/i);
 assert.doesNotMatch(fs.readFileSync(new URL('../runtime/SYSTEM.md', import.meta.url), 'utf8'), /(?:respond|reply|answer|write) (?:in|using) [a-z]+/i);
 assert.match(fs.readFileSync(new URL('../runtime/PLUGIN-PROMPT.md', import.meta.url), 'utf8'), /first user turn of a new session[\s\S]*respond in English unless the user explicitly requests another language/i);

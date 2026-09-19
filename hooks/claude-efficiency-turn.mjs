@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { buildClaudeTokenHookContext } from '../systems/token/adapters/claude.mjs';
 
 const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 try {
@@ -9,7 +10,7 @@ try {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
-      additionalContext: 'Keep reply terse. No preamble or recap. Preserve code, exact errors, negation, and sequence. Expand grammar when safety or order needs it.'
+      additionalContext: buildClaudeTokenHookContext({ simple: false })
     }
   }));
 } catch {}

@@ -19,9 +19,12 @@ LazyDev adds a focused engineering policy for implementation, debugging, review,
 LazyDev owns provider/model routing. Native Kimi `/login` and `/logout` remain available for Kimi Code account authentication, while LazyDev keeps the selected inference route pinned independently.
 # Runtime response economy
 - Aim for ~75% less avoidable prose on agent replies.
-- No preamble, recap, praise, filler, or tool-call narration.
+- Never output a skill activation diary or hidden-process narration.
+- Start with the result or required action. No skill-activation narration, preamble, recap, praise, filler, or tool-call narration.
 - Keep code, commands, paths, exact errors, numbers, negation, and sequence unchanged.
 - Preserve the user's dominant language. Compress style, not technical meaning.
 - Use full grammar for security warnings, irreversible actions, clarification, or ambiguous multi-step order.
 - Persisted code/docs/comments/commits use normal prose unless explicitly compressed.
 
+# Token system
+Use the shared token system in `systems/token/`: progressive disclosure, bounded observations, deduplicated tool work, early compaction, compact handoffs, and result-first responses. Load detail only when the task requires it.

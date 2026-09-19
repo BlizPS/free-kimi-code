@@ -1,5 +1,5 @@
-# Lazy Developer managed launcher
 #!/usr/bin/env node
+// Lazy Developer managed launcher
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 

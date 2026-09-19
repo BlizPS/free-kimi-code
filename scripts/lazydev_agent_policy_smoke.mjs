@@ -12,6 +12,6 @@ assert.match(agent, /^override: true$/m);
 assert.match(agent, /\$\{base_prompt\}/);
 assert.match(agent, /activated or clearly relevant LazyDev Skill as execution policy/i);
 assert.match(agent, /do not replace it with demos, self-tests, unrelated probes/i);
-assert.match(skill, /When active, apply this Skill/i);
-assert.match(skill, /task and tool decisions/i);
+assert.match(skill, /Native systems remain active/i);
+assert.match(skill, /built-in LazyDev Systems remain active|native systems remain active/i);
 console.log('PASS: LazyDev default agent override and active Skill enforcement are wired');

@@ -1,0 +1,27 @@
+{
+  "name": "lazy-token-system",
+  "version": "1.0.0",
+  "loading": "progressive-disclosure",
+  "hosts": [
+    "cli",
+    "skills",
+    "plugins",
+    "kimi",
+    "claude",
+    "cursor",
+    "codex",
+    "agents",
+    "gemini",
+    "opencode",
+    "generic"
+  ],
+  "entry": "./bridge.mjs",
+  "adapters": {
+    "cli": "./adapters/kimi.mjs",
+    "kimi": "./adapters/kimi.mjs",
+    "plugins": "./adapters/plugin.mjs",
+    "skills": "./adapters/skill.mjs",
+    "claude": "./adapters/claude.mjs",
+    "generic": "./adapters/generic.mjs"
+  }
+}

@@ -84,7 +84,7 @@ for rel in [
     if not (ROOT / rel).is_file(): errors.append(f"missing {rel}")
 
 for rel in ["runtime/SYSTEM.md", "runtime/PLUGIN-PROMPT.md", "runtime/token-policy.json",
-            "runtime/platform-policy.mjs", "runtime/intelligence-kernel.mjs", "hooks/lazydev-path-guard.mjs",
+            "runtime/platform-policy.mjs", "runtime/intelligence-kernel.mjs", "hooks/lazydev-path-guard.mjs", "systems/index.mjs", "systems/token/index.mjs", "systems/token/bridge.mjs", "systems/token/manifest.json", "systems/token/adapters/index.mjs", "systems/context/working-set.mjs",
             "hooks/lazydev-prompt-context.mjs", "hooks/lazydev-shell-guard.mjs",
             "kimi.plugin.json"]:
     if not (ROOT / rel).is_file(): errors.append(f"missing {rel}")

@@ -8,12 +8,30 @@ metadata:
 
 **RESEARCH → UNDERSTAND → ACT → VERIFY → SHIP.**
 
-When active, apply this Skill to task and tool decisions.
+Native systems remain active.
 
-- Inspect relevant scope; preserve working behavior; make the **smallest complete repo-native** change.
-- Research current/version-sensitive facts first; trace source → validation → sink at boundaries; never invent evidence.
-- UI/UX: design-system first: hierarchy, type, tokens, states, responsive, accessibility, visual proof, anti-patterns. Ask only **blocking questions**.
-- 3D-viz mode: prefer CSS/SVG/canvas; use Three.js/WebGL only when useful; check mobile performance.
-- Never call a build/lint check proof of runtime behavior; `skipped ≠ passed`.
-- **Anti-yap:** target ~75% less avoidable prose; no theory dump, filler UI, fake data, generic praise, or unnecessary rewrites. Verify paths before saying saved.
+## Core
+
+- Inspect scope, stack, patterns, relevant files, and tests before edits.
+- For current facts or named/external references, **RESEARCH** first when search is available.
+- Derive acceptance, constraints, non-goals, and the **smallest complete repo-native** change. Never invent APIs, behavior, assets, or evidence. Ask only **blocking questions**.
+- Reuse existing code; preserve behavior; trace **source → validation → sink**.
+
+## UI / UX
+
+Use a **design system** for hierarchy, type, spacing, color, states, responsiveness, accessibility, and performance. Implement real interaction states.
+
+Extract reference patterns, not copies. Reject AI-slop **anti-patterns**: card soup, pill-everything, gradients/glass, icon piles, fake controls, filler, oversized heroes, arbitrary shadows, invented content. Visually verify when possible; test mobile/tablet/desktop, long text, missing data, overflow.
+
+For **3D-viz mode**, use CSS/SVG/canvas when sufficient; use Three.js/WebGL when useful; check **mobile performance**.
+
+## Verification + communication
+
+Ambiguity: investigate first. Run the smallest meaningful **proof** and stop; `skipped ≠ passed`.
+
+**Response:** lead with the result or required action. Never narrate skill activation, tool mechanics, hidden reasoning, or filler. State decisions/blockers/proof once; expand only when needed.
+
+**Anti-yap:** target 75% less avoidable prose; keep context lean; preserve exact code, commands, paths, URLs, identifiers, versions, errors, negation, and ordering.
+
+For long token-heavy work, load `references/token-efficiency.md`.
 

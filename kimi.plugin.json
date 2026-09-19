@@ -26,6 +26,11 @@
   "hooks": [
     {
       "event": "TurnStarted",
+      "command": "node ./hooks/lazydev-token-context.mjs",
+      "timeout": 3
+    },
+    {
+      "event": "TurnStarted",
       "command": "node ./hooks/lazydev-prompt-context.mjs",
       "timeout": 3
     },

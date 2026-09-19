@@ -3,3 +3,4 @@ description: Use Lazy Developer for compact, evidence-driven software work
 alwaysApply: true
 ---
 Route implementation/UI → lazy-developer; failure → lazy-debug; verification → lazy-test; review → lazy-review. Read the shared `skills/` source, inspect first, preserve requirements/local conventions, avoid speculative churn, and verify real coverage.
+Token system: use progressive disclosure and compact working context; preserve exact technical literals.

@@ -11,6 +11,9 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { platformPaths } from '../runtime/platform-policy.mjs';
 import { modelIntelligenceProfile, buildIntelligenceAliasSystem } from '../runtime/intelligence-kernel.mjs';
+import { buildUiSystemPrompt } from '../runtime/ui-intelligence.mjs';
+import { buildNativeSystemsPrompt } from '../systems/index.mjs';
+import { buildKimiTokenConfig } from '../systems/token/adapters/kimi.mjs';
 import { extractSessionModelAliases } from '../runtime/session-model-compat.mjs';
 import { repairOpenAIHistory } from '../runtime/openai-history.mjs';
 
@@ -819,7 +822,9 @@ function writeKimiAgentGuidance() {
   const source = runtimePolicyPath('SYSTEM.md');
   const bodyText = fs.readFileSync(source, 'utf8').trimEnd();
   const aliasSystem = buildIntelligenceAliasSystem();
-  fs.writeFileSync(system, `${bodyText}\n\n${aliasSystem}\n`, { mode: 0o600 });
+  const uiSystem = buildUiSystemPrompt();
+  const nativeSystems = buildNativeSystemsPrompt();
+  fs.writeFileSync(system, `${bodyText}\n\n${nativeSystems}\n\n${uiSystem}\n\n${aliasSystem}\n`, { mode: 0o600 });
 }
 function basePromptPlaceholder() { return '${base_prompt}'; }
 function shellQuoteCommand(executable, args = []) {
@@ -885,6 +890,7 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
   const promptCommand = shellQuoteCommand(process.execPath, [promptHook]);
   const artifactCommand = shellQuoteCommand(process.execPath, [artifactHook]);
   const shellCommand = shellQuoteCommand(process.execPath, [shellHook]);
+  const tokenConfig = buildKimiTokenConfig({ maxContext: context, maxOutput: output, reserveRatio: 0.08 });
   return [
     `default_model = ${tomlQuote(alias)}`,
     `default_permission_mode = ${tomlQuote('manual')}`,
@@ -934,6 +940,7 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     `compaction_trigger_ratio = ${budget.ratio.toFixed(2)}`,
     `compaction_max_attempts = 2`,
     ``,
+    ...tokenConfig,
     `[mcp.client]`,
     `tool_call_timeout_ms = 60000`,
     ``,
