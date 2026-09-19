@@ -16,7 +16,7 @@ checks = {
 for name, url in checks.items():
     if url not in s:
         raise SystemExit(f'FAIL: no live catalog endpoint for {name}')
-for needle in ["function providerRequiresApiKey(provider)", "provider.kind === 'pollinations'", "auth: 'none'", "https://text.pollinations.ai/openai", 'function normalizeOllamaBaseUrl', 'function ollamaModelsUrl', "id: 'ollama'", '/api/tags', '/v1/models']:
+for needle in ["function providerRequiresApiKey(provider)", "provider.kind === 'pollinations'", "auth: 'none'", "https://text.pollinations.ai/", 'function normalizeOllamaBaseUrl', 'function ollamaModelsUrl', "id: 'ollama'", '/api/tags', '/v1/models']:
     if needle not in s:
         raise SystemExit(f'FAIL: Ollama local catalog support missing: {needle}')
 if 'AbortController' not in s or 'Request timed out after' not in s:

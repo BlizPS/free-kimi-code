@@ -84,7 +84,7 @@ const providers = [
   { id: 'groq', label: 'Groq', kind: 'openai', modelsUrl: 'https://api.groq.com/openai/v1/models', chatUrl: 'https://api.groq.com/openai/v1/chat/completions', env: 'GROQ_API_KEY' },
   { id: 'codebuddy', label: 'CodeBuddy', kind: 'codebuddy', modelsUrls: ['https://copilot.tencent.com/v3/config', 'https://api.codebuddy.ai/v1/models'], chatUrls: ['https://copilot.tencent.com/v2/chat/completions', 'https://api.codebuddy.ai/v1/chat/completions'], env: 'CODEBUDDY_API_KEY' },
   { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', modelsUrl: 'https://api.anthropic.com/v1/models', chatUrl: 'https://api.anthropic.com/v1/messages', env: 'ANTHROPIC_API_KEY' },
-  { id: 'pollinations', label: 'Pollinations', kind: 'pollinations', modelsUrl: 'https://text.pollinations.ai/models', chatUrl: 'https://text.pollinations.ai/openai', baseUrl: 'https://text.pollinations.ai/', env: null, auth: 'none', free: true },
+  { id: 'pollinations', label: 'Pollinations', kind: 'pollinations', modelsUrl: 'https://text.pollinations.ai/models', chatUrl: 'https://text.pollinations.ai/', baseUrl: 'https://text.pollinations.ai/', env: null, auth: 'none', free: true, legacyAnonymous: true },
 ];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EFFICIENCY_POLICY_FILE = path.join(root, 'runtime', 'lazy-efficiency.md');
@@ -257,6 +257,11 @@ function normalizeConfig(raw) {
   cfg.providers = p;
   if (!providers.some((x) => x.id === cfg.activeProvider)) cfg.activeProvider = 'gemini';
   delete cfg.apiKey; delete cfg.model;
+  for (const provider of providers) {
+    if (provider.auth === 'none' && cfg.providers?.[provider.id]?.apiKey) {
+      cfg.providers[provider.id] = { ...cfg.providers[provider.id], apiKey: '' };
+    }
+  }
   return migrateDisabledModelConfig(cfg);
 }
 function writeConfig(data) { writeJsonAtomic(configFile(), data); }
@@ -967,12 +972,20 @@ async function createProxy(provider, pc) {
       }
       body.model = pc.model;
       if (Array.isArray(body.messages)) body.messages = repairOpenAIHistory(body.messages);
-      let syntheticToolsActive = (learnedNoTools || nativeToolCapability(provider, pc) === false) && syntheticToolDefinitions(body).length > 0;
+      let syntheticToolsActive = (provider.id === 'pollinations' || learnedNoTools || nativeToolCapability(provider, pc) === false) && syntheticToolDefinitions(body).length > 0;
       let syntheticToolsLearned = learnedNoTools;
       const downstreamStream = body.stream === true;
       const removedRequestFields = new Set(UNSUPPORTED_PASSTHROUGH_FIELDS);
       const preparedBody = provider.id === 'gemini' ? prepareGeminiRequest(body, pc.model) : normalizeOpenAICompatibleRequest(body, provider, pc, removedRequestFields);
       if (preparedBody !== body) body = preparedBody;
+      if (provider.id === 'pollinations') {
+        body.stream = false;
+        delete body.tools;
+        delete body.tool_choice;
+        delete body.parallel_tool_calls;
+        delete body.functions;
+        delete body.function_call;
+      }
       if (provider.id === 'openrouter') {
         const providerOptions = body.provider && typeof body.provider === 'object' && !Array.isArray(body.provider) ? body.provider : {};
         // Do not inject a custom `models` array into openrouter/free. The OpenRouter
@@ -1081,11 +1094,11 @@ async function createProxy(provider, pc) {
                 upstreamRes.on('error', reject);
                 return;
               }
-              if (syntheticToolsActive) {
+              if (syntheticToolsActive || provider.id === 'pollinations') {
                 let raw = '';
                 upstreamRes.setEncoding('utf8');
                 upstreamRes.on('data', chunk => { raw += chunk; });
-                upstreamRes.on('end', () => resolve({ ok: true, synthetic: true, status, body: raw, headers: upstreamRes.headers }));
+                upstreamRes.on('end', () => resolve({ ok: true, synthetic: syntheticToolsActive, pollinations: provider.id === 'pollinations', status, body: raw, headers: upstreamRes.headers }));
                 upstreamRes.on('error', reject);
                 return;
               }
@@ -1104,6 +1117,44 @@ async function createProxy(provider, pc) {
           }).catch(error => ({ ok: false, status: 502, body: error instanceof Error ? error.message : String(error), headers: {} }));
 
           if (result.ok) {
+            if (result.pollinations) {
+              let completion = null;
+              const rawText = String(result.body || '').trim();
+              try { completion = JSON.parse(rawText || '{}'); } catch {
+                completion = {
+                  id: `pollinations-${Date.now()}`,
+                  object: 'chat.completion',
+                  created: Math.floor(Date.now() / 1000),
+                  model: attemptModel || pc.model,
+                  choices: [{ index: 0, message: { role: 'assistant', content: rawText }, finish_reason: 'stop' }],
+                };
+              }
+              if (!completion || !Array.isArray(completion.choices)) {
+                completion = {
+                  id: `pollinations-${Date.now()}`, object: 'chat.completion', created: Math.floor(Date.now()/1000), model: attemptModel || pc.model,
+                  choices: [{ index: 0, message: { role: 'assistant', content: rawText }, finish_reason: 'stop' }],
+                };
+              }
+              if (result.synthetic) {
+                const content = String(completion?.choices?.[0]?.message?.content || '');
+                const calls = extractSyntheticToolCalls(content, toolDefs, requestBody.messages || [], pathHints);
+                const generated = syntheticToolResponse(attemptModel || pc.model, completion, calls, downstreamStream);
+                res.statusCode = 200;
+                res.setHeader('X-LazyDev-Synthetic-Tools', '1');
+                res.setHeader('X-LazyDev-Pollinations-Anonymous', '1');
+                res.setHeader('content-type', generated.contentType);
+                res.setHeader('content-length', Buffer.byteLength(generated.body));
+                res.end(generated.body);
+                return;
+              }
+              res.statusCode = 200;
+              res.setHeader('X-LazyDev-Pollinations-Anonymous', '1');
+              res.setHeader('content-type', 'application/json');
+              const bodyText = JSON.stringify(completion);
+              res.setHeader('content-length', Buffer.byteLength(bodyText));
+              res.end(bodyText);
+              return;
+            }
             if (result.synthetic) {
               let completion = null;
               try { completion = JSON.parse(result.body || '{}'); } catch (error) {
@@ -1388,6 +1439,7 @@ function shouldUseTemplateCodec(body, pc) {
 function activeProviderEnvKeys(provider) {
   if (provider.id === 'gemini') return ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GEMINI_BASE_URL', 'GEMINI_BASE_URL'];
   if (provider.id === 'anthropic') return ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL'];
+  if (provider.id === 'pollinations') return ['POLLINATIONS_API_KEY', 'POLLINATIONS_KEY', 'POLLINATIONS_TOKEN', 'OPENAI_API_KEY', 'OPENAI_BASE_URL'];
   // All remaining LazyDev providers use Kimi's OpenAI-compatible adapter or
   // the local Ollama proxy, so stale OpenAI env overrides must not replace the
   // URL/key that LazyDev just generated for this session.
@@ -1405,6 +1457,11 @@ function sanitizeKimiChildEnv(provider) {
 }
 function buildKimiModelEnv(provider, pc, proxy, budget) {
   const env = {};
+  if (provider.id === 'pollinations') {
+    env.POLLINATIONS_API_KEY = '';
+    env.POLLINATIONS_KEY = '';
+    env.POLLINATIONS_TOKEN = '';
+  }
   // Kimi Code's KIMI_MODEL_* family is an in-memory model override with higher
   // priority than default_model. This keeps the LazyDev inference route stable
   // even when native /login or /logout reloads the on-disk configuration.
@@ -2108,8 +2165,13 @@ async function chat() {
   const cfg = normalizeConfig(readConfig());
   const provider = activeProvider(cfg);
   const savedPc = providerConfig(cfg, provider.id);
-  let pc = { ...savedPc, toolUse: modelSupportsKimiTools(provider, savedPc) };
-  if (!pc.apiKey || !pc.model) { line(red(`No active provider is configured. Run: lazydev setup`)); return; }
+  if (provider.auth === 'none' && savedPc.apiKey) {
+    savedPc.apiKey = '';
+    cfg.providers[provider.id] = { ...savedPc, apiKey: '' };
+    writeConfig(cfg);
+  }
+  let pc = { ...savedPc, apiKey: provider.auth === 'none' ? '' : savedPc.apiKey, toolUse: modelSupportsKimiTools(provider, savedPc) };
+  if ((providerRequiresApiKey(provider) && !pc.apiKey) || !pc.model) { line(red(`No active provider is configured. Run: lazydev setup`)); return; }
   if (provider.id === 'openrouter') {
     const live = await verifyLiveModel(provider, pc);
     if (live.status === 'missing') {

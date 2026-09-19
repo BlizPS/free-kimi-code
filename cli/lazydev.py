@@ -56,7 +56,7 @@ PROVIDERS: list[dict[str, Any]] = [
     {"id": "groq", "label": "Groq", "kind": "openai", "models": "https://api.groq.com/openai/v1/models", "base": "https://api.groq.com/openai/v1", "env": "GROQ_API_KEY"},
     {"id": "codebuddy", "label": "CodeBuddy", "kind": "openai", "models": ["https://copilot.tencent.com/v3/config", "https://api.codebuddy.ai/v1/models"], "base": "https://api.codebuddy.ai/v1", "env": "CODEBUDDY_API_KEY"},
     {"id": "anthropic", "label": "Anthropic", "kind": "anthropic", "models": "https://api.anthropic.com/v1/models", "base": "https://api.anthropic.com", "env": "ANTHROPIC_API_KEY"},
-    {"id": "pollinations", "label": "Pollinations", "kind": "pollinations", "models": "https://text.pollinations.ai/models", "base": "https://text.pollinations.ai/", "chat": "https://text.pollinations.ai/openai", "env": None, "auth": "none", "free": True},
+    {"id": "pollinations", "label": "Pollinations", "kind": "pollinations", "models": "https://text.pollinations.ai/models", "base": "https://text.pollinations.ai/", "chat": "https://text.pollinations.ai/", "env": None, "auth": "none", "free": True, "legacyAnonymous": True},
 ]
 
 SKILLS = [
@@ -1268,7 +1268,7 @@ class _ProviderProxy:
                     return self._send_json(400, {"error": {"message": "Request body must be an object"}})
                 original_model = str(outer.pc.get("model") or body.get("model") or "")
                 attempt_model = original_model
-                synthetic_tools_active = (outer.learned_no_tools or native_tool_capability(outer.pc) is False) and bool(_tool_definitions(body))
+                synthetic_tools_active = (outer.provider.get("id") == "pollinations" or outer.learned_no_tools or native_tool_capability(outer.pc) is False) and bool(_tool_definitions(body))
                 synthetic_tools_learned = outer.learned_no_tools
                 downstream_stream = bool(body.get("stream"))
                 body["model"] = original_model
@@ -1294,6 +1294,10 @@ class _ProviderProxy:
                         physical_output,
                     )
                     normalized_body = _normalize_provider_request(request_body, outer.provider, outer.pc)
+                    if outer.provider.get("id") == "pollinations":
+                        normalized_body["stream"] = False
+                        for field in ("tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"):
+                            normalized_body.pop(field, None)
                     normalized_body["model"] = attempt_model
                     outbound, removed_now = _strip_request_fields(normalized_body, removed_fields)
                     removed_fields |= removed_now
@@ -1383,6 +1387,43 @@ class _ProviderProxy:
                         self.close_connection = True
                         return
                     try:
+                        if outer.provider.get("id") == "pollinations":
+                            payload = response.read()
+                            raw_text = payload.decode("utf-8", "replace").strip()
+                            try:
+                                completion = json.loads(raw_text or "{}")
+                            except Exception:
+                                completion = {
+                                    "id": f"pollinations-{int(time.time() * 1000)}",
+                                    "object": "chat.completion",
+                                    "created": int(time.time()),
+                                    "model": attempt_model,
+                                    "choices": [{"index": 0, "message": {"role": "assistant", "content": raw_text}, "finish_reason": "stop"}],
+                                }
+                            if not isinstance(completion, dict) or not isinstance(completion.get("choices"), list):
+                                completion = {
+                                    "id": f"pollinations-{int(time.time() * 1000)}", "object": "chat.completion", "created": int(time.time()),
+                                    "model": attempt_model, "choices": [{"index": 0, "message": {"role": "assistant", "content": raw_text}, "finish_reason": "stop"}],
+                                }
+                            if synthetic_tools_active:
+                                choices = completion.get("choices") or []
+                                message = choices[0].get("message") if choices and isinstance(choices[0], dict) else {}
+                                content = message.get("content") if isinstance(message, dict) else ""
+                                calls = _extract_synthetic_tool_calls(str(content or ""), tool_defs, normalized_body.get("messages", []), outer.path_hints)
+                                response_headers, raw_response = _synthetic_tool_completion(attempt_model, completion, calls, downstream_stream)
+                                self.send_response(200)
+                                for key, value in response_headers.items(): self.send_header(key, value)
+                                self.send_header("Content-Length", str(len(raw_response)))
+                                self.send_header("X-LazyDev-Pollinations-Anonymous", "1")
+                                self.send_header("Connection", "close")
+                                self.end_headers(); self.wfile.write(raw_response); self.close_connection = True; return
+                            raw_response = json.dumps(completion, separators=(",", ":")).encode("utf-8")
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/json")
+                            self.send_header("Content-Length", str(len(raw_response)))
+                            self.send_header("X-LazyDev-Pollinations-Anonymous", "1")
+                            self.send_header("Connection", "close")
+                            self.end_headers(); self.wfile.write(raw_response); self.close_connection = True; return
                         if synthetic_tools_active:
                             payload = response.read()
                             try:
@@ -1442,6 +1483,8 @@ class _ProviderProxy:
 
     def upstream_url(self) -> str:
         base = normalize_url(self.pc.get("baseUrl") or self.provider.get("base") or "")
+        if self.provider.get("id") == "pollinations":
+            return base + "/" if not base.endswith("/") else base
         lowered = base.lower()
         if lowered.endswith("/v1") or lowered.endswith("/openai"):
             return base + "/chat/completions"
@@ -1464,7 +1507,7 @@ class _ProviderProxy:
             "Content-Length": str(len(json.dumps(body, separators=(",", ":")).encode("utf-8"))),
         }
         key = str(self.pc.get("apiKey", "") or "")
-        if key and self.provider.get("id") != "ollama":
+        if key and self.provider.get("id") not in {"ollama", "pollinations"}:
             headers["Authorization"] = f"Bearer {key}"
         payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
         path = target.path or "/"
@@ -1708,7 +1751,11 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
         return 1
     cfg = read_config()
     provider = active_provider(cfg)
-    pc = provider_config(cfg, provider["id"])
+    pc = dict(provider_config(cfg, provider["id"]))
+    if provider.get("auth") == "none":
+        pc["apiKey"] = ""
+        cfg.setdefault("providers", {})[provider["id"]] = {**pc, "apiKey": ""}
+        write_config(cfg)
     if not pc.get("model"):
         print("No active provider is configured. Run: lazydev setup", file=sys.stderr)
         return 1
@@ -1736,6 +1783,9 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     else:
         args += ["--agent", "default"]
     env = os.environ.copy()
+    if provider.get("id") == "pollinations":
+        for name in ("POLLINATIONS_API_KEY", "POLLINATIONS_KEY", "POLLINATIONS_TOKEN", "OPENAI_API_KEY", "OPENAI_BASE_URL"):
+            env.pop(name, None)
     env["KIMI_CODE_HOME"] = str(KIMI_HOME)
     env["KIMI_LOOP_MAX_STEPS_PER_TURN"] = "0"
     env["LAZYDEV_ARTIFACT_DIR"] = str(ARTIFACT_DIR)
