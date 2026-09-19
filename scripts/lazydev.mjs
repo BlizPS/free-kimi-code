@@ -34,7 +34,7 @@ const SYNTHETIC_TOOL_OPEN = '<lazydev_tool_call>';
 const SYNTHETIC_TOOL_CLOSE = '</lazydev_tool_call>';
 const SYNTHETIC_TOOL_MAX_SCHEMA_CHARS = 12000;
 const SYNTHETIC_TOOL_MAX_RESULT_CHARS = 8000;
-const PROVIDER_TRANSIENT_MAX_RETRIES = Math.max(0, Math.min(4, Number(process.env.LAZYDEV_TRANSIENT_RETRIES || 2)));
+const PROVIDER_TRANSIENT_MAX_RETRIES = Math.max(0, Math.min(9, Number(process.env.LAZYDEV_TRANSIENT_RETRIES || 8)));
 const PROVIDER_TRANSIENT_BASE_MS = Math.max(250, Math.min(5000, Number(process.env.LAZYDEV_TRANSIENT_BASE_MS || 800)));
 const PROVIDER_TRANSIENT_MAX_MS = Math.max(PROVIDER_TRANSIENT_BASE_MS, Math.min(30000, Number(process.env.LAZYDEV_TRANSIENT_MAX_MS || 8000)));
 const TOKEN_CODEC_ENABLED = !['0','false','off','disabled'].includes(String(process.env.LAZYDEV_TOKEN_CODEC || 'auto').trim().toLowerCase());
@@ -46,7 +46,7 @@ const TOKEN_CODEC_TEMPLATE_MODE = (() => {
 })();
 const TOKEN_CODEC_TEMPLATE_PRESSURE = Math.max(0.55, Math.min(0.95, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_PRESSURE || 0.78)));
 const CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768;
-const CONTEXT_EXTRA_MULTIPLIER = Math.max(1.25, Math.min(4, Number(process.env.LAZYDEV_CONTEXT_EXTRA_MULTIPLIER || 2)));
+const CONTEXT_EXTRA_MULTIPLIER = Math.max(1.25, Math.min(4, Number(process.env.LAZYDEV_CONTEXT_EXTRA_MULTIPLIER || 1.6)));
 const CONTEXT_FIT_RATIO = 1;
 const CONTEXT_RECENT_MESSAGES = Math.max(4, Math.min(20, Number(process.env.LAZYDEV_CONTEXT_RECENT_MESSAGES || 10)));
 const CONTEXT_ARCHIVE_SNIPPET_CHARS = Math.max(80, Math.min(800, Number(process.env.LAZYDEV_CONTEXT_ARCHIVE_SNIPPET_CHARS || 240)));
@@ -84,7 +84,7 @@ const providers = [
   { id: 'groq', label: 'Groq', kind: 'openai', modelsUrl: 'https://api.groq.com/openai/v1/models', chatUrl: 'https://api.groq.com/openai/v1/chat/completions', env: 'GROQ_API_KEY' },
   { id: 'codebuddy', label: 'CodeBuddy', kind: 'codebuddy', modelsUrls: ['https://copilot.tencent.com/v3/config', 'https://api.codebuddy.ai/v1/models'], chatUrls: ['https://copilot.tencent.com/v2/chat/completions', 'https://api.codebuddy.ai/v1/chat/completions'], env: 'CODEBUDDY_API_KEY' },
   { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', modelsUrl: 'https://api.anthropic.com/v1/models', chatUrl: 'https://api.anthropic.com/v1/messages', env: 'ANTHROPIC_API_KEY' },
-  { id: 'pollinations', label: 'Pollinations', kind: 'pollinations', modelsUrl: 'https://text.pollinations.ai/models', chatUrl: 'https://text.pollinations.ai/', baseUrl: 'https://text.pollinations.ai/', env: null, auth: 'none', free: true, legacyAnonymous: true },
+  { id: 'huggingface', label: 'Hugging Face', kind: 'openai', modelsUrl: 'https://router.huggingface.co/v1/models', chatUrl: 'https://router.huggingface.co/v1/chat/completions', baseUrl: 'https://router.huggingface.co/v1', env: 'HF_TOKEN' },
 ];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EFFICIENCY_POLICY_FILE = path.join(root, 'runtime', 'lazy-efficiency.md');
@@ -254,8 +254,9 @@ function normalizeConfig(raw) {
   if (!p.gemini && (typeof cfg.apiKey === 'string' || typeof cfg.model === 'string')) {
     p.gemini = { apiKey: typeof cfg.apiKey === 'string' ? cfg.apiKey.trim() : '', model: typeof cfg.model === 'string' && cfg.model.trim() ? cfg.model.trim() : 'gemini-flash-lite-latest' };
   }
+  for (const key of Object.keys(p)) if (!providers.some((x) => x.id === key)) delete p[key];
   cfg.providers = p;
-  if (!providers.some((x) => x.id === cfg.activeProvider)) cfg.activeProvider = 'gemini';
+  if (!providers.some((x) => x.id === cfg.activeProvider)) cfg.activeProvider = 'huggingface';
   delete cfg.apiKey; delete cfg.model;
   for (const provider of providers) {
     if (provider.auth === 'none' && cfg.providers?.[provider.id]?.apiKey) {
@@ -410,7 +411,7 @@ const PROVIDER_OUTPUT_HARD_CAPS = Object.freeze({
   groq: 32768,
   codebuddy: 32768,
   anthropic: 65536,
-  pollinations: 32768,
+  huggingface: 32768,
 });
 const KNOWN_MODEL_LIMITS = [
   { test: /^nvidia\/nemotron-3-super-120b-a12b$/i, contextLimit: 1048576, outputLimit: 32768, thinking: false, offEffort: 'none', provider: 'nvidia' },
@@ -496,6 +497,11 @@ function normalizeSyntheticCallArgs(name, args = {}, toolDefs = [], messages = [
     if (key === 'path' && normalized[key] === undefined) normalized[key] = inferPath();
   }
   if (typeof normalized.path === 'string') normalized.path = canonicalToolPath(normalized.path);
+  if (/^(read|readfile|readmediafile)$/i.test(String(name || '')) && normalized.max_chars !== undefined) {
+    const configuredMax = Math.max(100000, Math.min(500000, Number(process.env.LAZYDEV_READ_MAX_CHARS || 500000)));
+    const requested = Number(normalized.max_chars);
+    normalized.max_chars = Number.isFinite(requested) && requested > 0 ? Math.min(Math.max(100000, Math.floor(requested)), configuredMax) : configuredMax;
+  }
   if (required.some(key => normalized[key] === undefined || normalized[key] === null || normalized[key] === '')) return null;
   if (Object.keys(properties).length) return Object.fromEntries(Object.entries(normalized).filter(([key]) => key in properties));
   return normalized;
@@ -696,12 +702,16 @@ function normalizeModel(item, provider) {
       toolUseSource: known.toolUse !== undefined ? 'catalog-rule' : 'unknown',
     }, provider);
   }
-  if (provider.kind === 'pollinations') {
-    const capabilities = Array.isArray(item.capabilities) ? item.capabilities : [];
-    const explicitTools = item.tools === true ? true : item.tools === false ? false : null;
-    const toolUse = explicitTools !== null ? explicitTools : capabilities.includes('tool_calling') ? true : null;
-    const contextLimit = Number(item.context_length) || Number(item.contextWindow) || Number(item.context_window) || null;
-    const outputLimit = Number(item.max_output_tokens) || Number(item.max_completion_tokens) || null;
+  if (provider.id === 'huggingface') {
+    const providerRecords = Array.isArray(item.providers) ? item.providers.filter((entry) => entry && typeof entry === 'object') : [];
+    const liveProviders = providerRecords.filter((entry) => !entry.status || String(entry.status).toLowerCase() === 'live');
+    const contexts = liveProviders.map((entry) => Number(entry.context_length) || 0).filter((n) => n > 0);
+    const outputs = liveProviders.map((entry) => Number(entry.max_completion_tokens) || Number(entry.max_output_tokens) || Number(entry.max_tokens) || 0).filter((n) => n > 0);
+    const toolFlags = liveProviders.map((entry) => entry.supports_tools === true ? true : entry.supports_tools === false ? false : null);
+    const supportedParameters = Array.isArray(item.supported_parameters) ? item.supported_parameters : [];
+    const toolUse = toolFlags.some((flag) => flag === false) ? false : toolFlags.length && toolFlags.every((flag) => flag === true) ? true : (supportedParameters.length ? supportedParameters.includes('tools') : null);
+    const contextLimit = (contexts.length ? Math.min(...contexts) : 0) || Number(item.context_length) || null;
+    const outputLimit = (outputs.length ? Math.min(...outputs) : 0) || Number(item.max_completion_tokens) || Number(item.max_output_tokens) || null;
     return applyKnownModelLimits({
       id,
       name: String(item.name || item.id || id),
@@ -711,14 +721,18 @@ function normalizeModel(item, provider) {
       contextLimit,
       live: true,
       toolUse,
-      toolUseSource: toolUse === null ? 'unknown' : 'live',
-      reasoning: item.reasoning === true || capabilities.includes('reasoning'),
-      capabilities,
-      inputModalities: Array.isArray(item.input_modalities) ? item.input_modalities : [],
-      outputModalities: Array.isArray(item.output_modalities) ? item.output_modalities : [],
-      aliases: Array.isArray(item.aliases) ? item.aliases : [],
-      isFree: true,
-      freeTier: String(item.tier || '').toLowerCase() === 'anonymous' || provider.free === true,
+      toolUseSource: toolUse === null ? 'unknown' : 'live-provider-map',
+      supportedParameters,
+      capabilities: Array.isArray(item.capabilities) ? item.capabilities : [],
+      inputModalities: Array.isArray(item.architecture?.input_modalities) ? item.architecture.input_modalities : (Array.isArray(item.input_modalities) ? item.input_modalities : []),
+      outputModalities: Array.isArray(item.architecture?.output_modalities) ? item.architecture.output_modalities : (Array.isArray(item.output_modalities) ? item.output_modalities : []),
+      providers: liveProviders.map((entry) => ({
+        provider: entry.provider, status: entry.status, contextLength: Number(entry.context_length) || null,
+        maxCompletionTokens: Number(entry.max_completion_tokens) || Number(entry.max_output_tokens) || Number(entry.max_tokens) || null,
+        supportsTools: entry.supports_tools === true ? true : entry.supports_tools === false ? false : null,
+        throughput: Number(entry.throughput) || null, latencyMs: Number(entry.first_token_latency_ms) || null, isFree: entry.is_free === true,
+      })),
+      pricing: item.pricing && typeof item.pricing === 'object' ? item.pricing : {},
     }, provider);
   }
   if (provider.kind === 'ollama') {
@@ -780,11 +794,6 @@ async function fetchModels(provider, apiKey, options = {}) {
       .filter((x) => Array.isArray(x.supportedGenerationMethods) && x.supportedGenerationMethods.includes('generateContent'))
       .map((x) => normalizeModel(x, provider)).filter((x) => x.id);
     return models.filter((m) => !isAntigravityModel(m.id));
-  }
-  if (provider.kind === 'pollinations') {
-    const data = await requestJson(provider.modelsUrl, { timeout, headers: { 'user-agent': `lazydev/${version}` } });
-    const raw = Array.isArray(data) ? data : Array.isArray(data.models) ? data.models : Array.isArray(data.data) ? data.data : [];
-    return raw.map((x) => normalizeModel(x, provider)).filter((x) => x.id).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }
   if (provider.kind === 'anthropic') {
     const data = await requestJson(provider.modelsUrl, { timeout, headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'user-agent': `lazydev/${version}` } });
@@ -972,20 +981,12 @@ async function createProxy(provider, pc) {
       }
       body.model = pc.model;
       if (Array.isArray(body.messages)) body.messages = repairOpenAIHistory(body.messages);
-      let syntheticToolsActive = (provider.id === 'pollinations' || learnedNoTools || nativeToolCapability(provider, pc) === false) && syntheticToolDefinitions(body).length > 0;
+      let syntheticToolsActive = (learnedNoTools || nativeToolCapability(provider, pc) === false) && syntheticToolDefinitions(body).length > 0;
       let syntheticToolsLearned = learnedNoTools;
       const downstreamStream = body.stream === true;
       const removedRequestFields = new Set(UNSUPPORTED_PASSTHROUGH_FIELDS);
       const preparedBody = provider.id === 'gemini' ? prepareGeminiRequest(body, pc.model) : normalizeOpenAICompatibleRequest(body, provider, pc, removedRequestFields);
       if (preparedBody !== body) body = preparedBody;
-      if (provider.id === 'pollinations') {
-        body.stream = false;
-        delete body.tools;
-        delete body.tool_choice;
-        delete body.parallel_tool_calls;
-        delete body.functions;
-        delete body.function_call;
-      }
       if (provider.id === 'openrouter') {
         const providerOptions = body.provider && typeof body.provider === 'object' && !Array.isArray(body.provider) ? body.provider : {};
         // Do not inject a custom `models` array into openrouter/free. The OpenRouter
@@ -1094,11 +1095,11 @@ async function createProxy(provider, pc) {
                 upstreamRes.on('error', reject);
                 return;
               }
-              if (syntheticToolsActive || provider.id === 'pollinations') {
+              if (syntheticToolsActive) {
                 let raw = '';
                 upstreamRes.setEncoding('utf8');
                 upstreamRes.on('data', chunk => { raw += chunk; });
-                upstreamRes.on('end', () => resolve({ ok: true, synthetic: syntheticToolsActive, pollinations: provider.id === 'pollinations', status, body: raw, headers: upstreamRes.headers }));
+                upstreamRes.on('end', () => resolve({ ok: true, synthetic: syntheticToolsActive, status, body: raw, headers: upstreamRes.headers }));
                 upstreamRes.on('error', reject);
                 return;
               }
@@ -1117,44 +1118,6 @@ async function createProxy(provider, pc) {
           }).catch(error => ({ ok: false, status: 502, body: error instanceof Error ? error.message : String(error), headers: {} }));
 
           if (result.ok) {
-            if (result.pollinations) {
-              let completion = null;
-              const rawText = String(result.body || '').trim();
-              try { completion = JSON.parse(rawText || '{}'); } catch {
-                completion = {
-                  id: `pollinations-${Date.now()}`,
-                  object: 'chat.completion',
-                  created: Math.floor(Date.now() / 1000),
-                  model: attemptModel || pc.model,
-                  choices: [{ index: 0, message: { role: 'assistant', content: rawText }, finish_reason: 'stop' }],
-                };
-              }
-              if (!completion || !Array.isArray(completion.choices)) {
-                completion = {
-                  id: `pollinations-${Date.now()}`, object: 'chat.completion', created: Math.floor(Date.now()/1000), model: attemptModel || pc.model,
-                  choices: [{ index: 0, message: { role: 'assistant', content: rawText }, finish_reason: 'stop' }],
-                };
-              }
-              if (result.synthetic) {
-                const content = String(completion?.choices?.[0]?.message?.content || '');
-                const calls = extractSyntheticToolCalls(content, toolDefs, requestBody.messages || [], pathHints);
-                const generated = syntheticToolResponse(attemptModel || pc.model, completion, calls, downstreamStream);
-                res.statusCode = 200;
-                res.setHeader('X-LazyDev-Synthetic-Tools', '1');
-                res.setHeader('X-LazyDev-Pollinations-Anonymous', '1');
-                res.setHeader('content-type', generated.contentType);
-                res.setHeader('content-length', Buffer.byteLength(generated.body));
-                res.end(generated.body);
-                return;
-              }
-              res.statusCode = 200;
-              res.setHeader('X-LazyDev-Pollinations-Anonymous', '1');
-              res.setHeader('content-type', 'application/json');
-              const bodyText = JSON.stringify(completion);
-              res.setHeader('content-length', Buffer.byteLength(bodyText));
-              res.end(bodyText);
-              return;
-            }
             if (result.synthetic) {
               let completion = null;
               try { completion = JSON.parse(result.body || '{}'); } catch (error) {
@@ -1439,7 +1402,6 @@ function shouldUseTemplateCodec(body, pc) {
 function activeProviderEnvKeys(provider) {
   if (provider.id === 'gemini') return ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GEMINI_BASE_URL', 'GEMINI_BASE_URL'];
   if (provider.id === 'anthropic') return ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL'];
-  if (provider.id === 'pollinations') return ['POLLINATIONS_API_KEY', 'POLLINATIONS_KEY', 'POLLINATIONS_TOKEN', 'OPENAI_API_KEY', 'OPENAI_BASE_URL'];
   // All remaining LazyDev providers use Kimi's OpenAI-compatible adapter or
   // the local Ollama proxy, so stale OpenAI env overrides must not replace the
   // URL/key that LazyDev just generated for this session.
@@ -1457,11 +1419,6 @@ function sanitizeKimiChildEnv(provider) {
 }
 function buildKimiModelEnv(provider, pc, proxy, budget) {
   const env = {};
-  if (provider.id === 'pollinations') {
-    env.POLLINATIONS_API_KEY = '';
-    env.POLLINATIONS_KEY = '';
-    env.POLLINATIONS_TOKEN = '';
-  }
   // Kimi Code's KIMI_MODEL_* family is an in-memory model override with higher
   // priority than default_model. This keeps the LazyDev inference route stable
   // even when native /login or /logout reloads the on-disk configuration.
@@ -2245,6 +2202,8 @@ async function chat() {
     LAZYDEV_VERSION: version,
     LAZYDEV_MODEL: pc.model,
     LAZYDEV_CONTEXT_EXTRA_MULTIPLIER: String(CONTEXT_EXTRA_MULTIPLIER),
+    LAZYDEV_TRANSIENT_RETRIES: String(PROVIDER_TRANSIENT_MAX_RETRIES),
+    LAZYDEV_READ_MAX_CHARS: process.env.LAZYDEV_READ_MAX_CHARS || '500000',
     LAZYDEV_CONTEXT_FIT_RATIO: '1',
     LAZYDEV_CONTEXT_RECENT_MESSAGES: String(CONTEXT_RECENT_MESSAGES),
   };

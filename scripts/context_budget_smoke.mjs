@@ -31,7 +31,7 @@ const TOKEN_SAVINGS_TARGET = 0.80;
 const MAX_SKILL_FRACTION = 0.24;
 const KIMI_PACKAGE = '@moonshot-ai/kimi-code';
 const OPENROUTER_FREE_MODEL = 'openrouter/free';
-const PROVIDER_TRANSIENT_MAX_RETRIES = Math.max(0, Math.min(4, Number(process.env.LAZYDEV_TRANSIENT_RETRIES || 2)));
+const PROVIDER_TRANSIENT_MAX_RETRIES = Math.max(0, Math.min(9, Number(process.env.LAZYDEV_TRANSIENT_RETRIES || 8)));
 const PROVIDER_TRANSIENT_BASE_MS = Math.max(250, Math.min(5000, Number(process.env.LAZYDEV_TRANSIENT_BASE_MS || 800)));
 const PROVIDER_TRANSIENT_MAX_MS = Math.max(PROVIDER_TRANSIENT_BASE_MS, Math.min(30000, Number(process.env.LAZYDEV_TRANSIENT_MAX_MS || 8000)));
 const TOKEN_CODEC_ENABLED = !['0','false','off','disabled'].includes(String(process.env.LAZYDEV_TOKEN_CODEC || 'auto').trim().toLowerCase());
@@ -72,7 +72,7 @@ const providers = [
   { id: 'groq', label: 'Groq', kind: 'openai', modelsUrl: 'https://api.groq.com/openai/v1/models', chatUrl: 'https://api.groq.com/openai/v1/chat/completions', env: 'GROQ_API_KEY' },
   { id: 'codebuddy', label: 'CodeBuddy', kind: 'codebuddy', modelsUrls: ['https://copilot.tencent.com/v3/config', 'https://api.codebuddy.ai/v1/models'], chatUrls: ['https://copilot.tencent.com/v2/chat/completions', 'https://api.codebuddy.ai/v1/chat/completions'], env: 'CODEBUDDY_API_KEY' },
   { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', modelsUrl: 'https://api.anthropic.com/v1/models', chatUrl: 'https://api.anthropic.com/v1/messages', env: 'ANTHROPIC_API_KEY' },
-  { id: 'pollinations', label: 'Pollinations', kind: 'pollinations', modelsUrl: 'https://text.pollinations.ai/models', chatUrl: 'https://text.pollinations.ai/openai', baseUrl: 'https://text.pollinations.ai/', env: null, auth: 'none', free: true },
+  { id: 'huggingface', label: 'Hugging Face', kind: 'openai', modelsUrl: 'https://router.huggingface.co/v1/models', chatUrl: 'https://router.huggingface.co/v1/chat/completions', baseUrl: 'https://router.huggingface.co/v1', env: 'HF_TOKEN' },
 ];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EFFICIENCY_POLICY_FILE = path.join(root, 'runtime', 'lazy-efficiency.md');

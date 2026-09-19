@@ -56,7 +56,7 @@ PROVIDERS: list[dict[str, Any]] = [
     {"id": "groq", "label": "Groq", "kind": "openai", "models": "https://api.groq.com/openai/v1/models", "base": "https://api.groq.com/openai/v1", "env": "GROQ_API_KEY"},
     {"id": "codebuddy", "label": "CodeBuddy", "kind": "openai", "models": ["https://copilot.tencent.com/v3/config", "https://api.codebuddy.ai/v1/models"], "base": "https://api.codebuddy.ai/v1", "env": "CODEBUDDY_API_KEY"},
     {"id": "anthropic", "label": "Anthropic", "kind": "anthropic", "models": "https://api.anthropic.com/v1/models", "base": "https://api.anthropic.com", "env": "ANTHROPIC_API_KEY"},
-    {"id": "pollinations", "label": "Pollinations", "kind": "pollinations", "models": "https://text.pollinations.ai/models", "base": "https://text.pollinations.ai/", "chat": "https://text.pollinations.ai/", "env": None, "auth": "none", "free": True, "legacyAnonymous": True},
+    {"id": "huggingface", "label": "Hugging Face", "kind": "openai", "models": "https://router.huggingface.co/v1/models", "base": "https://router.huggingface.co/v1", "chat": "https://router.huggingface.co/v1/chat/completions", "env": "HF_TOKEN"},
 ]
 
 SKILLS = [
@@ -77,14 +77,14 @@ KNOWN_UNSUPPORTED_REQUEST_FIELDS = {
     "prompt_cache_key",
     "safety_identifier",
 }
-PROXY_MAX_RETRIES = 2
+PROXY_MAX_RETRIES = 8
 PROXY_MAX_400_REPAIRS = 4
 DEFAULT_MODEL_CONTEXT = 16384
 DEFAULT_MODEL_OUTPUT = 8192
 CONTEXT_SAFETY_MARGIN = 1024
 CONTEXT_UNKNOWN_OUTPUT_FRACTION = 0.25
 CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768
-CONTEXT_EXTRA_MULTIPLIER = max(1.25, min(4.0, float(os.environ.get("LAZYDEV_CONTEXT_EXTRA_MULTIPLIER", "2.0") or 2.0)))
+CONTEXT_EXTRA_MULTIPLIER = max(1.25, min(4.0, float(os.environ.get("LAZYDEV_CONTEXT_EXTRA_MULTIPLIER", "1.6") or 1.6)))
 CONTEXT_FIT_RATIO = 1.0
 CONTEXT_RECENT_MESSAGES = max(4, min(20, int(os.environ.get("LAZYDEV_CONTEXT_RECENT_MESSAGES", "10") or 10)))
 CONTEXT_ARCHIVE_SNIPPET_CHARS = max(80, min(800, int(os.environ.get("LAZYDEV_CONTEXT_ARCHIVE_SNIPPET_CHARS", "240") or 240)))
@@ -99,7 +99,7 @@ PROVIDER_OUTPUT_HARD_CAPS = {
     "openai": 32768,
     "ollama": 32768,
     "anthropic": 65536,
-    "pollinations": 32768,
+    "huggingface": 32768,
 }
 MODEL_LIMIT_RULES = (
     # These rules provide numeric limits only. Tool capability is deliberately
@@ -207,7 +207,18 @@ def config_file() -> Path:
 
 def read_config() -> dict[str, Any]:
     value = json_load(config_file(), {})
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    providers_value = value.get("providers") if isinstance(value.get("providers"), dict) else {}
+    known_ids = {provider["id"] for provider in PROVIDERS}
+    for provider_id in list(providers_value):
+        if provider_id not in known_ids:
+            providers_value.pop(provider_id, None)
+    value["providers"] = providers_value
+    selected = value.get("activeProvider")
+    if selected is not None and selected not in known_ids:
+        value["activeProvider"] = "huggingface"
+    return value
 
 
 def write_config(value: dict[str, Any]) -> None:
@@ -266,28 +277,37 @@ def normalize_model(item: dict[str, Any], provider: dict[str, Any]) -> dict[str,
             "toolUseSource": "unknown",
         }
         return apply_model_limits(info, provider, raw) | {"id": raw, "name": item.get("displayName") or raw, "live": True}
-    if pid == "pollinations":
-        raw = str(item.get("name") or item.get("id") or item.get("model") or "").strip()
-        capabilities = item.get("capabilities") if isinstance(item.get("capabilities"), list) else []
-        explicit_tools = item.get("tools") if isinstance(item.get("tools"), bool) else None
-        tool_use = explicit_tools if explicit_tools is not None else (True if "tool_calling" in capabilities else None)
-        context = item.get("context_length") or item.get("contextWindow") or item.get("context_window")
-        output = item.get("max_output_tokens") or item.get("max_completion_tokens")
+    if pid == "huggingface":
+        raw = str(item.get("id") or item.get("name") or item.get("model") or "").strip()
+        records = item.get("providers") if isinstance(item.get("providers"), list) else []
+        records = [entry for entry in records if isinstance(entry, dict)]
+        live_records = [entry for entry in records if not entry.get("status") or str(entry.get("status")).lower() == "live"]
+        contexts = [_positive_int(entry.get("context_length")) for entry in live_records if _positive_int(entry.get("context_length"))]
+        outputs = [_positive_int(entry.get("max_completion_tokens")) or _positive_int(entry.get("max_output_tokens")) or _positive_int(entry.get("max_tokens")) for entry in live_records]
+        outputs = [value for value in outputs if value]
+        flags = [True if entry.get("supports_tools") is True else False if entry.get("supports_tools") is False else None for entry in live_records]
+        supported = item.get("supported_parameters") if isinstance(item.get("supported_parameters"), list) else []
+        tool_use = False if any(flag is False for flag in flags) else True if flags and all(flag is True for flag in flags) else (True if "tools" in supported else None)
+        context = min(contexts) if contexts else _positive_int(item.get("context_length"))
+        output = min(outputs) if outputs else (_positive_int(item.get("max_completion_tokens")) or _positive_int(item.get("max_output_tokens")))
         info = {
-            "id": raw,
-            "name": item.get("name") or raw,
-            "description": item.get("description") or "",
-            "context": context,
-            "output": output,
-            "toolUse": tool_use,
-            "toolUseSource": "live" if tool_use is not None else "unknown",
-            "reasoning": bool(item.get("reasoning") or "reasoning" in capabilities),
-            "capabilities": capabilities,
-            "aliases": item.get("aliases") if isinstance(item.get("aliases"), list) else [],
-            "inputModalities": item.get("input_modalities") if isinstance(item.get("input_modalities"), list) else [],
-            "outputModalities": item.get("output_modalities") if isinstance(item.get("output_modalities"), list) else [],
-            "free": True,
-            "freeTier": str(item.get("tier") or "").lower() == "anonymous" or bool(provider.get("free")),
+            "id": raw, "name": item.get("name") or raw, "description": str(item.get("description") or ""),
+            "context": context, "output": output, "toolUse": tool_use,
+            "toolUseSource": "live-provider-map" if tool_use is not None else "unknown",
+            "supportedParameters": supported,
+            "capabilities": item.get("capabilities") if isinstance(item.get("capabilities"), list) else [],
+            "inputModalities": ((item.get("architecture") or {}).get("input_modalities") if isinstance((item.get("architecture") or {}).get("input_modalities"), list) else []),
+            "outputModalities": ((item.get("architecture") or {}).get("output_modalities") if isinstance((item.get("architecture") or {}).get("output_modalities"), list) else []),
+            "providers": [
+                {"provider": entry.get("provider"), "status": entry.get("status"), "contextLength": _positive_int(entry.get("context_length")),
+                 "maxCompletionTokens": _positive_int(entry.get("max_completion_tokens")) or _positive_int(entry.get("max_output_tokens")) or _positive_int(entry.get("max_tokens")),
+                 "supportsTools": True if entry.get("supports_tools") is True else False if entry.get("supports_tools") is False else None,
+                 "throughput": entry.get("throughput") if isinstance(entry.get("throughput"), (int, float)) else None,
+                 "latencyMs": entry.get("first_token_latency_ms") if isinstance(entry.get("first_token_latency_ms"), (int, float)) else None,
+                 "isFree": entry.get("is_free") is True}
+                for entry in live_records
+            ],
+            "pricing": item.get("pricing") if isinstance(item.get("pricing"), dict) else {},
         }
         return apply_model_limits(info, provider, raw) | {"id": raw, "name": item.get("name") or raw, "live": True}
     if pid == "ollama":
@@ -368,8 +388,6 @@ def fetch_models(provider: dict[str, Any], api_key: str = "", base_url: str = ""
         url = f"{provider['models']}?key={urllib.parse.quote(api_key, safe='')}"
         data = request_json(url)
         raw = data.get("models", []) if isinstance(data, dict) else []
-    elif pid == "pollinations":
-        data = request_json(provider["models"], headers={"User-Agent": f"lazydev/{VERSION}"})
         if isinstance(data, list):
             raw = data
         elif isinstance(data, dict):
@@ -741,6 +759,13 @@ def _normalize_synthetic_call_args(name: str, args: dict[str, Any], tool_defs: l
                 normalized[required_name] = inferred
     if "path" in normalized and isinstance(normalized["path"], str):
         normalized["path"] = _canonical_tool_path(normalized["path"])
+    if re.match(r"^(read|readfile|readmediafile)$", str(name or ""), re.I) and "max_chars" in normalized:
+        configured_max = max(100000, min(500000, int(os.environ.get("LAZYDEV_READ_MAX_CHARS", "500000") or 500000)))
+        try:
+            requested = int(normalized["max_chars"])
+        except (TypeError, ValueError):
+            requested = 0
+        normalized["max_chars"] = min(max(100000, requested), configured_max) if requested > 0 else configured_max
     # A malformed synthetic call must never reach Kimi's strict tool validator.
     for required_name in required:
         if required_name not in normalized or normalized[required_name] in (None, ""):
@@ -1268,7 +1293,7 @@ class _ProviderProxy:
                     return self._send_json(400, {"error": {"message": "Request body must be an object"}})
                 original_model = str(outer.pc.get("model") or body.get("model") or "")
                 attempt_model = original_model
-                synthetic_tools_active = (outer.provider.get("id") == "pollinations" or outer.learned_no_tools or native_tool_capability(outer.pc) is False) and bool(_tool_definitions(body))
+                synthetic_tools_active = (outer.learned_no_tools or native_tool_capability(outer.pc) is False) and bool(_tool_definitions(body))
                 synthetic_tools_learned = outer.learned_no_tools
                 downstream_stream = bool(body.get("stream"))
                 body["model"] = original_model
@@ -1294,10 +1319,6 @@ class _ProviderProxy:
                         physical_output,
                     )
                     normalized_body = _normalize_provider_request(request_body, outer.provider, outer.pc)
-                    if outer.provider.get("id") == "pollinations":
-                        normalized_body["stream"] = False
-                        for field in ("tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"):
-                            normalized_body.pop(field, None)
                     normalized_body["model"] = attempt_model
                     outbound, removed_now = _strip_request_fields(normalized_body, removed_fields)
                     removed_fields |= removed_now
@@ -1387,43 +1408,6 @@ class _ProviderProxy:
                         self.close_connection = True
                         return
                     try:
-                        if outer.provider.get("id") == "pollinations":
-                            payload = response.read()
-                            raw_text = payload.decode("utf-8", "replace").strip()
-                            try:
-                                completion = json.loads(raw_text or "{}")
-                            except Exception:
-                                completion = {
-                                    "id": f"pollinations-{int(time.time() * 1000)}",
-                                    "object": "chat.completion",
-                                    "created": int(time.time()),
-                                    "model": attempt_model,
-                                    "choices": [{"index": 0, "message": {"role": "assistant", "content": raw_text}, "finish_reason": "stop"}],
-                                }
-                            if not isinstance(completion, dict) or not isinstance(completion.get("choices"), list):
-                                completion = {
-                                    "id": f"pollinations-{int(time.time() * 1000)}", "object": "chat.completion", "created": int(time.time()),
-                                    "model": attempt_model, "choices": [{"index": 0, "message": {"role": "assistant", "content": raw_text}, "finish_reason": "stop"}],
-                                }
-                            if synthetic_tools_active:
-                                choices = completion.get("choices") or []
-                                message = choices[0].get("message") if choices and isinstance(choices[0], dict) else {}
-                                content = message.get("content") if isinstance(message, dict) else ""
-                                calls = _extract_synthetic_tool_calls(str(content or ""), tool_defs, normalized_body.get("messages", []), outer.path_hints)
-                                response_headers, raw_response = _synthetic_tool_completion(attempt_model, completion, calls, downstream_stream)
-                                self.send_response(200)
-                                for key, value in response_headers.items(): self.send_header(key, value)
-                                self.send_header("Content-Length", str(len(raw_response)))
-                                self.send_header("X-LazyDev-Pollinations-Anonymous", "1")
-                                self.send_header("Connection", "close")
-                                self.end_headers(); self.wfile.write(raw_response); self.close_connection = True; return
-                            raw_response = json.dumps(completion, separators=(",", ":")).encode("utf-8")
-                            self.send_response(200)
-                            self.send_header("Content-Type", "application/json")
-                            self.send_header("Content-Length", str(len(raw_response)))
-                            self.send_header("X-LazyDev-Pollinations-Anonymous", "1")
-                            self.send_header("Connection", "close")
-                            self.end_headers(); self.wfile.write(raw_response); self.close_connection = True; return
                         if synthetic_tools_active:
                             payload = response.read()
                             try:
@@ -1483,8 +1467,6 @@ class _ProviderProxy:
 
     def upstream_url(self) -> str:
         base = normalize_url(self.pc.get("baseUrl") or self.provider.get("base") or "")
-        if self.provider.get("id") == "pollinations":
-            return base + "/" if not base.endswith("/") else base
         lowered = base.lower()
         if lowered.endswith("/v1") or lowered.endswith("/openai"):
             return base + "/chat/completions"
@@ -1507,7 +1489,7 @@ class _ProviderProxy:
             "Content-Length": str(len(json.dumps(body, separators=(",", ":")).encode("utf-8"))),
         }
         key = str(self.pc.get("apiKey", "") or "")
-        if key and self.provider.get("id") not in {"ollama", "pollinations"}:
+        if key and self.provider.get("id") != "ollama":
             headers["Authorization"] = f"Bearer {key}"
         payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
         path = target.path or "/"
@@ -1783,9 +1765,6 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     else:
         args += ["--agent", "default"]
     env = os.environ.copy()
-    if provider.get("id") == "pollinations":
-        for name in ("POLLINATIONS_API_KEY", "POLLINATIONS_KEY", "POLLINATIONS_TOKEN", "OPENAI_API_KEY", "OPENAI_BASE_URL"):
-            env.pop(name, None)
     env["KIMI_CODE_HOME"] = str(KIMI_HOME)
     env["KIMI_LOOP_MAX_STEPS_PER_TURN"] = "0"
     env["LAZYDEV_ARTIFACT_DIR"] = str(ARTIFACT_DIR)
@@ -1793,6 +1772,8 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     env["LAZYDEV_CONTEXT_DIR"] = str(HOME / ".lazydev")
     env["LAZYDEV_MODEL"] = str(pc.get("model"))
     env["LAZYDEV_CONTEXT_EXTRA_MULTIPLIER"] = str(CONTEXT_EXTRA_MULTIPLIER)
+    env["LAZYDEV_TRANSIENT_RETRIES"] = str(PROXY_MAX_RETRIES)
+    env["LAZYDEV_READ_MAX_CHARS"] = os.environ.get("LAZYDEV_READ_MAX_CHARS", "500000")
     env["LAZYDEV_CONTEXT_FIT_RATIO"] = str(CONTEXT_FIT_RATIO)
     env["LAZYDEV_CONTEXT_RECENT_MESSAGES"] = str(CONTEXT_RECENT_MESSAGES)
     for name in list(env):

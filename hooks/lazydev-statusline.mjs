@@ -26,7 +26,12 @@ function fmt(n) {
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 100_000 ? 0 : 1).replace(/\.0$/, '')}k`;
   return String(n);
 }
-const pct = size > 0 ? Math.max(0, Math.min(100, (used / size) * 100)) : 0;
+const nativePct = size > 0 ? Math.max(0, Math.min(100, (used / size) * 100)) : 0;
+const virtualMultiplier = Math.max(1.25, Math.min(4, Number(process.env.LAZYDEV_CONTEXT_EXTRA_MULTIPLIER || 1.6)));
+const virtualSize = size > 0 ? Math.max(size, Math.round(size * virtualMultiplier)) : 0;
+const virtualPct = virtualSize > 0 ? Math.max(0, Math.min(100, (used / virtualSize) * 100)) : 0;
 const model = String(data?.model?.display_name || data?.model?.name || '').trim();
-const contextText = size > 0 ? `context: ${pct.toFixed(pct >= 10 ? 0 : 1)}% (${fmt(Math.min(used, size))}/${fmt(size)})` : `context: ${fmt(used)}`;
+const contextText = size > 0
+  ? `context: ${nativePct.toFixed(nativePct >= 10 ? 0 : 1)}% (${fmt(Math.min(used, size))}/${fmt(size)} native) · virtual: ${virtualPct.toFixed(virtualPct >= 10 ? 0 : 1)}% (${fmt(Math.min(used, virtualSize))}/${fmt(virtualSize)})`
+  : `context: ${fmt(used)}`;
 process.stdout.write(model ? `${contextText} · ${model}` : contextText);
