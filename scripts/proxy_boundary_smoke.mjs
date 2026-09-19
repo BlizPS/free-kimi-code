@@ -8,7 +8,7 @@ const launcher = fs.readFileSync(path.join(root, 'scripts', 'lazydev.mjs'), 'utf
 const agent = fs.readFileSync(path.join(root, 'agents', 'lazydev.md'), 'utf8');
 const policy = JSON.parse(fs.readFileSync(path.join(root, 'runtime', 'token-policy.json'), 'utf8'));
 
-assert.ok(launcher.includes("const launchArgs = [...invocation.args, '--add-dir', outputDirectory()];"));
+assert.match(launcher, /const artifactDir = ensureOutputDirectory\(\);\n  const launchArgs = \[\.\.\.invocation\.args, '--add-dir', artifactDir\];/);
 assert.match(launcher, /else launchArgs\.push\('--agent', 'default'\);/);
 assert.match(launcher, /KIMI_LOOP_MAX_STEPS_PER_TURN: '0'/);
 assert.match(launcher, /`max_steps_per_turn = 0`,/);

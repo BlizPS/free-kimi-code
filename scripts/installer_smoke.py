@@ -24,6 +24,8 @@ checks=[
     ('install.ps1', 'Existing Kimi sessions and configuration were left in place.', ps),
     ('install.ps1', 'Refresh-ExistingLazyDevLaunchers', ps),
     ('install.ps1', '$LazyInstallComplete', ps),
+    ('install.ps1', 'Invoke-WebRequest -UseBasicParsing -Uri $KimiInstallUrl -OutFile $kimiInstallerPath', ps),
+    ('install.ps1', 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File $kimiInstallerPath', ps),
 ]
 
 checks += [
@@ -62,10 +64,16 @@ if '(Test-VersionAtLeast $KimiCurrentVersion $KimiVersion)' not in ps:
     errors.append('install.ps1: Kimi version check must skip newer compatible installations')
 if 'ensure_legacy_launcher_targets' not in sh or 'canonical="$LAZYDEV_BIN_DIR/lazydev"' not in sh:
     errors.append('install.sh: compatibility launcher reconciliation missing canonical launcher copy')
+if 'for dir in "$HOME/.local/bin" "${PREFIX:-}/bin"' in sh:
+    errors.append('install.sh: must not target /bin accidentally when PREFIX is unset')
 
 for name, text in [('install.sh', sh), ('install.ps1', ps)]:
     if 'npm install' in text.lower() or 'npm.cmd install' in text.lower():
         errors.append(f'{name}: installer must not install through npm')
+if 'ScriptBlock]::Create' in ps or 'scriptblock]::Create' in ps:
+    errors.append('install.ps1: must not parse downloaded bytes with ScriptBlock.Create')
+if 'scriptblock]::Create' in (ROOT/'scripts/lazydev.mjs').read_text(encoding='utf-8').lower():
+    errors.append('scripts/lazydev.mjs: Windows installer hint still uses ScriptBlock.Create')
 if pkg.get('version') != '1.0.0': errors.append('package version is not 1.0.0')
 if pkg.get('homepage') != 'https://github.com/BlizPS/lazy-developer-free-kimi-code': errors.append('package homepage mismatch')
 if pkg.get('repository',{}).get('url') != 'git+https://github.com/BlizPS/lazy-developer-free-kimi-code.git': errors.append('package repository URL mismatch')

@@ -814,7 +814,7 @@ function ensureKimiInstalled() {
   console.error(red(`Lazy Developer requires Kimi Code ${KIMI_VERSION}.`));
   console.error('Install it with the Lazy Developer installer, then run: lazydev chat');
   console.error('macOS/Linux: curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.sh" | sh');
-  console.error('Windows PowerShell: & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1")))');
+  console.error('Windows PowerShell: irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1" -OutFile "$env:TEMP\lazydev-install.ps1"; & "$env:TEMP\lazydev-install.ps1"');
   return false;
 }
 function tomlQuote(text) { return JSON.stringify(String(text)); }
@@ -1535,7 +1535,8 @@ async function chat() {
   // Do not pass the legacy explicit-config flag: recent standalone builds
   // resolve their runtime config from KIMI_CODE_HOME instead.
   // The config written above is therefore the canonical runtime configuration.
-  const launchArgs = [...invocation.args, '--add-dir', outputDirectory()];
+  const artifactDir = ensureOutputDirectory();
+  const launchArgs = [...invocation.args, '--add-dir', artifactDir];
   const workDirIndex = process.argv.indexOf('--work-dir');
   if (workDirIndex >= 0 && process.argv[workDirIndex + 1]) launchArgs.push('--work-dir', process.argv[workDirIndex + 1]);
   const mode = process.argv.includes('--new') ? 'new' : process.argv.includes('--sessions') || process.argv.includes('--session') ? 'sessions' : process.argv.includes('--resume') || process.argv.includes('--continue') ? 'continue' : 'new';
