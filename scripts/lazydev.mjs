@@ -23,6 +23,7 @@ import { generateDesignSystem } from '../systems/ui/pro/index.mjs';
 import { buildLanguageFrame, getLanguageReport } from '../systems/languages/index.mjs';
 import { buildGeminiRetryRequest, chunkFinishReason, chunkHasVisibleOutput, geminiOpenAIEndpoint, parseSseEvent, prepareGeminiRequest, responseHasUsableOutput, streamNeedsGeminiRetry } from '../runtime/gemini-resilience.mjs';
 import { compressAgenticMessages, FOVEANCE_DEFAULTS } from '../systems/token/foveance.mjs';
+import { VirtualContextStore, extractContextPaths } from '../systems/context/virtual-store.mjs';
 
 const version = '1.0.0';
 const TOKEN_SAVINGS_FLOOR = 0.75;
@@ -46,7 +47,9 @@ const TOKEN_CODEC_TEMPLATE_MODE = (() => {
 })();
 const TOKEN_CODEC_TEMPLATE_PRESSURE = Math.max(0.55, Math.min(0.95, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_PRESSURE || 0.78)));
 const CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768;
-const CONTEXT_EXTRA_MULTIPLIER = Math.max(1.25, Math.min(4, Number(process.env.LAZYDEV_CONTEXT_EXTRA_MULTIPLIER || 1.6)));
+const CONTEXT_EXTRA_MULTIPLIER = Math.max(1.25, Math.min(4, Number(process.env.LAZYDEV_CONTEXT_EXTRA_MULTIPLIER || 2.0)));
+const VIRTUAL_CONTEXT_BUDGET_FRACTION = Math.max(0.08, Math.min(0.30, Number(process.env.LAZYDEV_VIRTUAL_CONTEXT_BUDGET_FRACTION || 0.20)));
+const VIRTUAL_CONTEXT_MAX_BUDGET = Math.max(2048, Math.min(32768, Number(process.env.LAZYDEV_VIRTUAL_CONTEXT_MAX_BUDGET || 16000)));
 const CONTEXT_FIT_RATIO = 1;
 const CONTEXT_RECENT_MESSAGES = Math.max(4, Math.min(20, Number(process.env.LAZYDEV_CONTEXT_RECENT_MESSAGES || 10)));
 const CONTEXT_ARCHIVE_SNIPPET_CHARS = Math.max(80, Math.min(800, Number(process.env.LAZYDEV_CONTEXT_ARCHIVE_SNIPPET_CHARS || 240)));
@@ -478,16 +481,19 @@ function normalizeSyntheticCallArgs(name, args = {}, toolDefs = [], messages = [
   const properties = parameters.properties && typeof parameters.properties === 'object' ? parameters.properties : {};
   const aliases = { path: ['file','filepath','file_path','filename','target'], content: ['text','body','data'], pattern: ['query'] };
   const inferPath = () => {
-    if (pathHints.length) return pathHints[pathHints.length - 1];
-    const pattern = /(?:\/storage\/emulated\/0\/|storage\/emulated\/0\/|(?:^|\s)lazydevfile\/)[^\s<>"']+|[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\.(?:html?|css|js|mjs|json|md|txt|py|ts|tsx|jsx)/ig;
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const message = messages[i];
-      if (!message || typeof message !== 'object') continue;
-      const content = Array.isArray(message.content) ? message.content.map(block => block?.text ?? block?.content ?? '').join('\n') : String(message.content || '');
-      const matches = [...content.matchAll(pattern)];
-      if (matches.length) return canonicalToolPath(matches[matches.length - 1][0]);
-    }
-    return null;
+    // Never borrow a path from the entire transcript. A stale path is worse than
+    // a missing argument because it can silently open an unrelated HTML file.
+    const recentUser = [...messages].reverse().find((message) => message && message.role === 'user');
+    const content = recentUser
+      ? (Array.isArray(recentUser.content) ? recentUser.content.map(block => block?.text ?? block?.content ?? '').join('\n') : String(recentUser.content || ''))
+      : '';
+    const explicit = extractContextPaths(content).map(canonicalToolPath);
+    if (explicit.length) return explicit[explicit.length - 1];
+    const relevantHint = [...pathHints].reverse().find((candidate) => {
+      const base = path.basename(candidate).toLowerCase();
+      return /(?:html?|css|js|mjs|json|md|txt|py|ts|tsx|jsx)$/u.test(base) && content.toLowerCase().includes(base);
+    });
+    return relevantHint || null;
   };
   for (const key of required) {
     if (normalized[key] !== undefined && normalized[key] !== null && normalized[key] !== '') continue;
@@ -532,58 +538,96 @@ function messageContentText(message) {
   if (Array.isArray(message?.content)) return message.content.map(block => block?.text ?? block?.content ?? '').join('\n');
   try { return message?.content == null ? '' : JSON.stringify(message.content); } catch { return String(message?.content || ''); }
 }
-function fitMessagesToContext(messages, context, outputCap) {
-  const source = Array.isArray(messages) ? messages.map(m => (m && typeof m === 'object' ? { ...m } : m)) : [];
+function userAndRecentText(messages = [], recent = 6) {
+  const source = Array.isArray(messages) ? messages : [];
+  const start = Math.max(0, source.length - Math.max(1, recent));
+  return source.slice(start).map((message) => {
+    if (!message || typeof message !== 'object') return '';
+    return messageContentText(message);
+  }).filter(Boolean).join('\n');
+}
+function buildVirtualContextQuery(messages = []) {
+  const source = Array.isArray(messages) ? messages : [];
+  const lastUser = [...source].reverse().find((message) => message && message.role === 'user');
+  const recentText = userAndRecentText(source, 6);
+  const primary = lastUser ? messageContentText(lastUser) : recentText;
+  return `${primary}\n${recentText}`.trim().slice(0, 10000);
+}
+function activeContextPaths(messages = []) {
+  const source = Array.isArray(messages) ? messages : [];
+  const lastUser = [...source].reverse().find((message) => message && message.role === 'user');
+  const recent = userAndRecentText(source, 6);
+  const promptPaths = lastUser ? extractContextPaths(messageContentText(lastUser)) : [];
+  const recentPaths = extractContextPaths(recent);
+  return [...new Set([...promptPaths, ...recentPaths])].slice(-12);
+}
+function writeVirtualContextSnapshot(store) {
+  try {
+    const home = process.env.KIMI_CODE_HOME || path.join(process.env.HOME || process.env.USERPROFILE || process.cwd(), '.kimi-code');
+    fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(home, 'lazydev-virtual-context.json'), JSON.stringify(store.snapshot(), null, 2), { mode: 0o600 });
+  } catch {}
+}
+function injectVirtualContext(messages, block) {
+  if (!block) return messages;
+  const source = Array.isArray(messages) ? [...messages] : [];
+  const withoutOld = source.filter((message) => !(message && message.role === 'system' && /<lazydev-virtual-context>/u.test(messageContentText(message))));
+  const firstNonSystem = withoutOld.findIndex((message) => message && message.role !== 'system');
+  const index = firstNonSystem < 0 ? withoutOld.length : firstNonSystem;
+  withoutOld.splice(index, 0, { role: 'system', content: block });
+  return withoutOld;
+}
+function fitMessagesToContext(messages, context, outputCap, virtualStore = null) {
+  let source = Array.isArray(messages) ? messages.map((m) => (m && typeof m === 'object' ? { ...m } : m)) : [];
   const physical = Math.max(1024, Number(context) || 16384);
   const safeOutput = Math.max(256, Math.min(Number(outputCap) || 8192, Math.max(256, Math.floor(physical * 0.25)), CONTEXT_ABSOLUTE_OUTPUT_CAP));
-  // Keep the model's full declared context window; trim only for output headroom.
+  // Never reduce the model's declared context window. Only reserve output headroom.
   const target = Math.max(1024, physical - safeOutput - 512);
   const before = estimateMessagesTokens(source);
-  if (before <= target) return { messages: source, changed: false, before, after: before, virtualMultiplier: CONTEXT_EXTRA_MULTIPLIER };
-  const working = source;
-  const recentCut = Math.max(0, working.length - CONTEXT_RECENT_MESSAGES);
-  for (let i = 0; i < recentCut; i += 1) {
-    const message = working[i];
-    if (!message || typeof message !== 'object') continue;
-    const text = messageContentText(message);
-    if (!text) continue;
-    const limit = message.role === 'tool' || message.role === 'function' ? CONTEXT_TOOL_RESULT_CHARS : Math.max(700, CONTEXT_ARCHIVE_SNIPPET_CHARS * 3);
-    message.content = compactMessageText(text, limit);
-    if (estimateMessagesTokens(working) <= target) break;
-  }
-  if (estimateMessagesTokens(working) > target) {
-    const recent = working.slice(-CONTEXT_RECENT_MESSAGES);
-    const older = working.slice(0, -CONTEXT_RECENT_MESSAGES);
-    const lines = [];
-    for (const message of older) {
-      if (!message || typeof message !== 'object') continue;
-      const text = messageContentText(message);
-      if (!text) continue;
-      const paths = [...text.matchAll(/(?:\/storage\/emulated\/0\/|storage\/emulated\/0\/|lazydevfile\/)[^\s<>"']+/ig)].slice(-3).map(m => m[0]);
-      lines.push(`[${message.role || 'message'}]${paths.length ? ` files=${paths.join(',')}` : ''} ${compactMessageText(text, CONTEXT_ARCHIVE_SNIPPET_CHARS)}`);
-    }
-    const archive = compactMessageText(`[LazyDev context archive — older conversation kept outside the physical model window]\n${lines.join('\n')}`, Math.max(600, Math.floor(Math.max(600, target * 3.6 * 0.18))));
-    const systems = working.filter(m => m && typeof m === 'object' && m.role === 'system');
-    working.splice(0, working.length, ...systems, ...(lines.length ? [{ role: 'user', content: archive }] : []), ...recent);
-  }
-  while (estimateMessagesTokens(working) > target) {
-    const removable = working.findIndex((message, index) => message && typeof message === 'object' && message.role !== 'system' && index < working.length - 3);
+  if (before <= target) return { messages: source, changed: false, before, after: before, virtualMultiplier: CONTEXT_EXTRA_MULTIPLIER, virtualUsed: 0, virtualHits: 0 };
+
+  const store = virtualStore || new VirtualContextStore({ multiplier: CONTEXT_EXTRA_MULTIPLIER });
+  store.setPhysicalContext(physical);
+  const query = buildVirtualContextQuery(source);
+  const focusPaths = activeContextPaths(source);
+  store.ingestMessages(source, CONTEXT_RECENT_MESSAGES);
+  const virtualBudget = Math.max(2048, Math.min(VIRTUAL_CONTEXT_MAX_BUDGET, Math.floor(target * VIRTUAL_CONTEXT_BUDGET_FRACTION)));
+  const retrieved = store.retrieve(query, focusPaths, virtualBudget);
+  const virtualBlock = store.render(retrieved, focusPaths);
+  source = injectVirtualContext(source, virtualBlock);
+  writeVirtualContextSnapshot(store);
+
+  const systems = source.filter((message) => message && typeof message === 'object' && message.role === 'system');
+  const recent = source.slice(-CONTEXT_RECENT_MESSAGES).filter((message) => !(message && message.role === 'system'));
+  source = [...systems, ...recent];
+
+  while (estimateMessagesTokens(source) > target) {
+    const removable = source.findIndex((message, index) => message && typeof message === 'object' && message.role !== 'system' && index < source.length - 3);
     if (removable < 0) break;
-    working.splice(removable, 1);
+    source.splice(removable, 1);
   }
-  while (estimateMessagesTokens(working) > target) {
+  while (estimateMessagesTokens(source) > target) {
     let changed = false;
-    for (const message of working) {
+    for (const message of source) {
       if (!message || typeof message !== 'object' || message.role === 'system') continue;
       const text = messageContentText(message);
       if (text.length <= 240) continue;
       message.content = compactMessageText(text, Math.max(240, Math.floor(text.length / 2)));
       changed = true;
-      if (estimateMessagesTokens(working) <= target) break;
+      if (estimateMessagesTokens(source) <= target) break;
     }
     if (!changed) break;
   }
-  return { messages: working, changed: true, before, after: estimateMessagesTokens(working), virtualMultiplier: CONTEXT_EXTRA_MULTIPLIER };
+  writeVirtualContextSnapshot(store);
+  return {
+    messages: source,
+    changed: true,
+    before,
+    after: estimateMessagesTokens(source),
+    virtualMultiplier: CONTEXT_EXTRA_MULTIPLIER,
+    virtualUsed: retrieved.tokens,
+    virtualHits: retrieved.segments.length,
+  };
 }
 
 function syntheticToolDefinitions(body = {}) {
@@ -949,6 +993,7 @@ async function createProxy(provider, pc) {
   const token = crypto.randomBytes(24).toString('hex');
   let learnedNoTools = false;
   const pathHints = [];
+  const virtualContextStore = new VirtualContextStore({ multiplier: CONTEXT_EXTRA_MULTIPLIER });
   const server = http.createServer((req, res) => {
     const expected = `Bearer ${token}`;
     if (req.headers.authorization !== expected) {
@@ -1080,7 +1125,7 @@ async function createProxy(provider, pc) {
             requestBody = stripToolRequestFields(requestBody);
             requestBody.stream = false;
           }
-          const fit = fitMessagesToContext(requestBody.messages, Number(effectiveModelInfo(provider, pc).contextLimit) || 16384, Number(effectiveModelInfo(provider, pc).outputLimit) || 8192);
+          const fit = fitMessagesToContext(requestBody.messages, Number(effectiveModelInfo(provider, pc).contextLimit) || 16384, Number(effectiveModelInfo(provider, pc).outputLimit) || 8192, virtualContextStore);
           requestBody.messages = fit.messages;
           const outboundBody = normalizeOpenAICompatibleRequest(requestBody, provider, pc, removedFields);
           const result = await new Promise((resolve, reject) => {

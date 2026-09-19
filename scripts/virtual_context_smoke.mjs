@@ -8,5 +8,6 @@ assert.match(s, /context_window_size/);
 assert.match(s, /LAZYDEV_CONTEXT_EXTRA_MULTIPLIER \|\| 1\.6/);
 assert.match(s, /native/);
 assert.match(s, /virtual:/);
+assert.match(s, /storedTokens|capacityTokens|archive/);
 assert.match(s, /Math\.max\(size, Math\.round\(size \* virtualMultiplier\)\)/);
 console.log('PASS: statusline exposes native context separately from a virtual archive/display window');

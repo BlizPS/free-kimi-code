@@ -21,7 +21,7 @@ export function buildSeoTaskFrame(prompt = '') {
 export function buildSeoSystemPrompt() {
   return [
     '## LazyDev SEO System',
-    'SEO work is a technical implementation and verification task, not a ranking promise. Research current search guidance before policy-sensitive decisions, then inspect the real application.',
+    'SEO work is a technical implementation and verification task, not a ranking promise. Run one focused research pass for current search guidance, cache/reuse the evidence for the turn, then inspect the real application.',
     'Indexable pages need unique descriptive titles and useful meta descriptions, an intentional canonical, semantic HTML, crawlable links, coherent content, and explicit indexability controls. Preserve established URL structure during redesigns unless the user requests a migration.',
     "JavaScript must not hide the page's essential meaning from crawlers. Where content is separately addressable, use real URLs and ensure important content is present in rendered HTML or an equivalent crawlable representation.",
     'Structured data is optional enhancement, not filler: it must be valid, relevant, accurate, and consistent with visible content. Prefer JSON-LD and validate it when possible.',

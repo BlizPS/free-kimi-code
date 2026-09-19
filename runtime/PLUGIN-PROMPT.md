@@ -34,3 +34,7 @@ Use the shared token system in `systems/token/`: progressive disclosure, bounded
 Taste is integrated into the native UI system and is not exposed as an additional Skill. The discoverable LazyDev Skill set remains exactly four: lazy-developer, lazy-debug, lazy-review, lazy-test.
 For 3D/WebGL/Three.js, research a concrete working example and verify current API/version documentation before implementation.
 For SEO, research current search guidance and verify actual metadata, canonical, crawlability, indexability, structured data, and performance before claiming completion.
+
+## Focused context
+
+Read the smallest relevant project surface first. Do not bulk-read unrelated HTML files. When the user names a file, treat it as the active file; inspect another HTML file only when the current task explicitly covers multiple pages or the file is directly referenced as a dependency. Virtual context is a retrieval archive, not an enlarged model window: retrieve by current-task relevance and file affinity, then use the returned evidence instead of replaying stale transcript content.

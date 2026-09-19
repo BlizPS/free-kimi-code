@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
 let raw = '';
 process.stdin.setEncoding('utf8');
 for await (const chunk of process.stdin) raw += chunk;
@@ -31,7 +33,19 @@ const virtualMultiplier = Math.max(1.25, Math.min(4, Number(process.env.LAZYDEV_
 const virtualSize = size > 0 ? Math.max(size, Math.round(size * virtualMultiplier)) : 0;
 const virtualPct = virtualSize > 0 ? Math.max(0, Math.min(100, (used / virtualSize) * 100)) : 0;
 const model = String(data?.model?.display_name || data?.model?.name || '').trim();
+let virtualStats = null;
+try {
+  const home = process.env.KIMI_CODE_HOME || path.join(process.env.HOME || process.cwd(), '.kimi-code');
+  const snapshot = path.join(home, 'lazydev-virtual-context.json');
+  virtualStats = fs.existsSync(snapshot)
+    ? JSON.parse(fs.readFileSync(snapshot, 'utf8'))
+    : null;
+} catch {}
+const virtualText = virtualStats?.capacityTokens
+  ? `virtual: ${fmt(virtualStats.storedTokens || 0)}/${fmt(virtualStats.capacityTokens)} stored · ${virtualStats.lastHits || 0} hits`
+  : (size > 0 ? `virtual: ${virtualPct.toFixed(virtualPct >= 10 ? 0 : 1)}% archive ${fmt(virtualSize)}` : '');
+const suffix = virtualText ? ` · ${virtualText}` : '';
 const contextText = size > 0
-  ? `context: ${nativePct.toFixed(nativePct >= 10 ? 0 : 1)}% (${fmt(Math.min(used, size))}/${fmt(size)} native) · virtual: ${virtualPct.toFixed(virtualPct >= 10 ? 0 : 1)}% (${fmt(Math.min(used, virtualSize))}/${fmt(virtualSize)})`
-  : `context: ${fmt(used)}`;
+  ? `context: ${nativePct.toFixed(nativePct >= 10 ? 0 : 1)}% (${fmt(Math.min(used, size))}/${fmt(size)} native)${suffix}`
+  : `context: ${fmt(used)}${suffix}`;
 process.stdout.write(model ? `${contextText} · ${model}` : contextText);

@@ -52,6 +52,8 @@ def handle(payload: dict, state_dir: str | Path | None = None) -> tuple[int, str
             "session": session,
             "domains": domains,
             "researched": False,
+            "attempted": False,
+            "writeBlocked": False,
             "sources": [],
             "timestamp": int(time.time()),
         })
@@ -67,7 +69,9 @@ def handle(payload: dict, state_dir: str | Path | None = None) -> tuple[int, str
         if tool in SEARCH_TOOLS or any(token.lower() == tool.lower() for token in SEARCH_TOOLS):
             output = payload.get("tool_output") or payload.get("output") or ""
             source_text = str(output)[:2000]
-            state["researched"] = True
+            state["attempted"] = True
+            sample = str(output).strip()
+            state["researched"] = bool(sample and not re.search(r"network error|failed to fetch|429|quota|timed out|error", sample, re.I))
             state.setdefault("sources", []).append({"tool": tool, "sample": source_text[:500]})
             state["sources"] = state["sources"][-6:]
             state["timestamp"] = int(time.time())
@@ -76,13 +80,10 @@ def handle(payload: dict, state_dir: str | Path | None = None) -> tuple[int, str
 
     if event == "PreToolUse":
         tool = str(payload.get("tool_name") or payload.get("name") or "")
-        if domains and tool in WRITE_TOOLS and not state.get("researched"):
-            domain = " + ".join(domains)
-            return 2, (
-                f"Research gate: this {domain} task requires concrete external research before the first code write. "
-                "Use WebSearch/search_web (or another configured search tool) to inspect at least one working example "
-                "or current authoritative source, then continue."
-            )
+        if domains and tool in WRITE_TOOLS and not state.get("researched") and not state.get("attempted") and not state.get("writeBlocked"):
+            state["writeBlocked"] = True
+            save(state_file, root, state)
+            return 2, "Research required once: run one focused external search, then continue."
         return 0, ""
 
     return 0, ""
