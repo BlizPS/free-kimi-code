@@ -1,18 +1,20 @@
 const DEFAULTS = Object.freeze({
   reserveRatio: 0.08,
-  reserveFloor: 12000,
-  inputFloor: 8192,
+  reserveFloor: 1024,
+  inputFloor: 1024,
+  outputFraction: 0.25,
+  absoluteOutputCap: 16384,
 });
 
 export function computeTokenBudget(input = {}) {
-  const max = Math.max(16384, Number(input.maxContext ?? input.contextLimit ?? 131072));
-  const output = Math.max(1024, Number(input.maxOutput ?? input.outputLimit ?? 8192));
-  const reserve = Math.min(
-    Math.max(DEFAULTS.reserveFloor, output * 2),
-    Math.max(16384, Math.round(max * (Number(input.reserveRatio) || DEFAULTS.reserveRatio))),
-  );
+  const max = Math.max(1024, Number(input.maxContext ?? input.contextLimit ?? 16384));
+  const rawOutput = Math.max(256, Number(input.maxOutput ?? input.outputLimit ?? 8192));
+  const output = Math.max(256, Math.min(rawOutput, Math.floor(max * (Number(input.outputFraction) || DEFAULTS.outputFraction)), Number(input.absoluteOutputCap) || DEFAULTS.absoluteOutputCap));
+  const reserve = max > 4096
+    ? Math.min(Math.max(DEFAULTS.reserveFloor, output), Math.max(DEFAULTS.reserveFloor, Math.floor(max / 4)))
+    : Math.max(512, Math.floor(max / 6));
   const inputBudget = Math.max(DEFAULTS.inputFloor, max - reserve);
-  const trigger = Math.min(0.94, Math.max(0.72, Number(input.compactionRatio) || 0.88));
+  const trigger = Math.max(0.60, Math.min(0.90, Number(input.compactionRatio) || (max - reserve - 512) / Math.max(1, max)));
   return Object.freeze({ max, output, reserve, input: inputBudget, trigger });
 }
 

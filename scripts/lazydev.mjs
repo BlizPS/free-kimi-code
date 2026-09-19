@@ -45,6 +45,7 @@ const TOKEN_CODEC_TEMPLATE_MODE = (() => {
   return ['on','true','1','auto','off','false','0','disabled'].includes(value) ? (value === 'true' || value === '1' ? 'on' : value === 'false' || value === '0' || value === 'disabled' ? 'off' : value) : 'auto';
 })();
 const TOKEN_CODEC_TEMPLATE_PRESSURE = Math.max(0.55, Math.min(0.95, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_PRESSURE || 0.78)));
+const CONTEXT_ABSOLUTE_OUTPUT_CAP = 16384;
 const TOKEN_CODEC_TEMPLATE_MIN_SAVED = Math.max(64, Math.min(4096, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_MIN_SAVED || 128)));
 const ANTIGRAVITY_AGENT = 'antigravity-preview-09-2026';
 const KIMI_BUILTIN_TOOLS = [
@@ -270,13 +271,37 @@ function migrateDisabledModelConfig(cfg) {
   return cfg;
 }
 function activeProvider(cfg) { return providers.find((x) => x.id === cfg.activeProvider) || providers.find((x) => x.id === 'gemini') || providers[0]; }
+async function fetchOpenRouterEndpointLimits(modelId, apiKey) {
+  const id = String(modelId || '').trim();
+  if (!id || !id.includes('/') || id === OPENROUTER_FREE_MODEL) return {};
+  const [author, ...slugParts] = id.split('/');
+  const slug = slugParts.join('/');
+  try {
+    const url = `https://openrouter.ai/api/v1/models/${encodeURIComponent(author)}/${encodeURIComponent(slug)}/endpoints`;
+    const data = await requestJson(url, { timeout: 10000, headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} });
+    const endpoints = Array.isArray(data?.data?.endpoints) ? data.data.endpoints : [];
+    if (!endpoints.length) return {};
+    const contexts = endpoints.map((x) => Number(x?.context_length) || 0).filter((x) => x > 0);
+    const outputs = endpoints.map((x) => Number(x?.max_completion_tokens) || 0).filter((x) => x > 0);
+    const supportedFlags = endpoints.map((x) => Array.isArray(x?.supported_parameters) ? x.supported_parameters.includes('tools') : null).filter((x) => x !== null);
+    const out = {};
+    if (contexts.length) { out.contextLimit = Math.min(...contexts); out.inputLimit = Math.min(...contexts); out.contextSource = 'endpoint-min'; }
+    if (outputs.length) { out.outputLimit = Math.min(...outputs); out.outputSource = 'endpoint-min'; }
+    if (supportedFlags.length) { out.toolUse = supportedFlags.every(Boolean); out.toolUseSource = 'endpoint'; }
+    return out;
+  } catch { return {}; }
+}
 async function verifyLiveModel(provider, pc) {
   if (!pc?.model || (providerRequiresApiKey(provider) && !pc?.apiKey)) return { status: 'not-configured' };
   try {
     const models = await fetchModels(provider, pc.apiKey);
     const found = models.find((m) => m.id === pc.model);
     if (!found) return { status: 'missing', models };
-    if (provider.id === 'openrouter' && found.toolUse === false) return { status: 'no-tools', model: found, models };
+    if (provider.id === 'openrouter') {
+      const endpointLimits = await fetchOpenRouterEndpointLimits(found.id, pc.apiKey);
+      if (Object.keys(endpointLimits).length) Object.assign(found, endpointLimits);
+      if (found.toolUse === false) return { status: 'no-tools', model: found, models };
+    }
     return { status: 'ok', model: found, models };
   } catch (error) {
     return { status: 'unverified', error: error instanceof Error ? error.message : String(error) };
@@ -710,14 +735,37 @@ function unsupportedRequestFieldsFromError(text) {
   }
   return names;
 }
+function estimateRequestTokens(body) {
+  try {
+    const payload = { ...(body || {}) }; delete payload.max_tokens; delete payload.max_completion_tokens;
+    return Math.max(1, Math.ceil(JSON.stringify(payload).length / 3.6));
+  } catch { return 0; }
+}
+function contextLimitFromError(detail) {
+  const text = String(detail || '');
+  const patterns = [/maximum context length (?:is|of)\s*(\d+)/i, /context (?:window|length)\s*(?:is|of)\s*(\d+)/i, /max(?:imum)?_prompt_tokens\D+(\d+)/i];
+  for (const re of patterns) { const m = text.match(re); if (m && Number(m[1]) > 0) return Number(m[1]); }
+  return null;
+}
+function outputLimitFromError(detail) {
+  const text = String(detail || '');
+  const patterns = [/maximum output tokens\D+(\d+)/i, /max(?:imum)\s*(?:completion|output)\s*tokens\D+(\d+)/i, /max_tokens[^\d]{0,24}(?:maximum|limit|allowed)[^\d]{0,24}(\d+)/i];
+  for (const re of patterns) { const m = text.match(re); if (m && Number(m[1]) > 0) return Number(m[1]); }
+  return null;
+}
+function requestOutputCap(body, provider, pc) {
+  const info = effectiveModelInfo(provider, pc);
+  const context = Math.max(1024, Number(info.contextLimit) || Number(info.inputLimit) || 16384);
+  const declared = Math.max(256, Number(info.outputLimit) || 8192);
+  const hardCap = Math.min(PROVIDER_OUTPUT_HARD_CAPS[provider.id] || 32768, CONTEXT_ABSOLUTE_OUTPUT_CAP);
+  const remaining = Math.max(256, context - estimateRequestTokens(body) - 1024);
+  const fractionCap = Math.max(256, Math.floor(context * 0.25));
+  return Math.max(256, Math.min(declared, hardCap, fractionCap, remaining));
+}
 function normalizeOpenAICompatibleRequest(body, provider, pc, removed = new Set()) {
   const out = { ...(body || {}) };
   for (const field of UNSUPPORTED_PASSTHROUGH_FIELDS) { out[field] = undefined; delete out[field]; removed.add(field); }
-  const info = effectiveModelInfo(provider, pc);
-  const hardCap = PROVIDER_OUTPUT_HARD_CAPS[provider.id] || 32768;
-  const declaredOutput = Number(info.outputLimit) || 0;
-  const known = knownModelInfo(String(pc?.model || ''), provider.id);
-  const outputCap = Math.max(256, declaredOutput > 0 ? declaredOutput : (Number(known.outputLimit) || hardCap));
+  const outputCap = requestOutputCap(out, provider, pc);
   for (const field of ['max_tokens', 'max_completion_tokens']) {
     if (out[field] !== undefined) {
       const n = Number(out[field]);
@@ -929,6 +977,24 @@ async function createProxy(provider, pc) {
             return;
           }
           if (result.status === 400 && repairCount < 4) {
+            let learned = false;
+            const learnedContext = contextLimitFromError(result.body);
+            const learnedOutput = outputLimitFromError(result.body);
+            if (learnedContext) {
+              const current = Number(pc?.modelInfo?.contextLimit) || Number(pc?.modelInfo?.inputLimit) || 0;
+              if (!current || learnedContext < current) {
+                pc.modelInfo = { ...(pc.modelInfo || {}), contextLimit: learnedContext, contextSource: 'error' };
+                learned = true;
+              }
+            }
+            if (learnedOutput) {
+              const current = Number(pc?.modelInfo?.outputLimit) || 0;
+              if (!current || learnedOutput < current) {
+                pc.modelInfo = { ...(pc.modelInfo || {}), outputLimit: learnedOutput, outputSource: 'error' };
+                learned = true;
+              }
+            }
+            if (learned) { repairCount += 1; continue; }
             const fields = [...unsupportedRequestFieldsFromError(result.body)].filter((field) => !removedFields.has(field));
             if (fields.length) {
               for (const field of fields) removedFields.add(field);
@@ -1424,15 +1490,14 @@ function effectiveModelInfo(provider, pc) {
 }
 
 function contextBudget(modelInfo = {}) {
-  const rawMax = Math.max(1024, Number(modelInfo?.contextLimit) || Number(modelInfo?.inputLimit) || 262144);
+  const rawMax = Math.max(1024, Number(modelInfo?.contextLimit) || Number(modelInfo?.inputLimit) || 16384);
   const cap = Number(process.env.LAZYDEV_CONTEXT_CAP || 0);
   const max = cap > 0 ? Math.max(1024, Math.min(rawMax, cap)) : rawMax;
-  const rawOutput = Math.max(256, Number(modelInfo?.outputLimit) || 16384);
-  const output = rawOutput;
-  const reserveTarget = Math.max(4096, Math.min(49152, Math.max(output * 2, Math.round(max * 0.08))));
-  const reserve = max > 4096 ? Math.min(reserveTarget, Math.max(1024, Math.floor(max / 4))) : Math.max(512, Math.floor(max / 8));
-  const input = max;
-  const ratio = max >= 262144 ? 0.90 : 0.88;
+  const rawOutput = Math.max(256, Number(modelInfo?.outputLimit) || 8192);
+  const output = Math.max(256, Math.min(rawOutput, Math.max(256, Math.floor(max * 0.25)), CONTEXT_ABSOLUTE_OUTPUT_CAP));
+  const reserve = max > 4096 ? Math.min(Math.max(1024, output), Math.max(1024, Math.floor(max / 4))) : Math.max(512, Math.floor(max / 6));
+  const input = Math.max(1024, max - reserve);
+  const ratio = Math.max(0.60, Math.min(0.90, (max - reserve - 512) / Math.max(1, max)));
   return { max, output, reserve, input, ratio };
 }
 

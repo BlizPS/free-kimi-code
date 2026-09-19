@@ -54,6 +54,24 @@ try:
     assert mod.native_tool_capability({"modelInfo": {"toolUse": True}}) is True
     assert mod.native_tool_capability({"modelInfo": {}}) is None
 
+    # Context safety: a 32K model with ~11K input and a 29K completion request
+    # must be clamped before the provider sees it. The exact model is irrelevant.
+    context_pc = {"apiKey": "x", "model": "small-context-model", "modelInfo": {"context": 32768, "output": 32768}}
+    oversized = {"model": "small-context-model", "messages": [{"role": "user", "content": "x" * 39000}], "max_tokens": 29491}
+    normalized = mod._normalize_provider_request(oversized, provider, context_pc)
+    assert int(normalized["max_tokens"]) < 29491, normalized
+    assert int(normalized["max_tokens"]) <= 8192, normalized
+
+    tiny_pc = {"apiKey": "x", "model": "tiny-context-model", "modelInfo": {"context": 8192, "output": 8192}}
+    tiny = {"model": "tiny-context-model", "messages": [{"role": "user", "content": "x" * 5000}], "max_tokens": 8192}
+    tiny_normalized = mod._normalize_provider_request(tiny, provider, tiny_pc)
+    assert int(tiny_normalized["max_tokens"]) < 8192, tiny_normalized
+
+    huge_pc = {"apiKey": "x", "model": "huge-context-model", "modelInfo": {"context": 1048576, "output": 131072}}
+    huge = {"model": "huge-context-model", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 131072}
+    huge_normalized = mod._normalize_provider_request(huge, provider, huge_pc)
+    assert int(huge_normalized["max_tokens"]) <= 16384, huge_normalized
+
     tool = {"type": "function", "function": {"name": "ReadFile", "description": "Read a file", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}
     no_native_pc = {"apiKey": "test-key", "model": "same-model", "modelInfo": {"context": 32768, "output": 4096, "toolUse": False}}
 

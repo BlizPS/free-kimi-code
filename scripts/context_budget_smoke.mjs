@@ -1231,15 +1231,14 @@ function effectiveModelInfo(provider, pc) {
 }
 
 function contextBudget(modelInfo = {}) {
-  const rawMax = Math.max(1024, Number(modelInfo?.contextLimit) || Number(modelInfo?.inputLimit) || 262144);
+  const rawMax = Math.max(1024, Number(modelInfo?.contextLimit) || Number(modelInfo?.inputLimit) || 16384);
   const cap = Number(process.env.LAZYDEV_CONTEXT_CAP || 0);
   const max = cap > 0 ? Math.max(1024, Math.min(rawMax, cap)) : rawMax;
-  const rawOutput = Math.max(256, Number(modelInfo?.outputLimit) || 16384);
-  const output = Math.min(rawOutput, 32768);
-  const reserveTarget = Math.max(4096, Math.min(49152, Math.max(output * 2, Math.round(max * 0.08))));
-  const reserve = max > 4096 ? Math.min(reserveTarget, Math.max(1024, Math.floor(max / 4))) : Math.max(512, Math.floor(max / 8));
-  const input = max;
-  const ratio = max >= 262144 ? 0.90 : 0.88;
+  const rawOutput = Math.max(256, Number(modelInfo?.outputLimit) || 8192);
+  const output = Math.max(256, Math.min(rawOutput, Math.max(256, Math.floor(max * 0.25)), 16384));
+  const reserve = max > 4096 ? Math.min(Math.max(1024, output), Math.max(1024, Math.floor(max / 4))) : Math.max(512, Math.floor(max / 6));
+  const input = Math.max(1024, max - reserve);
+  const ratio = Math.max(0.60, Math.min(0.90, (max - reserve - 512) / Math.max(1, max)));
   return { max, output, reserve, input, ratio };
 }
 

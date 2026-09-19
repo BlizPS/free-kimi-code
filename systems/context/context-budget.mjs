@@ -1,8 +1,11 @@
 export function computeContextBudget(input = {}) {
-  const max = Math.max(16384, Number(input.maxTokens || input.contextLimit || 131072));
-  const output = Math.max(2048, Number(input.outputTokens || input.outputLimit || 8192));
-  const reserve = Math.min(49152, Math.max(12000, Math.round(Math.max(output * 2, max * 0.08))));
-  const inputBudget = Math.max(8192, max - reserve);
+  const max = Math.max(1024, Number(input.maxTokens || input.contextLimit || 16384));
+  const rawOutput = Math.max(256, Number(input.outputTokens || input.outputLimit || 8192));
+  const output = Math.max(256, Math.min(rawOutput, Math.floor(max * 0.25), 16384));
+  const reserve = max > 4096
+    ? Math.min(Math.max(1024, output), Math.max(1024, Math.floor(max / 4)))
+    : Math.max(512, Math.floor(max / 6));
+  const inputBudget = Math.max(1024, max - reserve);
   return Object.freeze({ max, output, reserve, input: inputBudget });
 }
 

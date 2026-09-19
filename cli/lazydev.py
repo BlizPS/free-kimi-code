@@ -79,8 +79,11 @@ KNOWN_UNSUPPORTED_REQUEST_FIELDS = {
 }
 PROXY_MAX_RETRIES = 2
 PROXY_MAX_400_REPAIRS = 4
-DEFAULT_MODEL_CONTEXT = 262144
-DEFAULT_MODEL_OUTPUT = 16384
+DEFAULT_MODEL_CONTEXT = 16384
+DEFAULT_MODEL_OUTPUT = 8192
+CONTEXT_SAFETY_MARGIN = 1024
+CONTEXT_UNKNOWN_OUTPUT_FRACTION = 0.25
+CONTEXT_ABSOLUTE_OUTPUT_CAP = 16384
 PROVIDER_OUTPUT_HARD_CAPS = {
     "nvidia": 32768,
     "gemini": 65536,
@@ -90,6 +93,8 @@ PROVIDER_OUTPUT_HARD_CAPS = {
     "openrouter": 32768,
     "openai": 32768,
     "ollama": 32768,
+    "anthropic": 65536,
+    "pollinations": 32768,
 }
 MODEL_LIMIT_RULES = (
     # These rules provide numeric limits only. Tool capability is deliberately
@@ -158,7 +163,7 @@ def apply_model_limits(model_info: dict[str, Any], provider: dict[str, Any], mod
     if known.get("offEffort"):
         info["offEffort"] = known["offEffort"]
     info["context"] = max(1024, int(info["context"]))
-    output_value = max(256, int(info["output"]))
+    output_value = min(max(256, int(info["output"])), CONTEXT_ABSOLUTE_OUTPUT_CAP)
     # Live model metadata and exact model rules are authoritative. Provider
     # defaults are only a safety fallback when the upstream catalog omits a
     # per-model output ceiling. This avoids truncating providers such as
@@ -298,6 +303,46 @@ def _extract_model_records(data: Any) -> list[Any]:
         if isinstance(value, list):
             return value
     return []
+
+
+def fetch_openrouter_endpoint_limits(model_id: str, api_key: str = "") -> dict[str, Any]:
+    model_id = str(model_id or "").strip()
+    if not model_id or "/" not in model_id or model_id == "openrouter/free":
+        return {}
+    author, slug = model_id.split("/", 1)
+    url = f"https://openrouter.ai/api/v1/models/{urllib.parse.quote(author, safe='')}/{urllib.parse.quote(slug, safe='')}/endpoints"
+    try:
+        data = request_json(url, headers={"Authorization": f"Bearer {api_key}"} if api_key else {}, timeout=10)
+    except Exception:
+        return {}
+    payload = data.get("data") if isinstance(data, dict) else None
+    endpoints = payload.get("endpoints") if isinstance(payload, dict) else None
+    if not isinstance(endpoints, list) or not endpoints:
+        return {}
+    contexts = [_positive_int(e.get("context_length")) for e in endpoints if isinstance(e, dict)]
+    outputs = [_positive_int(e.get("max_completion_tokens")) for e in endpoints if isinstance(e, dict)]
+    contexts = [x for x in contexts if x]
+    outputs = [x for x in outputs if x]
+    result = {}
+    if contexts:
+        result["context"] = min(contexts)
+        result["contextSource"] = "endpoint-min"
+    if outputs:
+        result["output"] = min(outputs)
+        result["outputSource"] = "endpoint-min"
+    # The model-level capability remains separate; endpoint tool support is used
+    # to determine whether native tools are safe when routing across providers.
+    tool_flags = []
+    for endpoint in endpoints:
+        if not isinstance(endpoint, dict):
+            continue
+        supported = endpoint.get("supported_parameters")
+        if isinstance(supported, list):
+            tool_flags.append("tools" in supported)
+    if tool_flags:
+        result["toolUse"] = all(tool_flags)
+        result["toolUseSource"] = "endpoint"
+    return result
 
 
 def fetch_models(provider: dict[str, Any], api_key: str = "", base_url: str = "") -> list[dict[str, Any]]:
@@ -464,6 +509,63 @@ def model_output_size(provider: dict[str, Any], pc: dict[str, Any]) -> int:
     return max(256, int(info.get("output") or DEFAULT_MODEL_OUTPUT))
 
 
+def _estimate_request_tokens(body: dict[str, Any]) -> int:
+    """Conservative token estimate for the serialized request sent upstream."""
+    try:
+        payload = {k: v for k, v in body.items() if k not in {"max_tokens", "max_completion_tokens"}}
+        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        # JSON-over-wire / 4 is a useful baseline for mixed English/code. Bias
+        # slightly upward so tiny-context providers fail less often at the edge.
+        return max(1, int((len(raw) + 2) / 3.6))
+    except Exception:
+        return 0
+
+
+def _context_limit_from_error(detail: str) -> int | None:
+    text = str(detail or "")
+    patterns = [
+        r"maximum context length (?:is|of)\s*(\d+)",
+        r"context (?:window|length)\s*(?:is|of)\s*(\d+)",
+        r"max(?:imum)?_prompt_tokens\D+(\d+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            value = _positive_int(match.group(1))
+            if value:
+                return value
+    return None
+
+
+def _output_limit_from_error(detail: str) -> int | None:
+    text = str(detail or "")
+    patterns = [
+        r"maximum output tokens\D+(\d+)",
+        r"max(?:imum)?\s*(?:completion|output)\s*tokens\D+(\d+)",
+        r"max_tokens[^\d]{0,24}(?:maximum|limit|allowed)[^\d]{0,24}(\d+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            value = _positive_int(match.group(1))
+            if value:
+                return value
+    return None
+
+
+def _request_output_cap(body: dict[str, Any], provider: dict[str, Any], pc: dict[str, Any]) -> int:
+    info = apply_model_limits(pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}, provider, str(pc.get("model", "")))
+    context = max(1024, int(info.get("context") or DEFAULT_MODEL_CONTEXT))
+    declared_output = max(256, int(info.get("output") or DEFAULT_MODEL_OUTPUT))
+    provider_cap = PROVIDER_OUTPUT_HARD_CAPS.get(str(provider.get("id")), 32768)
+    model_cap = min(declared_output, provider_cap, CONTEXT_ABSOLUTE_OUTPUT_CAP)
+    input_tokens = _estimate_request_tokens(body)
+    remaining = max(256, context - input_tokens - CONTEXT_SAFETY_MARGIN)
+    # Never let a request reserve most/all of a small context window for output.
+    safe_fraction_cap = max(256, int(context * CONTEXT_UNKNOWN_OUTPUT_FRACTION))
+    return max(256, min(model_cap, safe_fraction_cap, remaining))
+
+
 def refresh_selected_model(config: dict[str, Any], provider: dict[str, Any], pc: dict[str, Any]) -> dict[str, Any]:
     model = str(pc.get("model", "")).strip()
     current = apply_model_limits(pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}, provider, model)
@@ -489,6 +591,10 @@ def refresh_selected_model(config: dict[str, Any], provider: dict[str, Any], pc:
                 model = canonical_model
                 pc["model"] = canonical_model
             current = apply_model_limits(selected, provider, model)
+            if provider.get("id") == "openrouter" and current.get("id") != "openrouter/free":
+                endpoint_limits = fetch_openrouter_endpoint_limits(model, key)
+                if endpoint_limits:
+                    current = {**current, **{k: v for k, v in endpoint_limits.items() if v is not None}}
             current["live"] = True
             pc["modelInfo"] = current
             config.setdefault("providers", {})[provider["id"]] = pc
@@ -766,20 +872,18 @@ def _normalize_provider_request(body: dict[str, Any], provider: dict[str, Any], 
     model = str(pc.get("model", normalized.get("model", "")))
     hard_cap = PROVIDER_OUTPUT_HARD_CAPS.get(pid, 32768)
     info = apply_model_limits(pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}, provider, model)
-    output_value = _positive_int(info.get("output")) or hard_cap
-    declared = info.get("outputSource") in {"live", "catalog-rule"}
-    output_cap = max(256, output_value if declared else min(output_value, hard_cap))
+    requested_cap = _request_output_cap(normalized, provider, pc)
     # Kimi can calculate a large remaining-context completion budget. Third-party
-    # OpenAI-compatible servers often enforce a much smaller per-call output cap,
-    # so clamp both common field spellings before the request leaves LazyDev.
+    # providers may have smaller context/output ceilings, so clamp the request to
+    # the model's declared limit AND the space actually left in this request.
     for key in ("max_tokens", "max_completion_tokens"):
         if key in normalized:
             try:
-                normalized[key] = max(1, min(int(normalized[key]), output_cap))
+                normalized[key] = max(1, min(int(normalized[key]), requested_cap))
             except (TypeError, ValueError):
                 normalized.pop(key, None)
     if "max_tokens" not in normalized and "max_completion_tokens" not in normalized:
-        normalized["max_tokens"] = output_cap
+        normalized["max_tokens"] = requested_cap
     if pid == "openrouter":
         provider_options = normalized.get("provider")
         if not isinstance(provider_options, dict):
@@ -991,6 +1095,24 @@ class _ProviderProxy:
                             continue
 
                         if status == 400:
+                            learned_context = _context_limit_from_error(detail)
+                            learned_output = _output_limit_from_error(detail)
+                            learned = False
+                            if learned_context:
+                                current_context = _positive_int((outer.pc.get("modelInfo") or {}).get("context")) if isinstance(outer.pc.get("modelInfo"), dict) else None
+                                if not current_context or learned_context < current_context:
+                                    outer.pc.setdefault("modelInfo", {})["context"] = learned_context
+                                    outer.pc.setdefault("modelInfo", {})["contextSource"] = "error"
+                                    learned = True
+                            if learned_output:
+                                current_output = _positive_int((outer.pc.get("modelInfo") or {}).get("output")) if isinstance(outer.pc.get("modelInfo"), dict) else None
+                                if not current_output or learned_output < current_output:
+                                    outer.pc.setdefault("modelInfo", {})["output"] = learned_output
+                                    outer.pc.setdefault("modelInfo", {})["outputSource"] = "error"
+                                    learned = True
+                            if learned and repair_count < PROXY_MAX_400_REPAIRS:
+                                repair_count += 1
+                                continue
                             newly_rejected = _unsupported_fields_from_error(detail) - removed_fields
                             if newly_rejected:
                                 removed_fields |= newly_rejected
@@ -1135,9 +1257,9 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     provider_type = "google-genai" if provider["id"] == "gemini" else "anthropic" if provider["id"] == "anthropic" else "openai"
     context = model_context_size(provider, pc)
     output = model_output_size(provider, pc)
-    reserve_target = max(4096, min(49152, max(output * 2, round(context * 0.08))))
-    reserve = min(reserve_target, max(1024, context // 4)) if context > 4096 else max(512, context // 8)
-    input_limit = context
+    safe_output = max(256, min(output, max(256, context // 4), CONTEXT_ABSOLUTE_OUTPUT_CAP))
+    reserve = min(max(1024, safe_output), max(1024, context // 4)) if context > 4096 else max(512, context // 6)
+    input_limit = max(1024, context - reserve)
     native_tools = native_tool_capability(pc)
     tool_use = True if proxy is not None else native_tools is not False
     capabilities = []
@@ -1184,7 +1306,7 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         f'model = {toml_quote(model)}',
         f'max_context_size = {context}',
         f'max_input_size = {input_limit}',
-        f'max_output_size = {min(output, max(256, context))}',
+        f'max_output_size = {safe_output}',
         f'capabilities = {json.dumps(capabilities)}',
         f'display_name = {toml_quote(provider["label"] + " · " + model)}',
         *( [f'off_effort = {toml_quote(known["offEffort"])}'] if known.get("offEffort") else [] ),
@@ -1201,7 +1323,7 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         'max_attempts_per_step = 10',
         'max_steps_per_turn = 0',
         f'reserved_context_size = {reserve}',
-        'compaction_trigger_ratio = 0.88',
+        f'compaction_trigger_ratio = {max(0.60, min(0.90, (context - reserve - 512) / max(1, context))):.2f}',
         'compaction_max_attempts = 2',
         '',
         '[token_counting]',
@@ -1320,7 +1442,7 @@ def write_runtime_system(provider: dict[str, Any], model: str) -> None:
         "- Use bundled LazyDev skills when materially relevant.",
         f"- Current date: {today}. Treat this only as the current calendar date; never use it as a historical event year.",
         f"- Active provider: {provider['label']}; model: {model}.",
-        f"- Standalone artifacts must end up under the exact canonical directory: {ARTIFACT_DIR}.",
+        f"- Standalone artifacts must be saved under the exact canonical directory: {ARTIFACT_DIR}.",
         "- File search: Glob uses path=<real directory> and pattern=<relative glob>; never put an absolute path or wildcard into pattern, and never scan OS/system roots.",
         "- Read: max_chars is optional and may be small; use the configured default for normal source files and pagination for large files. Do not emit an artificial minimum-max_chars error.",
         f"- Factual UI content: research historical/current facts, years, statistics, names, and dates before writing. For current/latest/today claims, a displayed current year must match {today[:4]}; historical years require a source.",
@@ -1377,7 +1499,10 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
             env.pop(name, None)
     context = model_context_size(provider, pc)
     output = model_output_size(provider, pc)
+    safe_output = max(256, min(output, max(256, context // 4), CONTEXT_ABSOLUTE_OUTPUT_CAP))
     env["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(context)
+    env["KIMI_MODEL_MAX_COMPLETION_TOKENS"] = str(safe_output)
+    env["KIMI_MODEL_MAX_TOKENS"] = str(safe_output)
     try:
         return subprocess.call([kimi, *args], cwd=str(workspace), env=env)
     except KeyboardInterrupt:
