@@ -55,6 +55,21 @@ command -v curl >/dev/null 2>&1 || fatal "curl is required."
 command -v tar >/dev/null 2>&1 || fatal "tar is required."
 command -v mktemp >/dev/null 2>&1 || fatal "mktemp is required."
 
+UV_INSTALL_URL="https://astral.sh/uv/install.sh"
+
+ensure_python_runner() {
+  if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! command -v uv >/dev/null 2>&1; then
+    say "Python not detected — installing standalone uv as the Python bootstrapper."
+    curl -fsSL "$UV_INSTALL_URL" | sh
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:${PATH:-}"
+  fi
+  command -v uv >/dev/null 2>&1 || fatal "Could not install uv for the native Python LazyDev CLI."
+}
+ensure_python_runner
+
 version_at_least() {
   current="$1"; required="$2"
   awk -v c="$current" -v r="$required" '
@@ -114,7 +129,7 @@ is_lazydev_launcher() {
     fi
   fi
   [ -f "$target" ] || return 1
-  grep -Eq 'Lazy Developer managed launcher|scripts/lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code' "$target" 2>/dev/null
+  grep -Eq 'Lazy Developer managed launcher|cli/lazydev\.py|scripts/lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code' "$target" 2>/dev/null
 }
 
 # If a previous install left a lazydev command in an earlier PATH entry,
@@ -283,7 +298,7 @@ if [ -f "$LAZYDEV_HOME/.lazydev-revision" ]; then
 fi
 LAZYDEV_INSTALL_COMPLETE=0
 if [ -f "$LAZYDEV_HOME/package.json" ] && \
-   [ -f "$LAZYDEV_HOME/scripts/lazydev.mjs" ] && \
+   [ -f "$LAZYDEV_HOME/cli/lazydev.py" ] && \
    [ -f "$LAZYDEV_HOME/skills/lazy-developer/SKILL.md" ] && \
    [ -f "$LAZYDEV_HOME/skills/lazy-debug/SKILL.md" ] && \
    [ -f "$LAZYDEV_HOME/skills/lazy-review/SKILL.md" ] && \
@@ -412,16 +427,19 @@ if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
   if [ -L "$LAZYDEV_LAUNCHER" ]; then rm -f "$LAZYDEV_LAUNCHER"; fi
   cat > "$LAZYDEV_LAUNCHER" <<EOF
 #!/bin/sh
-# Lazy Developer managed launcher
+# Lazy Developer managed launcher (native Python CLI)
 set -eu
-LAZYDEV_ROOT="$(printf '%s' "$LAZYDEV_HOME" | sed 's/[\\&]/\\&/g')"
-NODE_BIN="\$(command -v node 2>/dev/null || true)"
-if [ -z "\$NODE_BIN" ]; then
-  echo "LazyDev CLI requires Node.js 22.16.0 or newer at runtime. The installer itself does not require or install Node.js." >&2
-  exit 1
+LAZYDEV_ROOT="$(printf '%s' "$LAZYDEV_HOME" | sed 's/[\&]/\&/g')"
+PYTHON_BIN="\$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+if [ -n "\$PYTHON_BIN" ]; then
+  exec "\$PYTHON_BIN" "\$LAZYDEV_ROOT/cli/lazydev.py" "\$@"
 fi
-export PATH="$HOME/.kimi-code/bin:$LAZYDEV_BIN_DIR:\$PATH"
-exec "\$NODE_BIN" "\$LAZYDEV_ROOT/scripts/lazydev.mjs" "\$@"
+UV_BIN="\$(command -v uv 2>/dev/null || true)"
+if [ -n "\$UV_BIN" ]; then
+  exec "\$UV_BIN" run --no-project --python 3.13 "\$LAZYDEV_ROOT/cli/lazydev.py" "\$@"
+fi
+echo "LazyDev requires Python 3.10+ or uv. No Node.js runtime is used by the native CLI." >&2
+exit 1
 EOF
   chmod 755 "$LAZYDEV_LAUNCHER"
 

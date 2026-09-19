@@ -1,0 +1,6 @@
+interface:
+  display_name: "Lazy Debug"
+  short_description: "Find the first divergence and fix the root cause"
+  default_prompt: "Use $lazy-debug to isolate and repair this failure."
+policy:
+  allow_implicit_invocation: true

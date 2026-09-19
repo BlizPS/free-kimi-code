@@ -1,0 +1,206 @@
+[
+  {
+    "id": "ai-neutral",
+    "mode": "dark",
+    "roles": {
+      "background": "#0B0D10",
+      "surface": "#12161B",
+      "surface2": "#181D24",
+      "text": "#F4F7FA",
+      "muted": "#9DA6B0",
+      "border": "#2A313A",
+      "primary": "#7DD3FC",
+      "primaryText": "#071016",
+      "accent": "#A7F3D0",
+      "danger": "#FB7185",
+      "focus": "#7DD3FC"
+    }
+  },
+  {
+    "id": "developer-dark",
+    "mode": "dark",
+    "roles": {
+      "background": "#0A0C0F",
+      "surface": "#11151A",
+      "surface2": "#171C22",
+      "text": "#F1F5F9",
+      "muted": "#94A3B8",
+      "border": "#293241",
+      "primary": "#60A5FA",
+      "primaryText": "#07111F",
+      "accent": "#C4B5FD",
+      "danger": "#FB7185",
+      "focus": "#93C5FD"
+    }
+  },
+  {
+    "id": "trust-blue",
+    "mode": "light",
+    "roles": {
+      "background": "#F8FAFC",
+      "surface": "#FFFFFF",
+      "surface2": "#F1F5F9",
+      "text": "#0F172A",
+      "muted": "#64748B",
+      "border": "#CBD5E1",
+      "primary": "#2563EB",
+      "primaryText": "#FFFFFF",
+      "accent": "#0EA5E9",
+      "danger": "#DC2626",
+      "focus": "#2563EB"
+    }
+  },
+  {
+    "id": "analytics-neutral",
+    "mode": "light",
+    "roles": {
+      "background": "#F6F8FB",
+      "surface": "#FFFFFF",
+      "surface2": "#EEF2F7",
+      "text": "#111827",
+      "muted": "#64748B",
+      "border": "#D7DEE8",
+      "primary": "#334155",
+      "primaryText": "#FFFFFF",
+      "accent": "#0EA5E9",
+      "danger": "#DC2626",
+      "focus": "#0284C7"
+    }
+  },
+  {
+    "id": "finance-neutral",
+    "mode": "light",
+    "roles": {
+      "background": "#F8FAFC",
+      "surface": "#FFFFFF",
+      "surface2": "#EEF3F7",
+      "text": "#0F172A",
+      "muted": "#526171",
+      "border": "#CBD5E1",
+      "primary": "#0F766E",
+      "primaryText": "#FFFFFF",
+      "accent": "#2563EB",
+      "danger": "#B91C1C",
+      "focus": "#0F766E"
+    }
+  },
+  {
+    "id": "health-calm",
+    "mode": "light",
+    "roles": {
+      "background": "#F6FBFA",
+      "surface": "#FFFFFF",
+      "surface2": "#EAF5F2",
+      "text": "#15302B",
+      "muted": "#5B716C",
+      "border": "#C8DDD8",
+      "primary": "#0F766E",
+      "primaryText": "#FFFFFF",
+      "accent": "#4F46E5",
+      "danger": "#B42318",
+      "focus": "#0F766E"
+    }
+  },
+  {
+    "id": "education-warm",
+    "mode": "light",
+    "roles": {
+      "background": "#FFFDF8",
+      "surface": "#FFFFFF",
+      "surface2": "#F7F1E7",
+      "text": "#2B2D33",
+      "muted": "#686B74",
+      "border": "#E3D9C7",
+      "primary": "#7C3AED",
+      "primaryText": "#FFFFFF",
+      "accent": "#EA580C",
+      "danger": "#B42318",
+      "focus": "#7C3AED"
+    }
+  },
+  {
+    "id": "commerce-neutral",
+    "mode": "light",
+    "roles": {
+      "background": "#FAFAF9",
+      "surface": "#FFFFFF",
+      "surface2": "#F5F5F4",
+      "text": "#1C1917",
+      "muted": "#6B7280",
+      "border": "#D6D3D1",
+      "primary": "#111827",
+      "primaryText": "#FFFFFF",
+      "accent": "#B45309",
+      "danger": "#B91C1C",
+      "focus": "#111827"
+    }
+  },
+  {
+    "id": "media-dark",
+    "mode": "dark",
+    "roles": {
+      "background": "#07090C",
+      "surface": "#101318",
+      "surface2": "#171B21",
+      "text": "#F8FAFC",
+      "muted": "#A1A8B3",
+      "border": "#292F38",
+      "primary": "#F8FAFC",
+      "primaryText": "#090B0E",
+      "accent": "#F59E0B",
+      "danger": "#F43F5E",
+      "focus": "#F8FAFC"
+    }
+  },
+  {
+    "id": "editorial-neutral",
+    "mode": "light",
+    "roles": {
+      "background": "#FDFCF9",
+      "surface": "#FFFFFF",
+      "surface2": "#F3F1EC",
+      "text": "#1B1B1B",
+      "muted": "#686868",
+      "border": "#D9D6CE",
+      "primary": "#18181B",
+      "primaryText": "#FFFFFF",
+      "accent": "#9F1239",
+      "danger": "#B91C1C",
+      "focus": "#18181B"
+    }
+  },
+  {
+    "id": "admin-neutral",
+    "mode": "dark",
+    "roles": {
+      "background": "#0D1117",
+      "surface": "#161B22",
+      "surface2": "#1F2630",
+      "text": "#E6EDF3",
+      "muted": "#8B98A7",
+      "border": "#303846",
+      "primary": "#38BDF8",
+      "primaryText": "#06131A",
+      "accent": "#A78BFA",
+      "danger": "#FB7185",
+      "focus": "#38BDF8"
+    }
+  },
+  {
+    "id": "booking-neutral",
+    "mode": "light",
+    "roles": {
+      "background": "#F8FAFC",
+      "surface": "#FFFFFF",
+      "surface2": "#F1F5F9",
+      "text": "#1E293B",
+      "muted": "#64748B",
+      "border": "#CBD5E1",
+      "primary": "#0F766E",
+      "primaryText": "#FFFFFF",
+      "accent": "#2563EB",
+      "danger": "#DC2626",
+      "focus": "#0F766E"
+    }
+  }
+]

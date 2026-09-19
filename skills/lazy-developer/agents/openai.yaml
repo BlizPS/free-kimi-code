@@ -1,0 +1,6 @@
+interface:
+  display_name: "Lazy Developer"
+  short_description: "Ship small, verified, repo-native engineering changes"
+  default_prompt: "Use $lazy-developer for this implementation task."
+policy:
+  allow_implicit_invocation: true

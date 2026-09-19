@@ -64,6 +64,32 @@ function Get-RtkVersion([string]$Exe) {
     if (-not $Exe) { return '' }
     try { return Get-VersionFromText ((& $Exe --version 2>$null) -join "`n") } catch { return '' }
 }
+function Get-PythonCommand {
+    foreach ($name in @('py.exe', 'python.exe', 'python3.exe')) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
+    }
+    return $null
+}
+
+function Ensure-PythonRunner {
+    if (Get-PythonCommand) { return }
+    $uv = Get-Command 'uv.exe' -ErrorAction SilentlyContinue
+    if (-not $uv) {
+        Step 'Installing standalone uv for the native Python LazyDev CLI'
+        $tempUv = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-uv-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri 'https://astral.sh/uv/install.ps1' -OutFile $tempUv
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tempUv
+            if ($LASTEXITCODE -ne 0) { Fail "uv installer exited with code $LASTEXITCODE." }
+        } finally {
+            Remove-Item -LiteralPath $tempUv -Force -ErrorAction SilentlyContinue
+        }
+        $uv = Get-Command 'uv.exe' -ErrorAction SilentlyContinue
+    }
+    if (-not $uv) { Fail 'Python was not found and standalone uv could not be installed.' }
+    Write-Host '✓ uv is available as the Python bootstrapper.'
+}
 function Get-GitHubRevision {
     $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.0' }
     try {
@@ -139,12 +165,14 @@ if ($Help) {
 Lazy Developer installer
 
 Installs or updates Kimi Code $KimiVersion, RTK, and Lazy Developer $LazyDevVersion without npm or a private Node.js runtime.
-The installer does not require Node.js; the LazyDev CLI uses the host Node.js only when the CLI is run.
+The LazyDev CLI is native Python and does not require Node.js.
 Run the same command again to update only components that changed.
 Existing Kimi sessions are left alone during updates.
 "@ | Write-Host
 exit 0
 }
+
+Ensure-PythonRunner
 
 $KimiExe = Find-Kimi
 $KimiCurrentVersion = Get-KimiVersion $KimiExe
@@ -167,11 +195,12 @@ $InstalledLazyVersion = Get-InstalledLazyVersion
 $InstalledLazyRevision = Get-InstalledLazyRevision
 $Launcher = Join-Path $BinRoot 'lazydev.cmd'
 $LazyInstallComplete = (Test-Path -LiteralPath (Join-Path $InstallRoot 'package.json') -PathType Leaf) -and
-    (Test-Path -LiteralPath (Join-Path $InstallRoot 'scripts\lazydev.mjs') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $InstallRoot 'cli\lazydev.py') -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $InstallRoot 'skills\lazy-developer\SKILL.md') -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $InstallRoot 'skills\lazy-debug\SKILL.md') -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $InstallRoot 'skills\lazy-review\SKILL.md') -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $InstallRoot 'skills\lazy-test\SKILL.md') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $InstallRoot 'cli\lazydev.py') -PathType Leaf) -and
     (Test-Path -LiteralPath $Launcher -PathType Leaf)
 $LazyDevNeedsUpdate = $true
 if ($InstalledLazyVersion -and $InstalledLazyVersion -ne $LazyDevVersion) {
@@ -300,14 +329,26 @@ if ($LazyDevNeedsUpdate) {
 setlocal
 set "LAZYDEV_ROOT=$InstallRoot"
 set "PATH=$BinRoot;$(Join-Path $HOME '.kimi-code\bin');%PATH%"
-where node.exe >nul 2>&1
-if errorlevel 1 (
-  echo LazyDev CLI requires Node.js 22.16.0 or newer at runtime. The installer does not install Node.js. 1>&2
-  exit /b 1
+where py.exe >nul 2>&1
+if not errorlevel 1 (
+  py.exe -3 "%LAZYDEV_ROOT%\cli\lazydev.py" %*
+  set "EXIT_CODE=%ERRORLEVEL%"
+  endlocal & exit /b %EXIT_CODE%
 )
-node.exe "%LAZYDEV_ROOT%\scripts\lazydev.mjs" %*
-set "EXIT_CODE=%ERRORLEVEL%"
-endlocal & exit /b %EXIT_CODE%
+where python.exe >nul 2>&1
+if not errorlevel 1 (
+  python.exe "%LAZYDEV_ROOT%\cli\lazydev.py" %*
+  set "EXIT_CODE=%ERRORLEVEL%"
+  endlocal & exit /b %EXIT_CODE%
+)
+where uv.exe >nul 2>&1
+if not errorlevel 1 (
+  uv.exe run --no-project --python 3.13 "%LAZYDEV_ROOT%\cli\lazydev.py" %*
+  set "EXIT_CODE=%ERRORLEVEL%"
+  endlocal & exit /b %EXIT_CODE%
+)
+echo LazyDev requires Python 3.10+ or uv. The installer does not install Node.js. 1>&2
+endlocal & exit /b 1
 "@
         Set-Content -LiteralPath $Launcher -Value $launcherContent -Encoding ASCII
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
