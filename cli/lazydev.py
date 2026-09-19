@@ -12,11 +12,17 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
+import threading
+import time
+import http.server
+import http.client
 import sys
 import textwrap
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -45,7 +51,7 @@ PROVIDERS: list[dict[str, Any]] = [
     {"id": "ollama", "label": "Ollama Local", "kind": "ollama", "models": None, "base": "http://127.0.0.1:11434", "env": None},
     {"id": "llm7", "label": "LLM7", "kind": "openai", "models": "https://api.llm7.io/v1/models", "base": "https://api.llm7.io/v1", "env": "LLM7_API_KEY"},
     {"id": "groq", "label": "Groq", "kind": "openai", "models": "https://api.groq.com/openai/v1/models", "base": "https://api.groq.com/openai/v1", "env": "GROQ_API_KEY"},
-    {"id": "codebuddy", "label": "CodeBuddy", "kind": "openai", "models": "https://api.codebuddy.ai/v1/models", "base": "https://api.codebuddy.ai/v1", "env": "CODEBUDDY_API_KEY"},
+    {"id": "codebuddy", "label": "CodeBuddy", "kind": "openai", "models": ["https://copilot.tencent.com/v3/config", "https://api.codebuddy.ai/v1/models"], "base": "https://api.codebuddy.ai/v1", "env": "CODEBUDDY_API_KEY"},
     {"id": "anthropic", "label": "Anthropic", "kind": "anthropic", "models": "https://api.anthropic.com/v1/models", "base": "https://api.anthropic.com", "env": "ANTHROPIC_API_KEY"},
 ]
 
@@ -57,6 +63,18 @@ SKILLS = [
 ]
 
 EXTENSIONS = {"html", "htm", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "png", "jpg", "jpeg", "webp", "gif", "svg", "csv", "md", "txt"}
+
+# Kimi Code 2.x may attach OpenAI-only request hints to every OpenAI-compatible
+# request. Several compatible gateways reject those fields with HTTP 400 even
+# though the core chat payload is valid. Keep these disabled unless an upstream
+# explicitly accepts them; the local proxy also learns additional rejected
+# parameters from an upstream 400 response and retries without them.
+KNOWN_UNSUPPORTED_REQUEST_FIELDS = {
+    "prompt_cache_key",
+    "safety_identifier",
+}
+PROXY_MAX_RETRIES = 2
+PROXY_MAX_400_REPAIRS = 4
 
 
 def ansi(code: str, value: str) -> str:
@@ -145,6 +163,16 @@ def normalize_model(item: dict[str, Any], provider: dict[str, Any]) -> dict[str,
     return {"id": raw, "name": item.get("name") or raw, "toolUse": True if not supported else "tools" in supported, "free": free, "context": item.get("context_length"), "output": output_limit}
 
 
+def _extract_model_records(data: Any) -> list[Any]:
+    if not isinstance(data, dict):
+        return []
+    for key in ("data", "models", "modelList", "model_list", "items"):
+        value = data.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
 def fetch_models(provider: dict[str, Any], api_key: str = "", base_url: str = "") -> list[dict[str, Any]]:
     pid = provider["id"]
     if pid == "ollama":
@@ -152,13 +180,32 @@ def fetch_models(provider: dict[str, Any], api_key: str = "", base_url: str = ""
         data = request_json(f"{base}/api/tags")
         raw = data.get("models", []) if isinstance(data, dict) else []
         return [normalize_model(item, provider) for item in raw if isinstance(item, dict)]
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    data = request_json(provider["models"], headers=headers)
     if pid == "gemini":
+        url = f"{provider['models']}?key={urllib.parse.quote(api_key, safe='')}"
+        data = request_json(url)
         raw = data.get("models", []) if isinstance(data, dict) else []
-    else:
+    elif pid == "anthropic":
+        data = request_json(provider["models"], headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "User-Agent": f"lazydev/{VERSION}"})
         raw = data.get("data", []) if isinstance(data, dict) else []
-    models = [normalize_model(item, provider) for item in raw if isinstance(item, dict)]
+    elif pid == "codebuddy":
+        urls = provider["models"] if isinstance(provider.get("models"), list) else [provider.get("models")]
+        last_error = None
+        raw = []
+        for url in urls:
+            try:
+                data = request_json(str(url), headers={"Authorization": f"Bearer {api_key}", "x-api-key": api_key, "User-Agent": f"lazydev/{VERSION}"})
+                raw = _extract_model_records(data)
+                if raw:
+                    break
+            except Exception as exc:
+                last_error = exc
+        if not raw and last_error:
+            raise last_error
+    else:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        data = request_json(provider["models"], headers=headers)
+        raw = _extract_model_records(data)
+    models = [normalize_model(item if isinstance(item, dict) else {"id": str(item)}, provider) for item in raw]
     models = [m for m in models if m.get("id")]
     if pid == "openrouter":
         synthetic = {"id": "openrouter/free", "name": "Free Models Router · openrouter/free", "toolUse": True, "free": True, "context": 200000, "output": 8192}
@@ -330,7 +377,243 @@ def clear_terminal() -> None:
             pass
 
 
-def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any]) -> tuple[Path, Path]:
+def _strip_request_fields(body: dict[str, Any], fields: set[str]) -> tuple[dict[str, Any], set[str]]:
+    cleaned = dict(body)
+    removed: set[str] = set()
+    for field in fields:
+        if field in cleaned:
+            cleaned.pop(field, None)
+            removed.add(field)
+    extra = cleaned.get("extra_body")
+    if isinstance(extra, dict):
+        extra_clean = dict(extra)
+        for field in fields:
+            if field in extra_clean:
+                extra_clean.pop(field, None)
+                removed.add(field)
+        if extra_clean:
+            cleaned["extra_body"] = extra_clean
+        else:
+            cleaned.pop("extra_body", None)
+    return cleaned, removed
+
+
+def _unsupported_fields_from_error(detail: str) -> set[str]:
+    text = str(detail or "")
+    found = set(re.findall(r"[`\"]([A-Za-z_][A-Za-z0-9_]*)[`\"]", text))
+    lower = text.lower()
+    if not found and ("unsupported parameter" in lower or "unrecognized request argument" in lower or "unknown parameter" in lower):
+        match = re.search(r"(?:supplied|parameter(?:s)?\s*[:=]?)\s*([A-Za-z_][A-Za-z0-9_]*)", text, re.I)
+        if match:
+            found.add(match.group(1))
+    return {name for name in found if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name)}
+
+
+def _retry_after_seconds(headers: dict[str, str]) -> float:
+    value = str(headers.get("Retry-After", "") or "").strip()
+    try:
+        return max(0.0, min(30.0, float(value))) if value else 0.0
+    except ValueError:
+        return 0.0
+
+
+class _ProviderProxy:
+    def __init__(self, provider: dict[str, Any], pc: dict[str, Any]):
+        self.provider = provider
+        self.pc = pc
+        self.token = secrets.token_hex(24)
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
+        self.thread = threading.Thread(target=self.server.serve_forever, name="lazydev-provider-proxy", daemon=True)
+        self.thread.start()
+
+    @property
+    def port(self) -> int:
+        return int(self.server.server_address[1])
+
+    def close(self) -> None:
+        try:
+            self.server.shutdown()
+        finally:
+            self.server.server_close()
+            self.thread.join(timeout=1.0)
+
+    def _handler(self):
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            server_version = "LazyDevProviderProxy/1.0"
+
+            def log_message(self, fmt: str, *args: Any) -> None:
+                return
+
+            def _send_json(self, status: int, payload: Any) -> None:
+                data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(data)
+                self.close_connection = True
+
+            def _relay(self, status: int, headers: dict[str, str], response: Any, is_stream: bool) -> None:
+                self.send_response(status)
+                hop = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"}
+                for key, value in headers.items():
+                    if key.lower() in hop or key.lower() == "content-length":
+                        continue
+                    self.send_header(key, value)
+                self.send_header("X-LazyDev-Provider-Proxy", "1")
+                if is_stream:
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    try:
+                        while True:
+                            chunk = response.read(64 * 1024)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
+                    finally:
+                        try:
+                            response.close()
+                        except Exception:
+                            pass
+                else:
+                    payload = response.read()
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(payload)
+                self.close_connection = True
+
+            def do_POST(self) -> None:
+                if self.headers.get("Authorization", "") != f"Bearer {outer.token}":
+                    return self._send_json(401, {"error": {"message": "Unauthorized"}})
+                if self.path.split("?", 1)[0] != "/v1/chat/completions":
+                    return self._send_json(404, {"error": {"message": "Not found"}})
+                try:
+                    size = int(self.headers.get("Content-Length", "0") or "0")
+                except ValueError:
+                    size = 0
+                if size <= 0 or size > 8 * 1024 * 1024:
+                    return self._send_json(400, {"error": {"message": "Invalid request body size"}})
+                try:
+                    body = json.loads(self.rfile.read(size).decode("utf-8"))
+                except Exception:
+                    return self._send_json(400, {"error": {"message": "Invalid JSON"}})
+                if not isinstance(body, dict):
+                    return self._send_json(400, {"error": {"message": "Request body must be an object"}})
+                body["model"] = str(outer.pc.get("model") or body.get("model") or "")
+                removed_fields = set(KNOWN_UNSUPPORTED_REQUEST_FIELDS)
+                repair_count = 0
+                transient_attempt = 0
+                while True:
+                    outbound, removed_now = _strip_request_fields(body, removed_fields)
+                    removed_fields |= removed_now
+                    try:
+                        connection, response = outer._open_upstream(outbound)
+                    except Exception as exc:
+                        if transient_attempt < PROXY_MAX_RETRIES:
+                            time.sleep(min(4.0, 0.6 * (2 ** transient_attempt)))
+                            transient_attempt += 1
+                            continue
+                        return self._send_json(502, {"error": {"message": f"Provider request failed: {exc}"}})
+                    status = int(response.status)
+                    headers = {k: v for k, v in response.getheaders()}
+                    is_stream = bool(outbound.get("stream"))
+                    if status == 400 and repair_count < PROXY_MAX_400_REPAIRS:
+                        error_payload = response.read()
+                        try:
+                            detail = json.loads(error_payload.decode("utf-8", "replace")).get("error", {}).get("message", "")
+                        except Exception:
+                            detail = error_payload.decode("utf-8", "replace")
+                        try:
+                            response.close()
+                            connection.close()
+                        except Exception:
+                            pass
+                        newly_rejected = _unsupported_fields_from_error(detail) - removed_fields
+                        if newly_rejected:
+                            removed_fields |= newly_rejected
+                            repair_count += 1
+                            continue
+                        return self._send_json(400, {"error": {"message": detail or "Provider rejected the request."}})
+                    if status in {429, 500, 502, 503, 504} and transient_attempt < PROXY_MAX_RETRIES:
+                        retry_after = _retry_after_seconds(headers)
+                        delay = retry_after or min(4.0, 0.6 * (2 ** transient_attempt))
+                        try:
+                            response.close()
+                            connection.close()
+                        except Exception:
+                            pass
+                        time.sleep(delay)
+                        transient_attempt += 1
+                        continue
+                    if status >= 400:
+                        payload = response.read()
+                        try:
+                            response.close()
+                            connection.close()
+                        except Exception:
+                            pass
+                        self.send_response(status)
+                        self.send_header("Content-Type", headers.get("Content-Type", "application/json"))
+                        self.send_header("Content-Length", str(len(payload)))
+                        self.send_header("X-LazyDev-Provider-Proxy", "1")
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        self.wfile.write(payload)
+                        self.close_connection = True
+                        return
+                    try:
+                        self._relay(status, headers, response, is_stream)
+                    finally:
+                        try:
+                            connection.close()
+                        except Exception:
+                            pass
+                    return
+
+        return Handler
+
+    def upstream_url(self) -> str:
+        base = normalize_url(self.pc.get("baseUrl") or self.provider.get("base") or "")
+        lowered = base.lower()
+        if lowered.endswith("/v1") or lowered.endswith("/openai"):
+            return base + "/chat/completions"
+        return base + "/v1/chat/completions"
+
+    def _open_upstream(self, body: dict[str, Any]):
+        from urllib.parse import urlsplit
+        target = urlsplit(self.upstream_url())
+        if target.scheme not in {"http", "https"} or not target.hostname:
+            raise RuntimeError(f"Invalid provider API URL: {self.upstream_url()}")
+        timeout = 120
+        if target.scheme == "https":
+            connection = http.client.HTTPSConnection(target.hostname, target.port or 443, timeout=timeout)
+        else:
+            connection = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=timeout)
+        headers = {
+            "Accept": "text/event-stream" if body.get("stream") else "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": f"lazydev/{VERSION}",
+            "Content-Length": str(len(json.dumps(body, separators=(",", ":")).encode("utf-8"))),
+        }
+        key = str(self.pc.get("apiKey", "") or "")
+        if key and self.provider.get("id") != "ollama":
+            headers["Authorization"] = f"Bearer {key}"
+        payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
+        path = target.path or "/"
+        if target.query:
+            path += "?" + target.query
+        connection.request("POST", path, body=payload, headers=headers)
+        return connection, connection.getresponse()
+
+
+
+def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _ProviderProxy | None = None) -> tuple[Path, Path]:
     KIMI_HOME.mkdir(parents=True, exist_ok=True)
     pc = provider_config(cfg, provider["id"])
     model = str(pc.get("model", ""))
@@ -364,8 +647,8 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any]) -> tuple[Pat
         '',
         '[providers.lazydev]',
         f'type = {toml_quote(provider_type)}',
-        f'base_url = {toml_quote(base)}',
-        f'api_key = {toml_quote(str(pc.get("apiKey", "")))}',
+        f'base_url = {toml_quote(f"http://127.0.0.1:{proxy.port}/v1" if proxy else base)}',
+        f'api_key = {toml_quote(proxy.token if proxy else str(pc.get("apiKey", "")))}',
         '',
         f'[models.{json.dumps("lazydev/" + model)}]',
         'provider = "lazydev"',
@@ -441,7 +724,14 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     if not pc.get("model"):
         print("No active provider is configured. Run: lazydev setup", file=sys.stderr)
         return 1
-    write_kimi_files(provider, cfg)
+    proxy = None
+    if provider["id"] != "anthropic":
+        proxy = _ProviderProxy(provider, pc)
+    try:
+        write_kimi_files(provider, cfg, proxy)
+    except Exception:
+        proxy and proxy.close()
+        raise
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     args = ["--add-dir", str(ARTIFACT_DIR)]
     if sessions:
@@ -452,7 +742,6 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
         args += ["--agent", "default"]
     env = os.environ.copy()
     env["KIMI_CODE_HOME"] = str(KIMI_HOME)
-    env["KIMI_CODE_NO_AUTO_UPDATE"] = "1"
     env["KIMI_LOOP_MAX_STEPS_PER_TURN"] = "0"
     env["LAZYDEV_ARTIFACT_DIR"] = str(ARTIFACT_DIR)
     env["LAZYDEV_VERSION"] = VERSION
@@ -464,6 +753,9 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
         return subprocess.call([kimi, *args], cwd=os.getcwd(), env=env)
     except KeyboardInterrupt:
         return 130
+    finally:
+        if proxy is not None:
+            proxy.close()
 
 
 def detect_languages(cwd: Path) -> list[dict[str, Any]]:
