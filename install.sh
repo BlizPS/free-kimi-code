@@ -208,8 +208,7 @@ replace_legacy_lazydev_launchers() {
 ensure_legacy_launcher_targets() {
   canonical="$LAZYDEV_BIN_DIR/lazydev"
   [ -f "$canonical" ] || return 0
-  for dir in "$HOME/.local/bin" "${PREFIX:-}/bin"; do
-    [ -n "$dir" ] || continue
+  for dir in "$HOME/.local/bin"; do
     [ "$dir" = "$LAZYDEV_BIN_DIR" ] && continue
     mkdir -p "$dir" 2>/dev/null || true
     [ -d "$dir" ] && [ -w "$dir" ] || continue
@@ -217,6 +216,15 @@ ensure_legacy_launcher_targets() {
     cp "$canonical" "$candidate" 2>/dev/null || true
     chmod 755 "$candidate" 2>/dev/null || true
   done
+  if [ -n "${PREFIX:-}" ]; then
+    dir="$PREFIX/bin"
+    [ "$dir" = "$LAZYDEV_BIN_DIR" ] && return 0
+    mkdir -p "$dir" 2>/dev/null || true
+    [ -d "$dir" ] && [ -w "$dir" ] || return 0
+    candidate="$dir/lazydev"
+    cp "$canonical" "$candidate" 2>/dev/null || true
+    chmod 755 "$candidate" 2>/dev/null || true
+  fi
 }
 
 refresh_shell_path() {

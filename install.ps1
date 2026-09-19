@@ -242,33 +242,17 @@ if ($RtkExe -and $RtkCurrentVersion -and $RtkLatestVersion -and (Test-VersionAtL
     Write-Host 'RTK not found — installing.'
 }
 
-function Install-KimiCode {
-    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-" + [guid]::NewGuid().ToString('N'))
-    $installerFile = Join-Path $tempRoot 'kimi-code-install.ps1'
-    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-    try {
-        # The Kimi installer is served as application/octet-stream. Download it
-        # as a file instead of reading .Content, which becomes a byte array in
-        # some PowerShell/HTTP combinations and turns into "60 35 10 ..." text.
-        Invoke-WebRequest -UseBasicParsing -Uri $KimiInstallUrl -OutFile $installerFile
-        if (-not (Test-Path -LiteralPath $installerFile -PathType Leaf)) {
-            Fail 'Kimi Code installer could not be downloaded.'
-        }
-        $shell = Get-Command powershell.exe -ErrorAction SilentlyContinue
-        if (-not $shell) { Fail 'Windows PowerShell executable was not found.' }
-        & $shell.Source -NoProfile -ExecutionPolicy Bypass -File $installerFile
-        if ($LASTEXITCODE -ne 0) {
-            Fail "Kimi Code installer failed with exit code $LASTEXITCODE."
-        }
-    } finally {
-        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
 if ($KimiNeedsUpdate) {
     Step "Installing/updating Kimi Code $KimiVersion"
     $env:KIMI_VERSION = $KimiVersion
-    Install-KimiCode
+    $kimiInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $KimiInstallUrl -OutFile $kimiInstallerPath
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $kimiInstallerPath
+        if ($LASTEXITCODE -ne 0) { Fail "Kimi Code installer exited with code $LASTEXITCODE." }
+    } finally {
+        Remove-Item -LiteralPath $kimiInstallerPath -Force -ErrorAction SilentlyContinue
+    }
     $KimiExe = Find-Kimi
     if (-not $KimiExe) { Fail "Kimi Code did not install a usable launcher." }
     $KimiCurrentVersion = Get-KimiVersion $KimiExe
