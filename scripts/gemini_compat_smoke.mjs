@@ -20,8 +20,9 @@ if (prepared.reasoning_effort !== 'low') errors.push('Gemini request must defaul
 if (prepared.extra_body?.google?.thinking_config) errors.push('Gemini request must not send overlapping thinking config with reasoning_effort');
 if (!resilience.streamNeedsGeminiRetry({ finishReason: 'MAX_TOKENS', visibleOutput: false, retried: false })) errors.push('Gemini truncated thinking-only streams must be retryable');
 if (!resilience.streamNeedsGeminiRetry({ finishReason: 'MAX_TOKENS', visibleOutput: true, retried: false })) {} else errors.push('Gemini streams with visible output must not be retried');
-if (!src.includes("const geminiProxy = provider.id === 'gemini' && Boolean(proxy);")) errors.push('Gemini must use the resilient local proxy route');
-if (!src.includes("provider.id === 'gemini' ? geminiOpenAIEndpoint(pc.model)")) errors.push('Gemini proxy must target the official OpenAI-compatible endpoint');
+if (!src.includes("const proxy = !['ollama', 'gemini', 'anthropic'].includes(provider.id)")) errors.push('Gemini must bypass the OpenAI-compatible proxy');
+if (!src.includes("const providerType = provider.id === 'gemini' && !antigravity && !geminiProxy ? 'google-genai'")) errors.push('Gemini must use the native google-genai provider type');
+if (!src.includes("https://generativelanguage.googleapis.com")) errors.push('Gemini native Google endpoint missing');
 if (!src.includes("type = ${tomlQuote(providerType)}")) errors.push('Provider TOML generation missing');
 
 if (errors.length) {

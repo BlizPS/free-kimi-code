@@ -349,7 +349,7 @@ async function requestJson(urlString, { method = 'GET', headers = {}, body, time
 
 const PROVIDER_OUTPUT_HARD_CAPS = Object.freeze({
   openrouter: 32768,
-  gemini: 65536,
+  gemini: 32768,
   nvidia: 32768,
   openai: 32768,
   ollama: 32768,
@@ -594,9 +594,7 @@ function normalizeOpenAICompatibleRequest(body, provider, pc, removed = new Set(
   for (const field of UNSUPPORTED_PASSTHROUGH_FIELDS) { out[field] = undefined; delete out[field]; removed.add(field); }
   const info = effectiveModelInfo(provider, pc);
   const hardCap = PROVIDER_OUTPUT_HARD_CAPS[provider.id] || 32768;
-  const declaredOutput = Number(info.outputLimit) || 0;
-  const known = knownModelInfo(String(pc?.model || ''), provider.id);
-  const outputCap = Math.max(256, declaredOutput > 0 ? declaredOutput : (Number(known.outputLimit) || hardCap));
+  const outputCap = Math.max(256, Math.min(Number(info.outputLimit) || hardCap, hardCap));
   for (const field of ['max_tokens', 'max_completion_tokens']) {
     if (out[field] !== undefined) {
       const n = Number(out[field]);
@@ -1261,7 +1259,7 @@ function contextBudget(modelInfo = {}) {
   const cap = Number(process.env.LAZYDEV_CONTEXT_CAP || 0);
   const max = cap > 0 ? Math.max(1024, Math.min(rawMax, cap)) : rawMax;
   const rawOutput = Math.max(256, Number(modelInfo?.outputLimit) || 16384);
-  const output = rawOutput;
+  const output = Math.min(rawOutput, 32768);
   const reserveTarget = Math.max(4096, Math.min(49152, Math.max(output * 2, Math.round(max * 0.08))));
   const reserve = max > 4096 ? Math.min(reserveTarget, Math.max(1024, Math.floor(max / 4))) : Math.max(512, Math.floor(max / 8));
   const input = max;

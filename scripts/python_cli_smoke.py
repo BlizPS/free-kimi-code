@@ -64,19 +64,89 @@ with tempfile.TemporaryDirectory() as td:
         import tomllib
         parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
         model_entry = parsed["models"]["lazydev/Nvidia/nemotron-3-super-120b-a12b"]
+        # Explicit saved metadata is preserved when it is already known, while
+        # context display input budget is the full declared window so the TUI
+        # does not show 100% merely because the reserved output headroom was
+        # reached.
         assert model_entry["max_context_size"] == 131072
         assert model_entry["max_context_size"] > 0
         assert model_entry["max_output_size"] == 16384
-        assert model_entry["max_input_size"] == 114688
+        assert model_entry["max_input_size"] == 131072
 
-        cfg["providers"]["nvidia"]["modelInfo"] = {"toolUse": False}
+        # The exact NVIDIA model has a documented 1M context and agent/tool
+        # support; when metadata is absent the built-in model rule supplies it.
+        cfg["providers"]["nvidia"]["modelInfo"] = {}
         config_path, _ = mod.write_kimi_files(provider, cfg)
         parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
         model_entry = parsed["models"]["lazydev/Nvidia/nemotron-3-super-120b-a12b"]
-        assert model_entry["max_context_size"] == 32768
-        assert "tool_use" not in model_entry["capabilities"]
+        assert model_entry["max_context_size"] == 1048576
+        assert model_entry["max_input_size"] == 1048576
+        assert model_entry["max_output_size"] == 32768
+        assert "tool_use" in model_entry["capabilities"]
+        assert model_entry["off_effort"] == "none"
     finally:
         mod.KIMI_HOME = old_home
+
+# NVIDIA request normalization must use its documented chat-template controls
+# and remove generic OpenAI reasoning controls that can be rejected or cause
+# long reasoning traces to consume the entire max_tokens budget.
+normalized = mod._normalize_provider_request({
+    "model": "nvidia/nemotron-3-super-120b-a12b",
+    "messages": [{"role": "user", "content": "hello"}],
+    "tools": [{"type": "function", "function": {"name": "do_work"}}],
+    "max_tokens": 999999,
+    "prompt_cache_key": "drop",
+    "reasoning_effort": "high",
+}, {"id": "nvidia"}, {
+    "model": "nvidia/nemotron-3-super-120b-a12b",
+    "modelInfo": {},
+})
+assert "prompt_cache_key" not in normalized
+assert "reasoning_effort" not in normalized
+assert normalized["max_tokens"] == 32768
+kwargs = normalized["extra_body"]["chat_template_kwargs"]
+assert kwargs["enable_thinking"] is True and kwargs["low_effort"] is True and kwargs["force_nonempty_content"] is True
+
+
+# Existing installs may contain a stale, differently-cased NVIDIA model id.
+# The live catalog refresh must canonicalize it so the API receives the provider's
+# actual model identifier and the 1M context metadata can be adopted.
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading, json as _json
+class _ModelCatalog(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+    def do_GET(self):
+        payload = {"data": [{"id": "nvidia/nemotron-3-super-120b-a12b", "context_length": 1048576, "max_completion_tokens": 32768}]}
+        raw = _json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+_catalog = ThreadingHTTPServer(("127.0.0.1", 0), _ModelCatalog)
+threading.Thread(target=_catalog.serve_forever, daemon=True).start()
+try:
+    live_provider = {"id": "openai", "label": "OpenAI", "kind": "openai", "models": f"http://127.0.0.1:{_catalog.server_address[1]}/v1/models", "base": f"http://127.0.0.1:{_catalog.server_address[1]}/v1", "env": "OPENAI_API_KEY"}
+    live_cfg = {"providers": {"openai": {"apiKey": "test-key", "model": "NVIDIA/Nemotron-3-Super-120B-A12B", "modelInfo": {"context": 32768, "output": 4096}}}}
+    # Use the NVIDIA rule while exercising the catalog shape through a local endpoint.
+    live_provider["id"] = "nvidia"
+    live_provider["models"] = f"http://127.0.0.1:{_catalog.server_address[1]}/v1/models"
+    live_provider["base"] = f"http://127.0.0.1:{_catalog.server_address[1]}/v1"
+    live_cfg["providers"] = {"nvidia": {"apiKey": "test-key", "model": "NVIDIA/Nemotron-3-Super-120B-A12B", "modelInfo": {"context": 32768, "output": 4096}}}
+    old_provider_models = mod.PROVIDERS[:]
+    try:
+        # Directly exercise the refresh helper with the local catalog provider definition.
+        refreshed_pc = live_cfg["providers"]["nvidia"]
+        refreshed = mod.refresh_selected_model(live_cfg, live_provider, refreshed_pc)
+        assert refreshed_pc["model"] == "nvidia/nemotron-3-super-120b-a12b"
+        assert refreshed["context"] == 1048576
+        assert refreshed["output"] == 32768
+    finally:
+        mod.PROVIDERS[:] = old_provider_models
+finally:
+    _catalog.shutdown(); _catalog.server_close()
 
 # The native chat path must clear the terminal before starting Kimi Code.
 class _TTYBuffer:

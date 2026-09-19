@@ -19,6 +19,7 @@ import threading
 import time
 import http.server
 import http.client
+import io
 import sys
 import textwrap
 import urllib.error
@@ -75,6 +76,91 @@ KNOWN_UNSUPPORTED_REQUEST_FIELDS = {
 }
 PROXY_MAX_RETRIES = 2
 PROXY_MAX_400_REPAIRS = 4
+DEFAULT_MODEL_CONTEXT = 262144
+DEFAULT_MODEL_OUTPUT = 16384
+PROVIDER_OUTPUT_HARD_CAPS = {
+    "nvidia": 32768,
+    "gemini": 65536,
+    "groq": 32768,
+    "llm7": 32768,
+    "codebuddy": 32768,
+    "openrouter": 32768,
+    "openai": 32768,
+    "ollama": 32768,
+}
+MODEL_LIMIT_RULES = (
+    (re.compile(r"^nvidia/nemotron-3-super-120b-a12b$", re.I), 1048576, 32768, True, True, "none"),
+    (re.compile(r"^gemini-3\.1-flash-image(?:-.+)?$", re.I), 131072, 32768, False, True, None),
+    (re.compile(r"^gemini-3\.1-flash-lite(?:-.+)?$", re.I), 1048576, 65536, True, True, None),
+    (re.compile(r"^gemini-3\.1-pro(?:-.+)?$", re.I), 1048576, 65536, True, True, None),
+    (re.compile(r"^gemini-3-flash(?:-.+)?$", re.I), 1048576, 65536, True, True, None),
+)
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def known_model_limits(provider: dict[str, Any], model: str) -> dict[str, Any]:
+    pid = str(provider.get("id", ""))
+    model_id = str(model or "").strip()
+    for pattern, context, output, tool_use, thinking, off_effort in MODEL_LIMIT_RULES:
+        if pattern.search(model_id):
+            if pattern.pattern.startswith("^nvidia/") and pid != "nvidia":
+                continue
+            return {
+                "context": context,
+                "output": output,
+                "toolUse": tool_use,
+                "thinking": thinking,
+                "offEffort": off_effort,
+                "source": "catalog-rule",
+            }
+    return {}
+
+
+def apply_model_limits(model_info: dict[str, Any], provider: dict[str, Any], model: str) -> dict[str, Any]:
+    info = dict(model_info or {})
+    known = known_model_limits(provider, model)
+    live_context = _positive_int(info.get("context")) or _positive_int(info.get("contextLimit")) or _positive_int(info.get("context_length")) or _positive_int(info.get("inputTokenLimit")) or _positive_int(info.get("inputLimit"))
+    live_output = _positive_int(info.get("output")) or _positive_int(info.get("outputLimit")) or _positive_int(info.get("max_completion_tokens"))
+    if live_context:
+        info["context"] = live_context
+        info["contextSource"] = "live"
+    elif known.get("context"):
+        info["context"] = known["context"]
+        info["contextSource"] = known["source"]
+    else:
+        info["context"] = DEFAULT_MODEL_CONTEXT
+        info["contextSource"] = "fallback"
+    if live_output:
+        info["output"] = live_output
+        info["outputSource"] = "live"
+    elif known.get("output"):
+        info["output"] = known["output"]
+        info["outputSource"] = known["source"]
+    else:
+        provider_cap = PROVIDER_OUTPUT_HARD_CAPS.get(str(provider.get("id")), DEFAULT_MODEL_OUTPUT)
+        info["output"] = provider_cap
+        info["outputSource"] = "provider-default"
+    if known.get("toolUse") is not None:
+        info["toolUse"] = bool(known["toolUse"])
+    if known.get("offEffort"):
+        info["offEffort"] = known["offEffort"]
+    info["context"] = max(1024, int(info["context"]))
+    output_value = max(256, int(info["output"]))
+    # Live model metadata and exact model rules are authoritative. Provider
+    # defaults are only a safety fallback when the upstream catalog omits a
+    # per-model output ceiling. This avoids truncating providers such as
+    # Gemini models that legitimately expose larger output windows.
+    if info.get("outputSource") == "provider-default":
+        output_value = min(output_value, PROVIDER_OUTPUT_HARD_CAPS.get(str(provider.get("id")), 65536))
+    info["output"] = output_value
+    return info
 
 
 def ansi(code: str, value: str) -> str:
@@ -144,23 +230,26 @@ def normalize_model(item: dict[str, Any], provider: dict[str, Any]) -> dict[str,
     pid = provider["id"]
     if pid == "gemini":
         raw = str(item.get("name") or "").replace("models/", "", 1)
-        return {
+        info = {
             "id": raw,
             "name": item.get("displayName") or raw,
             "context": item.get("inputTokenLimit"),
             "output": item.get("outputTokenLimit"),
             "toolUse": True,
         }
+        return apply_model_limits(info, provider, raw) | {"id": raw, "name": item.get("displayName") or raw, "live": True}
     if pid == "ollama":
         raw = str(item.get("name") or item.get("model") or item.get("id") or "").strip()
-        return {"id": raw, "name": raw, "toolUse": True, "local": True}
+        info = apply_model_limits({"id": raw, "name": raw, "toolUse": True, "local": True}, provider, raw)
+        return info | {"live": True}
     raw = str(item.get("id") or item.get("name") or item.get("slug") or "").strip()
     pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
     supported = item.get("supported_parameters") if isinstance(item.get("supported_parameters"), list) else []
     free = pid == "openrouter" and (raw == "openrouter/free" or raw.lower().endswith(":free") or (str(pricing.get("prompt", "")) == "0" and str(pricing.get("completion", "")) == "0"))
     top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
     output_limit = item.get("max_completion_tokens") or top_provider.get("max_completion_tokens")
-    return {"id": raw, "name": item.get("name") or raw, "toolUse": True if not supported else "tools" in supported, "free": free, "context": item.get("context_length"), "output": output_limit}
+    info = {"id": raw, "name": item.get("name") or raw, "toolUse": True if not supported else "tools" in supported, "free": free, "context": item.get("context_length"), "output": output_limit}
+    return apply_model_limits(info, provider, raw) | {"live": True}
 
 
 def _extract_model_records(data: Any) -> list[Any]:
@@ -317,37 +406,43 @@ def toml_quote(value: str) -> str:
 
 
 def model_context_size(provider: dict[str, Any], pc: dict[str, Any]) -> int:
-    info = pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}
-    candidates = (
-        info.get("context"),
-        info.get("contextLimit"),
-        info.get("context_length"),
-        info.get("inputTokenLimit"),
-        info.get("inputLimit"),
-    )
-    for value in candidates:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            continue
-        if parsed > 0:
-            return max(1024, parsed)
-    # Kimi Code requires a positive model context declaration.
-    # Keep the unknown-model fallback conservative so providers without
-    # context metadata (notably Ollama) still start reliably.
-    return 32768
+    info = apply_model_limits(pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}, provider, str(pc.get("model", "")))
+    return max(1024, int(info.get("context") or DEFAULT_MODEL_CONTEXT))
 
 
-def model_output_size(pc: dict[str, Any]) -> int:
-    info = pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}
-    for value in (info.get("output"), info.get("outputLimit"), info.get("max_completion_tokens")):
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            continue
-        if parsed > 0:
-            return max(256, parsed)
-    return 8192
+def model_output_size(provider: dict[str, Any], pc: dict[str, Any]) -> int:
+    info = apply_model_limits(pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}, provider, str(pc.get("model", "")))
+    return max(256, int(info.get("output") or DEFAULT_MODEL_OUTPUT))
+
+
+def refresh_selected_model(config: dict[str, Any], provider: dict[str, Any], pc: dict[str, Any]) -> dict[str, Any]:
+    model = str(pc.get("model", "")).strip()
+    current = apply_model_limits(pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}, provider, model)
+    # Older LazyDev versions stored guessed limits without a live marker. Refresh
+    # those records once so stale context/output values cannot survive upgrades.
+    needs_live_refresh = provider.get("id") != "ollama" and (not bool(current.get("live")) or current.get("contextSource") == "fallback" or current.get("outputSource") == "fallback")
+    if not needs_live_refresh:
+        return current
+    try:
+        key = str(pc.get("apiKey", "") or "")
+        base = str(pc.get("baseUrl", "") or provider.get("base", ""))
+        models = fetch_models(provider, key, base)
+        selected = next((item for item in models if str(item.get("id", "")).strip() == model), None)
+        if selected is None:
+            selected = next((item for item in models if str(item.get("id", "")).strip().lower() == model.lower()), None)
+        if selected:
+            canonical_model = str(selected.get("id") or model).strip()
+            if canonical_model and canonical_model != model:
+                model = canonical_model
+                pc["model"] = canonical_model
+            current = apply_model_limits(selected, provider, model)
+            current["live"] = True
+            pc["modelInfo"] = current
+            config.setdefault("providers", {})[provider["id"]] = pc
+            write_config(config)
+    except Exception:
+        pass
+    return current
 
 
 def is_antigravity_model_name(model: str) -> bool:
@@ -415,6 +510,88 @@ def _retry_after_seconds(headers: dict[str, str]) -> float:
         return max(0.0, min(30.0, float(value))) if value else 0.0
     except ValueError:
         return 0.0
+
+
+def _normalize_provider_request(body: dict[str, Any], provider: dict[str, Any], pc: dict[str, Any]) -> dict[str, Any]:
+    normalized, _ = _strip_request_fields(body, KNOWN_UNSUPPORTED_REQUEST_FIELDS)
+    pid = str(provider.get("id", ""))
+    model = str(pc.get("model", normalized.get("model", "")))
+    hard_cap = PROVIDER_OUTPUT_HARD_CAPS.get(pid, 32768)
+    info = apply_model_limits(pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}, provider, model)
+    output_value = _positive_int(info.get("output")) or hard_cap
+    declared = info.get("outputSource") in {"live", "catalog-rule"}
+    output_cap = max(256, output_value if declared else min(output_value, hard_cap))
+    # Kimi can calculate a large remaining-context completion budget. Third-party
+    # OpenAI-compatible servers often enforce a much smaller per-call output cap,
+    # so clamp both common field spellings before the request leaves LazyDev.
+    for key in ("max_tokens", "max_completion_tokens"):
+        if key in normalized:
+            try:
+                normalized[key] = max(1, min(int(normalized[key]), output_cap))
+            except (TypeError, ValueError):
+                normalized.pop(key, None)
+    if "max_tokens" not in normalized and "max_completion_tokens" not in normalized:
+        normalized["max_tokens"] = output_cap
+    if pid == "nvidia":
+        # NVIDIA Nemotron 3 Super controls reasoning through chat-template kwargs,
+        # not OpenAI's generic reasoning_effort field. Strip the generic field and
+        # use the documented low-effort thinking mode for agent/tool requests.
+        normalized.pop("reasoning_effort", None)
+        normalized.pop("reasoning", None)
+        extra = dict(normalized.get("extra_body")) if isinstance(normalized.get("extra_body"), dict) else {}
+        kwargs = dict(extra.get("chat_template_kwargs")) if isinstance(extra.get("chat_template_kwargs"), dict) else {}
+        kwargs["enable_thinking"] = True
+        kwargs["low_effort"] = True
+        kwargs["force_nonempty_content"] = True
+        extra["chat_template_kwargs"] = kwargs
+        normalized["extra_body"] = extra
+    return normalized
+
+
+def _stream_has_visible_output(payload: bytes) -> bool:
+    text = payload.decode("utf-8", "replace")
+    for raw in re.split(r"\r?\n\r?\n", text):
+        data_lines = [line[5:].lstrip() for line in raw.splitlines() if line.startswith("data:")]
+        if not data_lines:
+            continue
+        data = "\n".join(data_lines).strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            chunk = json.loads(data)
+        except Exception:
+            continue
+        choices = chunk.get("choices") if isinstance(chunk, dict) else None
+        choice = choices[0] if isinstance(choices, list) and choices else {}
+        delta = choice.get("delta") if isinstance(choice, dict) else {}
+        if isinstance(delta, dict) and (delta.get("content") or delta.get("tool_calls") or delta.get("function_call")):
+            return True
+        message = choice.get("message") if isinstance(choice, dict) else {}
+        if isinstance(message, dict) and (message.get("content") or message.get("tool_calls") or message.get("function_call")):
+            return True
+    return False
+
+
+def _stream_finish_reason(payload: bytes) -> str:
+    text = payload.decode("utf-8", "replace")
+    found = ""
+    for raw in re.split(r"\r?\n\r?\n", text):
+        data_lines = [line[5:].lstrip() for line in raw.splitlines() if line.startswith("data:")]
+        if not data_lines:
+            continue
+        data = "\n".join(data_lines).strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            chunk = json.loads(data)
+        except Exception:
+            continue
+        choices = chunk.get("choices") if isinstance(chunk, dict) else None
+        choice = choices[0] if isinstance(choices, list) and choices else {}
+        reason = choice.get("finish_reason") if isinstance(choice, dict) else ""
+        if reason:
+            found = str(reason).lower()
+    return found
 
 
 class _ProviderProxy:
@@ -510,7 +687,8 @@ class _ProviderProxy:
                 repair_count = 0
                 transient_attempt = 0
                 while True:
-                    outbound, removed_now = _strip_request_fields(body, removed_fields)
+                    normalized_body = _normalize_provider_request(body, outer.provider, outer.pc)
+                    outbound, removed_now = _strip_request_fields(normalized_body, removed_fields)
                     removed_fields |= removed_now
                     try:
                         connection, response = outer._open_upstream(outbound)
@@ -568,7 +746,29 @@ class _ProviderProxy:
                         self.close_connection = True
                         return
                     try:
-                        self._relay(status, headers, response, is_stream)
+                        if is_stream and isinstance(outbound.get("tools"), list) and outbound.get("tools") and outer.provider.get("id") == "nvidia":
+                            payload = response.read()
+                            reason = _stream_finish_reason(payload)
+                            visible = _stream_has_visible_output(payload)
+                            if not visible and reason in {"length", "max_tokens", "truncated"} and repair_count < 1:
+                                repair_count += 1
+                                body = _normalize_provider_request(body, outer.provider, outer.pc)
+                                extra = dict(body.get("extra_body")) if isinstance(body.get("extra_body"), dict) else {}
+                                kwargs = dict(extra.get("chat_template_kwargs")) if isinstance(extra.get("chat_template_kwargs"), dict) else {}
+                                kwargs["enable_thinking"] = False
+                                kwargs.pop("low_effort", None)
+                                kwargs["force_nonempty_content"] = True
+                                extra["chat_template_kwargs"] = kwargs
+                                body["extra_body"] = extra
+                                try:
+                                    response.close()
+                                    connection.close()
+                                except Exception:
+                                    pass
+                                continue
+                            self._relay(status, headers, io.BytesIO(payload), is_stream)
+                        else:
+                            self._relay(status, headers, response, is_stream)
                     finally:
                         try:
                             connection.close()
@@ -618,19 +818,23 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     pc = provider_config(cfg, provider["id"])
     model = str(pc.get("model", ""))
     base = normalize_url(pc.get("baseUrl") or provider["base"])
-    provider_type = "anthropic" if provider["id"] == "anthropic" else "openai"
+    provider_type = "google-genai" if provider["id"] == "gemini" else "anthropic" if provider["id"] == "anthropic" else "openai"
     context = model_context_size(provider, pc)
-    output = model_output_size(pc)
+    output = model_output_size(provider, pc)
+    reserve_target = max(4096, min(49152, max(output * 2, round(context * 0.08))))
+    reserve = min(reserve_target, max(1024, context // 4)) if context > 4096 else max(512, context // 8)
+    input_limit = context
     tool_use = model_supports_tools(pc)
     capabilities = []
     if tool_use:
         capabilities.append("tool_use")
     if provider["id"] == "gemini" and not is_antigravity_model_name(model):
         capabilities.append("thinking")
+    known = known_model_limits(provider, model)
     if provider["id"] == "ollama":
         base = normalize_url(pc.get("baseUrl") or provider["base"]) + "/v1"
     elif provider["id"] == "gemini":
-        base = "https://generativelanguage.googleapis.com/v1beta/openai"
+        base = "https://generativelanguage.googleapis.com"
     lines = [
         f"default_model = {toml_quote('lazydev/' + model)}",
         'default_permission_mode = "manual"',
@@ -654,10 +858,11 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         'provider = "lazydev"',
         f'model = {toml_quote(model)}',
         f'max_context_size = {context}',
-        f'max_input_size = {max(1024, context - min(output, max(256, context // 4)))}',
+        f'max_input_size = {input_limit}',
         f'max_output_size = {min(output, max(256, context // 4))}',
         f'capabilities = {json.dumps(capabilities)}',
         f'display_name = {toml_quote(provider["label"] + " · " + model)}',
+        *( [f'off_effort = {toml_quote(known["offEffort"])}'] if known.get("offEffort") else [] ),
         '',
         '[thinking]',
         f'enabled = {"true" if provider["id"] == "gemini" else "false"}',
@@ -666,8 +871,12 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         '[loop_control]',
         'max_attempts_per_step = 10',
         'max_steps_per_turn = 0',
+        f'reserved_context_size = {reserve}',
         'compaction_trigger_ratio = 0.88',
         'compaction_max_attempts = 2',
+        '',
+        '[token_counting]',
+        'strategy = "measured+estimated"',
         '',
         '[mcp.client]',
         'tool_call_timeout_ms = 60000',
@@ -724,8 +933,9 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     if not pc.get("model"):
         print("No active provider is configured. Run: lazydev setup", file=sys.stderr)
         return 1
+    pc["modelInfo"] = refresh_selected_model(cfg, provider, pc)
     proxy = None
-    if provider["id"] != "anthropic":
+    if provider["id"] not in {"anthropic", "gemini"}:
         proxy = _ProviderProxy(provider, pc)
     try:
         write_kimi_files(provider, cfg, proxy)
@@ -749,6 +959,9 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     for name in list(env):
         if name.startswith("KIMI_MODEL_"):
             env.pop(name, None)
+    context = model_context_size(provider, pc)
+    output = model_output_size(provider, pc)
+    env["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(context)
     try:
         return subprocess.call([kimi, *args], cwd=os.getcwd(), env=env)
     except KeyboardInterrupt:
