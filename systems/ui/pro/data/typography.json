@@ -1,0 +1,52 @@
+[
+  {
+    "id": "ui-sans",
+    "heading": "Inter",
+    "body": "Inter",
+    "mood": "neutral, precise, product-focused"
+  },
+  {
+    "id": "ui-mono",
+    "heading": "Inter",
+    "body": "Inter",
+    "mono": "JetBrains Mono",
+    "mood": "technical, dense, tool-oriented"
+  },
+  {
+    "id": "humanist-sans",
+    "heading": "Atkinson Hyperlegible",
+    "body": "Inter",
+    "mood": "warm, readable, accessible"
+  },
+  {
+    "id": "editorial-pair",
+    "heading": "DM Sans",
+    "body": "Source Serif 4",
+    "mood": "editorial, expressive, readable"
+  },
+  {
+    "id": "display-modern",
+    "heading": "Space Grotesk",
+    "body": "Inter",
+    "mood": "modern, confident, tech-forward"
+  },
+  {
+    "id": "quiet-luxury",
+    "heading": "Cormorant Garamond",
+    "body": "Inter",
+    "mood": "refined, spacious, premium"
+  },
+  {
+    "id": "compact-data",
+    "heading": "Inter",
+    "body": "Inter",
+    "mono": "IBM Plex Mono",
+    "mood": "dense, numeric, operational"
+  },
+  {
+    "id": "friendly-product",
+    "heading": "Manrope",
+    "body": "Inter",
+    "mood": "friendly, modern, consumer"
+  }
+]

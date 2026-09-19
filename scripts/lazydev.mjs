@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import readline from 'node:readline';
 import { platformPaths } from '../runtime/platform-policy.mjs';
 import { modelIntelligenceProfile, buildIntelligenceAliasSystem } from '../runtime/intelligence-kernel.mjs';
 import { buildUiSystemPrompt } from '../runtime/ui-intelligence.mjs';
@@ -16,6 +17,7 @@ import { buildNativeSystemsPrompt } from '../systems/index.mjs';
 import { buildKimiTokenConfig } from '../systems/token/adapters/kimi.mjs';
 import { extractSessionModelAliases } from '../runtime/session-model-compat.mjs';
 import { repairOpenAIHistory } from '../runtime/openai-history.mjs';
+import { generateDesignSystem } from '../systems/ui/pro/index.mjs';
 
 const version = '1.0.0';
 const TOKEN_SAVINGS_FLOOR = 0.75;
@@ -68,6 +70,42 @@ function efficiencyPolicy() {
 function efficiencyStatus() {
   const text = efficiencyPolicy();
   return { active: Boolean(text), target: text.includes('~75%') ? 0.75 : null, policyFile: EFFICIENCY_POLICY_FILE };
+}
+
+
+function parseUiArgs(argv) {
+  const opts = {}; const queryParts = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = String(argv[i]);
+    if (arg === '--json') { opts.json = true; continue; }
+    if (arg === '--persist') { opts.persist = true; continue; }
+    if (arg === '--page') { opts.page = String(argv[++i] || '').trim() || null; continue; }
+    if (arg === '--project') { opts.projectName = String(argv[++i] || '').trim() || null; continue; }
+    if (arg === '--stack') { opts.stack = String(argv[++i] || '').trim() || null; continue; }
+    if (arg === '--motion' || arg === '--density' || arg === '--variance') {
+      const value = Number(argv[++i]);
+      if (Number.isFinite(value)) opts[arg.slice(2)] = value;
+      continue;
+    }
+    if (arg === '--output-dir') { opts.outputDir = String(argv[++i] || '').trim() || null; continue; }
+    queryParts.push(arg);
+  }
+  return { opts, query: queryParts.join(' ').trim() };
+}
+function uiCommand(argv) {
+  const { opts, query } = parseUiArgs(argv);
+  if (!query) throw new Error('Usage: lazydev ui "<product + interface brief>" [--json] [--persist] [--page <name>]');
+  const result = generateDesignSystem(query, { ...opts, cwd: process.cwd() });
+  if (opts.json) {
+    console.log(JSON.stringify({
+      query: result.query, project: result.project, stack: result.stack, decisionTrace: result.trace,
+      designSystem: result.resolution, matches: result.matches, components: result.components, stackRules: result.stackRules, uxRules: result.uxRules, persistence: result.persistence
+    }, null, 2));
+  } else {
+    console.log(result.markdown);
+    if (result.persistence?.master) console.log(`\nPersisted: ${result.persistence.master}`);
+    if (result.persistence?.page) console.log(`Page override: ${result.persistence.page}`);
+  }
 }
 
 function outputDirectory() {
@@ -190,23 +228,31 @@ function yellow(text) { return ansi('33', text); }
 function red(text) { return ansi('31', text); }
 function dim(text) { return ansi('2', text); }
 
-function prompt(question) {
-  return new Promise((resolve) => {
-    process.stdout.write(question);
-    const chunks = [];
-    const onData = (buf) => {
-      const text = String(buf);
-      const idx = text.indexOf('\n');
-      if (idx >= 0) {
-        chunks.push(text.slice(0, idx));
-        cleanup();
-        resolve(chunks.join('').replace(/\r$/, ''));
-      } else chunks.push(text);
+async function prompt(question) {
+  return new Promise((resolve, reject) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      crlfDelay: Infinity,
+    });
+    let closed = false;
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      try { rl.close(); } catch {}
+      try { process.stdin.pause(); } catch {}
     };
-    const cleanup = () => process.stdin.off('data', onData);
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', onData);
-    process.stdin.resume();
+    const onSigint = () => {
+      cleanup();
+      process.stdout.write('\n');
+      reject(new Error('Input interrupted.'));
+    };
+    rl.once('SIGINT', onSigint);
+    rl.question(question, (answer) => {
+      rl.off('SIGINT', onSigint);
+      cleanup();
+      resolve(String(answer || ''));
+    });
   });
 }
 
@@ -1071,17 +1117,33 @@ async function selectModel(models, initial = 0) {
     line(); line(dim('↑/↓ select · Enter confirm'));
   };
   render();
-  await new Promise((resolve) => {
+  await new Promise((resolve, reject) => {
+    const cleanup = () => {
+      process.stdin.off('keypress', onKey);
+      try { process.stdin.setRawMode(false); } catch {}
+      try { process.stdin.pause(); } catch {}
+    };
     const onKey = (_str, key = {}) => {
+      if (key.ctrl && key.name === 'c') {
+        cleanup();
+        process.stdout.write('\n');
+        reject(new Error('Model selection interrupted.'));
+        return;
+      }
       if (key.name === 'up') { index = (index - 1 + models.length) % models.length; render(); }
       else if (key.name === 'down') { index = (index + 1) % models.length; render(); }
-      else if (key.name === 'return' || key.name === 'enter') { done = true; process.stdin.off('keypress', onKey); try { process.stdin.setRawMode(false); } catch {} process.stdout.write('\n'); resolve(); }
+      else if (key.name === 'return' || key.name === 'enter') {
+        done = true;
+        cleanup();
+        process.stdout.write('\n');
+        resolve();
+      }
     };
     process.stdin.on('keypress', onKey);
   });
   return models[index];
 }
-function readlineInputKeys() { try { import('node:readline').then((m) => m.emitKeypressEvents(process.stdin)); } catch {} }
+function readlineInputKeys() { try { readline.emitKeypressEvents(process.stdin); } catch {} }
 
 async function envInfo(jsonMode=false) {
   const data={
@@ -1208,6 +1270,7 @@ async function help() {
   line(`  ${ansi('36','lazydev artifact'.padEnd(24))} Work with a standalone artifact path`);
   line(`  ${ansi('36','lazydev env'.padEnd(24))} Inspect the current runtime environment`);
   line(`  ${ansi('36','lazydev universal'.padEnd(24))} Show universal integration details`);
+  line(`  ${ansi('36','lazydev ui <brief>'.padEnd(24))} Generate a searchable design system before UI implementation`);
   line(`  ${ansi('36','lazydev doctor'.padEnd(24))} Check installation and configuration`);
   line(`  ${ansi('36','lazydev version'.padEnd(24))} Show the installed version`);
   line();
@@ -1328,6 +1391,7 @@ async function main() {
   if (cmd === 'skills') return listSkills();
   if (cmd === 'doctor') return doctor();
   if (cmd === 'env' || cmd === 'info' || cmd === 'universal') return envInfo(process.argv.includes('--json'));
+  if (cmd === 'ui') return uiCommand(process.argv.slice(3));
   if (cmd === 'artifact' || cmd === 'artifacts') return artifactCommand(process.argv[3]);
   if (cmd === 'setup') return setup();
   if (cmd === 'chat') return chat();

@@ -17,4 +17,9 @@ assert.match(bare.stdout, /lazydev chat/);
 assert.match(bare.stdout, /Command center/);
 assert.doesNotMatch(bare.stdout, /Open the configured or detected agent CLI/);
 
+const ui = spawnSync(process.execPath, [entry, 'ui', 'professional dark AI coding workspace', '--json'], { encoding: 'utf8' });
+assert.equal(ui.status, 0, ui.stderr);
+assert.match(ui.stdout, /\"decisionTrace\"/);
+assert.match(ui.stdout, /developer-tool/);
+
 console.log('command router smoke: PASS');

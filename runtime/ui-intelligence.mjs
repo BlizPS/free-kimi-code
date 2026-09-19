@@ -10,7 +10,8 @@ const UI_SIGNALS = Object.freeze({
 const UI_REQUEST = /\b(ui|ux|frontend|front-end|web app|website|web page|landing page|dashboard|component|design system|responsive|mobile ui|animation|visual design)\b/i;
 const UI_REFERENCE = /\b(reference|inspiration|inspired by|like|similar to|match|recreate|clone|copy|use .* as reference|kimi code|kimi code ui)\b/i;
 const UI_PRESERVE = /\b(keep|preserve|don't redesign|do not redesign|existing design|existing ui|same ui|same design|current ui|current design)\b/i;
-const UI_COMPLEX = /\b(multi-page|multiple pages|full app|complete app|production|polished|interactive|animation|responsive|mobile|desktop|states|accessibility)\b/i;
+const UI_COMPLEX = /\b(multi-page|multiple pages|full app|complete app|production|polished|professional|interactive|animation|responsive|mobile|desktop|states|accessibility|design system)\b/i;
+const UI_BUILD = /\b(build|create|make|implement|design|redesign|polish|improve|fix|refactor|generate)\b/i;
 
 export const UI_INTELLIGENCE_RULES = Object.freeze([
   'Design for the actual product; preserve existing identity unless redesign is requested.',
@@ -29,12 +30,16 @@ export function classifyUiRequest(prompt = '') {
   const reference = UI_REFERENCE.test(text);
   const preserve = UI_PRESERVE.test(text);
   const complex = UI_COMPLEX.test(text);
+  const build = UI_BUILD.test(text);
+  const designIntelligence = isUi && (build || reference || complex);
   return Object.freeze({
     isUi,
     domain,
     reference,
     preserve,
     complex,
+    build,
+    designIntelligence,
     researchFirst: isUi && (reference || complex),
   });
 }
@@ -48,6 +53,7 @@ export function buildUiTaskContext(prompt = '') {
     `reference=${task.reference ? 'named-or-external' : 'none'}`,
     `identity=${task.preserve ? 'preserve' : 'infer-from-repo'}`,
     `complexity=${task.complex ? 'non-trivial' : 'focused'}`,
+    `design-engine=${task.designIntelligence ? 'required-first' : 'off'}`,
   ];
   return `[UI] ${flags.join('; ')}`;
 }
@@ -56,7 +62,9 @@ export function buildUiSystemPrompt() {
   return [
     '## Built-in UI Generation Intelligence',
     'This protocol is always active for UI/frontend work; it does not depend on a Skill.',
-    'Execution order: inspect → research when warranted → define system → implement behavior → stress responsive states → verify → polish only mismatches.',
+    'For UI builds, run the local design-intelligence engine BEFORE writing code: `lazydev ui "<product + interface brief>" --json` (or `node cli/bin/lazydev.cjs ui ...` inside the repo).',
+    'Use the returned pattern/style/palette/type/density/motion/UX/anti-pattern decisions as implementation constraints. For named external references, also research the current reference before coding.',
+    'Execution order: inspect → local design search → external research when warranted → define system → implement behavior → stress responsive states → verify → polish only mismatches.',
     ...UI_INTELLIGENCE_RULES.map((rule, index) => `${index + 1}. ${rule}`),
   ].join('\n');
 }
