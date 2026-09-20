@@ -2,7 +2,7 @@
 name: lazy-test
 description: Use to verify code, UI, runtime behavior, releases, and packaging with the smallest proof.
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 ---
 # Lazy Test
 

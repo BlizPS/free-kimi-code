@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -1433,6 +1433,183 @@ def _stream_finish_reason(payload: bytes) -> str:
     return found
 
 
+
+def _content_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, list):
+        return ""
+    parts = []
+    for item in value:
+        if isinstance(item, dict) and item.get("text") is not None:
+            parts.append(str(item.get("text")))
+    return "\n".join(parts)
+
+
+def _openai_content_to_anthropic(value: Any) -> Any:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, list):
+        return ""
+    blocks = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        typ = str(item.get("type") or "")
+        if typ in {"text", "input_text", "output_text"} and item.get("text") is not None:
+            blocks.append({"type": "text", "text": str(item.get("text"))})
+        elif typ in {"image_url", "input_image"}:
+            image = item.get("image_url") if isinstance(item.get("image_url"), dict) else item
+            url = str(image.get("url") or "") if isinstance(image, dict) else ""
+            if url.startswith("data:"):
+                head, _, data = url.partition(",")
+                mime = head[5:].split(";", 1)[0] or "image/png"
+                blocks.append({"type":"image","source":{"type":"base64","media_type":mime,"data":data}})
+    if not blocks:
+        return ""
+    return blocks
+
+
+def _openai_to_anthropic(body: dict[str, Any], model: str) -> dict[str, Any]:
+    messages = []
+    system_parts = []
+    raw_messages = body.get("messages") if isinstance(body.get("messages"), list) else []
+    for msg in raw_messages:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "user")
+        if role == "system":
+            text = _content_text(msg.get("content"))
+            if text:
+                system_parts.append(text)
+            continue
+        if role == "tool":
+            tool_id = str(msg.get("tool_call_id") or msg.get("id") or "tool_result")
+            value = msg.get("content")
+            if not isinstance(value, str):
+                value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            messages.append({"role":"user","content":[{"type":"tool_result","tool_use_id":tool_id,"content":value}]})
+            continue
+        if role == "assistant":
+            content_blocks=[]
+            text=_openai_content_to_anthropic(msg.get("content"))
+            if isinstance(text,list):
+                content_blocks.extend(text)
+            elif text:
+                content_blocks.append({"type":"text","text":text})
+            for call in msg.get("tool_calls") if isinstance(msg.get("tool_calls"),list) else []:
+                if not isinstance(call,dict): continue
+                fn=call.get("function") if isinstance(call.get("function"),dict) else {}
+                name=str(fn.get("name") or "tool")
+                call_id=str(call.get("id") or secrets.token_hex(8))
+                try: args=json.loads(str(fn.get("arguments") or "{}"))
+                except Exception: args={}
+                content_blocks.append({"type":"tool_use","id":call_id,"name":name,"input":args if isinstance(args,dict) else {}})
+            if content_blocks:
+                messages.append({"role":"assistant","content":content_blocks})
+            continue
+        content=_openai_content_to_anthropic(msg.get("content"))
+        messages.append({"role":"user","content":content})
+    out={"model":model,"messages":messages,"max_tokens":max(1,int(body.get("max_tokens") or body.get("max_completion_tokens") or DEFAULT_MODEL_OUTPUT)),"stream":bool(body.get("stream"))}
+    if system_parts:
+        out["system"]="\n\n".join(system_parts)
+    tools=[]
+    for tool in body.get("tools") if isinstance(body.get("tools"),list) else []:
+        if not isinstance(tool,dict) or tool.get("type") != "function": continue
+        fn=tool.get("function") if isinstance(tool.get("function"),dict) else {}
+        name=str(fn.get("name") or "").strip()
+        if not name: continue
+        schema=fn.get("parameters") if isinstance(fn.get("parameters"),dict) else {"type":"object","properties":{}}
+        tools.append({"name":name,"description":str(fn.get("description") or ""),"input_schema":schema})
+    if tools:
+        out["tools"]=tools
+        choice=body.get("tool_choice")
+        if isinstance(choice,dict) and isinstance(choice.get("function"),dict) and choice["function"].get("name"):
+            out["tool_choice"]={"type":"tool","name":str(choice["function"]["name"])}
+        elif choice == "none":
+            out["tool_choice"]={"type":"none"}
+        elif choice == "required":
+            out["tool_choice"]={"type":"any"}
+        else:
+            out["tool_choice"]={"type":"auto"}
+    # Current Anthropic models increasingly reject non-default temperature/top_p;
+    # the unified layer does not need them for agent routing, so omit them here.
+    if isinstance(body.get("stop"),list): out["stop_sequences"]=[str(x) for x in body["stop"][:4]]
+    return out
+
+
+def _anthropic_to_openai(payload: dict[str, Any], model: str | None = None) -> dict[str, Any]:
+    content=payload.get("content") if isinstance(payload.get("content"),list) else []
+    text_parts=[]; tool_calls=[]
+    for block in content:
+        if not isinstance(block,dict): continue
+        typ=str(block.get("type") or "")
+        if typ == "text" and block.get("text") is not None:
+            text_parts.append(str(block.get("text")))
+        elif typ == "tool_use":
+            tool_calls.append({"id":str(block.get("id") or secrets.token_hex(8)),"type":"function","function":{"name":str(block.get("name") or "tool"),"arguments":json.dumps(block.get("input") if isinstance(block.get("input"),dict) else {},ensure_ascii=False,separators=(",",":"))}})
+    message={"role":"assistant","content":"\n".join(text_parts) if text_parts else None}
+    if tool_calls: message["tool_calls"]=tool_calls
+    reason=str(payload.get("stop_reason") or "end_turn")
+    finish="tool_calls" if reason == "tool_use" else "length" if reason == "max_tokens" else "stop"
+    usage=payload.get("usage") if isinstance(payload.get("usage"),dict) else {}
+    prompt_tokens=int(usage.get("input_tokens") or 0)
+    completion_tokens=int(usage.get("output_tokens") or 0)
+    return {"id":str(payload.get("id") or "chatcmpl-lazydev"),"object":"chat.completion","created":int(time.time()),"model":str(payload.get("model") or model or ""),"choices":[{"index":0,"message":message,"finish_reason":finish}],"usage":{"prompt_tokens":prompt_tokens,"completion_tokens":completion_tokens,"total_tokens":prompt_tokens+completion_tokens}}
+
+
+def _anthropic_sse_to_openai(raw: bytes, model: str) -> bytes:
+    out=[]
+    response_id=f"chatcmpl-{secrets.token_hex(8)}"
+    sent_role=False
+    tool_indexes={}
+    finish=""
+    for chunk in re.split(rb"\n\n", raw):
+        event_type=""; data_line=""
+        for line in chunk.splitlines():
+            text=line.decode("utf-8","replace")
+            if text.startswith("event:"): event_type=text[6:].strip()
+            elif text.startswith("data:"): data_line=text[5:].strip()
+        if not data_line: continue
+        try: data=json.loads(data_line)
+        except Exception: continue
+        if data.get("type") == "message_start":
+            msg=data.get("message") if isinstance(data.get("message"),dict) else {}
+            response_id=str(msg.get("id") or response_id)
+            if not sent_role:
+                out.append({"id":response_id,"object":"chat.completion.chunk","created":int(time.time()),"model":str(msg.get("model") or model),"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":None}]})
+                sent_role=True
+        elif data.get("type") == "content_block_start":
+            idx=int(data.get("index") or 0)
+            block=data.get("content_block") if isinstance(data.get("content_block"),dict) else {}
+            if block.get("type") == "tool_use":
+                tool_indexes[idx] = {"id":str(block.get("id") or secrets.token_hex(8)),"name":str(block.get("name") or "tool")}
+                out.append({"id":response_id,"object":"chat.completion.chunk","created":int(time.time()),"model":model,"choices":[{"index":0,"delta":{"tool_calls":[{"index":idx,"id":tool_indexes[idx]["id"],"type":"function","function":{"name":tool_indexes[idx]["name"],"arguments":""}}]},"finish_reason":None}]})
+        elif data.get("type") == "content_block_delta":
+            idx=int(data.get("index") or 0); delta=data.get("delta") if isinstance(data.get("delta"),dict) else {}
+            if delta.get("type") == "text_delta" and delta.get("text") is not None:
+                out.append({"id":response_id,"object":"chat.completion.chunk","created":int(time.time()),"model":model,"choices":[{"index":0,"delta":{"content":str(delta.get("text"))},"finish_reason":None}]})
+            elif delta.get("type") == "input_json_delta" and delta.get("partial_json") is not None:
+                call=tool_indexes.get(idx,{"id":"","name":"tool"})
+                out.append({"id":response_id,"object":"chat.completion.chunk","created":int(time.time()),"model":model,"choices":[{"index":0,"delta":{"tool_calls":[{"index":idx,"id":call["id"],"type":"function","function":{"name":call["name"],"arguments":str(delta.get("partial_json"))}}]},"finish_reason":None}]})
+        elif data.get("type") == "message_delta":
+            d=data.get("delta") if isinstance(data.get("delta"),dict) else {}
+            sr=str(d.get("stop_reason") or "")
+            if sr: finish="tool_calls" if sr == "tool_use" else "length" if sr == "max_tokens" else "stop"
+        elif data.get("type") == "message_stop":
+            if not sent_role:
+                out.append({"id":response_id,"object":"chat.completion.chunk","created":int(time.time()),"model":model,"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":None}]})
+            out.append({"id":response_id,"object":"chat.completion.chunk","created":int(time.time()),"model":model,"choices":[{"index":0,"delta":{},"finish_reason":finish or "stop"}]})
+            out.append("[DONE]")
+    frames = []
+    for item in out:
+        if item == "[DONE]":
+            frames.append(b"data: [DONE]\n\n")
+        else:
+            frames.append(b"data: " + json.dumps(item, separators=(",", ":"), ensure_ascii=False).encode("utf-8") + b"\n\n")
+    return b"".join(frames)
+
+
 class _ProviderProxy:
     def __init__(self, provider: dict[str, Any], pc: dict[str, Any]):
         self.provider = provider
@@ -1506,10 +1683,86 @@ class _ProviderProxy:
                     self.wfile.write(payload)
                 self.close_connection = True
 
-            def do_POST(self) -> None:
-                if self.headers.get("Authorization", "") != f"Bearer {outer.token}":
+            def do_GET(self) -> None:
+                if self.headers.get("Authorization", "") != f"Bearer {outer.token}" and self.headers.get("x-goog-api-key", "") != outer.token:
                     return self._send_json(401, {"error": {"message": "Unauthorized"}})
-                if self.path.split("?", 1)[0] != "/v1/chat/completions":
+                path=self.path.split("?",1)[0]
+                if path.startswith("/v1beta/models") or path.startswith("/v1/models"):
+                    model=str(outer.pc.get("model") or "lazydev")
+                    return self._send_json(200, {"models":[{"name":f"models/{model}","displayName":model,"supportedGenerationMethods":["generateContent","streamGenerateContent"]}]})
+                return self._send_json(404, {"error":{"message":"Not found"}})
+
+            def _gemini_to_openai(self, body: dict[str, Any], model: str) -> dict[str, Any]:
+                messages=[]
+                system=body.get("systemInstruction") or body.get("system_instruction")
+                if isinstance(system,dict):
+                    parts=system.get("parts") if isinstance(system.get("parts"),list) else []
+                    text="\n".join(str(x.get("text")) for x in parts if isinstance(x,dict) and x.get("text"))
+                    if text: messages.append({"role":"system","content":text})
+                for item in body.get("contents",[]) if isinstance(body.get("contents"),list) else []:
+                    if not isinstance(item,dict): continue
+                    role="assistant" if item.get("role") in {"model","assistant"} else "user"
+                    parts=item.get("parts") if isinstance(item.get("parts"),list) else []
+                    texts=[]; tool_calls=[]
+                    for part in parts:
+                        if not isinstance(part,dict): continue
+                        if isinstance(part.get("text"),str): texts.append(part["text"])
+                        inline=part.get("inlineData") or part.get("inline_data")
+                        if isinstance(inline,dict) and inline.get("data") and inline.get("mimeType"):
+                            texts.append(f"[Inline image: data:{inline['mimeType']};base64,{inline['data']}]")
+                        fc=part.get("functionCall")
+                        if isinstance(fc,dict) and fc.get("name"):
+                            call_id=secrets.token_hex(8)
+                            tool_calls.append({"id":call_id,"type":"function","function":{"name":str(fc["name"]),"arguments":json.dumps(fc.get("args") or {},separators=(",",":"))}})
+                        fr=part.get("functionResponse")
+                        if isinstance(fr,dict) and fr.get("name"):
+                            call_id=str(fr.get("id") or fr.get("callId") or fr.get("call_id") or fr.get("name"))
+                            response_value=fr.get("response")
+                            messages.append({"role":"tool","tool_call_id":call_id,"name":str(fr.get("name")),"content":json.dumps(response_value if response_value is not None else {},separators=(",",":"))})
+                    gemini_tools=body.get("tools") if isinstance(body.get("tools"),list) else []
+                    openai_tools=[]
+                    for group in gemini_tools:
+                        if not isinstance(group,dict): continue
+                        decls=group.get("functionDeclarations") or group.get("function_declarations")
+                        if not isinstance(decls,list): continue
+                        for decl in decls:
+                            if not isinstance(decl,dict) or not decl.get("name"): continue
+                            openai_tools.append({"type":"function","function":{"name":str(decl["name"]),"description":str(decl.get("description") or ""),"parameters":decl.get("parameters") or {"type":"object","properties":{}}}})
+                    msg={"role":role,"content":"\n".join(texts) if texts else ""}
+                    if tool_calls: msg["tool_calls"]=tool_calls
+                    if msg["content"] or tool_calls: messages.append(msg)
+                out={"model":model,"messages":messages,"stream":False}
+                if openai_tools: out["tools"]=openai_tools; out["tool_choice"]="auto"
+                gen=body.get("generationConfig") if isinstance(body.get("generationConfig"),dict) else {}
+                if "maxOutputTokens" in gen: out["max_tokens"]=gen["maxOutputTokens"]
+                if "temperature" in gen: out["temperature"]=gen["temperature"]
+                if "topP" in gen: out["top_p"]=gen["topP"]
+                if "stopSequences" in gen: out["stop"]=gen["stopSequences"]
+                return out
+
+            def _openai_to_gemini(self, completion: dict[str,Any], model: str) -> dict[str,Any]:
+                choice=(completion.get("choices") or [{}])[0] if isinstance(completion,dict) else {}
+                msg=choice.get("message") if isinstance(choice,dict) else {}
+                parts=[]
+                text=msg.get("content") if isinstance(msg,dict) else ""
+                if text: parts.append({"text":str(text)})
+                for call in (msg.get("tool_calls") or []) if isinstance(msg,dict) else []:
+                    fn=call.get("function") if isinstance(call,dict) else {}
+                    if isinstance(fn,dict) and fn.get("name"):
+                        try: args=json.loads(fn.get("arguments") or "{}")
+                        except Exception: args={}
+                        parts.append({"functionCall":{"name":str(fn["name"]),"args":args}})
+                finish=str(choice.get("finish_reason") or "STOP").upper()
+                if finish=="TOOL_CALLS": finish="STOP"
+                return {"candidates":[{"content":{"role":"model","parts":parts},"finishReason":finish}],"modelVersion":model,"usageMetadata":completion.get("usage") or {}}
+
+            def do_POST(self) -> None:
+                auth_ok=self.headers.get("Authorization", "") == f"Bearer {outer.token}" or self.headers.get("x-goog-api-key", "") == outer.token
+                if not auth_ok:
+                    return self._send_json(401, {"error": {"message": "Unauthorized"}})
+                path=self.path.split("?",1)[0]
+                gemini_mode=path.startswith("/v1beta/models/") and (path.endswith(":generateContent") or path.endswith(":streamGenerateContent"))
+                if not gemini_mode and path != "/v1/chat/completions":
                     return self._send_json(404, {"error": {"message": "Not found"}})
                 try:
                     size = int(self.headers.get("Content-Length", "0") or "0")
@@ -1523,6 +1776,28 @@ class _ProviderProxy:
                     return self._send_json(400, {"error": {"message": "Invalid JSON"}})
                 if not isinstance(body, dict):
                     return self._send_json(400, {"error": {"message": "Request body must be an object"}})
+                if gemini_mode:
+                    model=str(outer.pc.get("model") or "lazydev")
+                    openai_body=self._gemini_to_openai(body,model)
+                    openai_body["model"]=model
+                    try:
+                        connection,response=outer._open_upstream(openai_body)
+                        payload=response.read()
+                        status=int(response.status)
+                        response.close(); connection.close()
+                        if status >= 400:
+                            try: detail=json.loads(payload.decode("utf-8","replace"))
+                            except Exception: detail={"error":{"message":payload.decode("utf-8","replace")}}
+                            return self._send_json(status,detail)
+                        completion=json.loads(payload.decode("utf-8","replace"))
+                        result=self._openai_to_gemini(completion,model)
+                        if path.endswith(":streamGenerateContent"):
+                            raw=json.dumps(result,separators=(",",":"))
+                            data=f"data: {raw}\n\n".encode("utf-8")+b"data: [DONE]\n\n"
+                            self.send_response(200); self.send_header("Content-Type","text/event-stream"); self.send_header("Content-Length",str(len(data))); self.send_header("Connection","close"); self.end_headers(); self.wfile.write(data); self.close_connection=True; return
+                        return self._send_json(200,result)
+                    except Exception as exc:
+                        return self._send_json(502,{"error":{"message":f"Gemini proxy request failed: {exc}"}})
                 original_model = str(outer.pc.get("model") or body.get("model") or "")
                 attempt_model = original_model
                 synthetic_tools_active = (outer.learned_no_tools or native_tool_capability(outer.pc) is False) and bool(_tool_definitions(body))
@@ -1640,6 +1915,26 @@ class _ProviderProxy:
                         self.close_connection = True
                         return
                     try:
+                        if outer.provider.get("id") == "anthropic":
+                            payload = response.read()
+                            try:
+                                response.close(); connection.close()
+                            except Exception:
+                                pass
+                            if is_stream:
+                                raw_stream = _anthropic_sse_to_openai(payload, attempt_model)
+                                self.send_response(200)
+                                self.send_header("Content-Type", "text/event-stream")
+                                self.send_header("Content-Length", str(len(raw_stream)))
+                                self.send_header("X-LazyDev-Provider-Proxy", "1")
+                                self.send_header("Connection", "close")
+                                self.end_headers(); self.wfile.write(raw_stream); self.close_connection = True; return
+                            try:
+                                source_payload = json.loads(payload.decode("utf-8", "replace"))
+                                completion = _anthropic_to_openai(source_payload, attempt_model)
+                            except Exception as exc:
+                                return self._send_json(502, {"error": {"message": f"Anthropic response conversion failed: {exc}"}})
+                            return self._send_json(200, completion)
                         if synthetic_tools_active:
                             payload = response.read()
                             try:
@@ -1699,6 +1994,10 @@ class _ProviderProxy:
 
     def upstream_url(self) -> str:
         base = normalize_url(self.pc.get("baseUrl") or self.provider.get("base") or "")
+        if self.provider.get("id") == "anthropic":
+            if base.endswith("/v1/messages"): return base
+            if base.endswith("/v1"): return base + "/messages"
+            return base + "/v1/messages"
         lowered = base.lower()
         if lowered.endswith("/v1") or lowered.endswith("/openai"):
             return base + "/chat/completions"
@@ -1709,25 +2008,30 @@ class _ProviderProxy:
         target = urlsplit(self.upstream_url())
         if target.scheme not in {"http", "https"} or not target.hostname:
             raise RuntimeError(f"Invalid provider API URL: {self.upstream_url()}")
+        outbound = _openai_to_anthropic(body, str(self.pc.get("model") or body.get("model") or "")) if self.provider.get("id") == "anthropic" else body
         timeout = 120
         if target.scheme == "https":
             connection = http.client.HTTPSConnection(target.hostname, target.port or 443, timeout=timeout)
         else:
             connection = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=timeout)
+        encoded = json.dumps(outbound, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         headers = {
-            "Accept": "text/event-stream" if body.get("stream") else "application/json",
+            "Accept": "text/event-stream" if outbound.get("stream") else "application/json",
             "Content-Type": "application/json",
             "User-Agent": f"lazydev/{VERSION}",
-            "Content-Length": str(len(json.dumps(body, separators=(",", ":")).encode("utf-8"))),
+            "Content-Length": str(len(encoded)),
         }
         key = str(self.pc.get("apiKey", "") or "")
-        if key and self.provider.get("id") != "ollama":
-            headers["Authorization"] = f"Bearer {key}"
-        payload = json.dumps(body, separators=(",", ":")).encode("utf-8")
+        if key:
+            if self.provider.get("id") == "anthropic":
+                headers["x-api-key"] = key
+                headers["anthropic-version"] = "2023-06-01"
+            elif self.provider.get("id") != "ollama":
+                headers["Authorization"] = f"Bearer {key}"
         path = target.path or "/"
         if target.query:
             path += "?" + target.query
-        connection.request("POST", path, body=payload, headers=headers)
+        connection.request("POST", path, body=encoded, headers=headers)
         return connection, connection.getresponse()
 
 
@@ -1741,6 +2045,100 @@ def _hook_command(script: Path) -> str:
         return f'"{executable}" "{target}"'
     import shlex
     return f'{shlex.quote(executable)} {shlex.quote(target)}'
+
+def _extract_external_kimi_sections(text: str) -> list[str]:
+    """Preserve user-managed Kimi provider/model/service sections.
+
+    LazyDev owns its own `providers.lazydev` and `models.lazydev/*` namespaces,
+    but native Kimi account flows may add their managed provider/model blocks.
+    Keep those unrelated blocks intact when LazyDev repairs its route.
+    """
+    lines = str(text or "").splitlines()
+    sections: list[str] = []
+    current_name: str | None = None
+    buffer: list[str] = []
+
+    def flush() -> None:
+        nonlocal buffer, current_name
+        if not current_name or not buffer:
+            buffer = []
+            return
+        normalized = re.sub(r"^\[+|\]+$", "", current_name).strip()
+        is_config_namespace = bool(re.match(r"^(providers|models|services)\.", normalized))
+        is_lazydev_namespace = (
+            "providers.lazydev" in normalized
+            or 'models.\"lazydev/' in normalized
+            or "models.lazydev/" in normalized
+        )
+        if is_config_namespace and not is_lazydev_namespace:
+            sections.append("\n".join(buffer).strip())
+        buffer = []
+
+    for line in lines:
+        match = re.match(r"^\s*(\[\[?)([^\]]+?)(\]\]?)\s*$", line)
+        if match:
+            flush()
+            current_name = match.group(2).strip()
+            buffer = [line]
+        elif buffer:
+            buffer.append(line)
+    flush()
+    return [item for item in sections if item]
+
+
+def _kimi_config_needs_repair(text: str, model: str) -> bool:
+    """Return true when native Kimi account actions removed LazyDev's route."""
+    expected = f'default_model = {toml_quote("lazydev/" + str(model))}'
+    return expected not in text or "[providers.lazydev]" not in text
+
+
+def _start_kimi_auth_bridge(config_path: Path, provider: dict[str, Any], cfg: dict[str, Any], proxy: _ProviderProxy | None) -> threading.Event:
+    """Watch Kimi config and restore LazyDev routing after native account mutations."""
+    stop = threading.Event()
+    pc = provider_config(cfg, provider["id"])
+    try:
+        last_mtime: int | None = config_path.stat().st_mtime_ns
+    except OSError:
+        last_mtime = None
+
+    def watch() -> None:
+        nonlocal last_mtime
+        while not stop.wait(0.05):
+            try:
+                stat = config_path.stat()
+                mtime = stat.st_mtime_ns
+                if last_mtime is None:
+                    last_mtime = mtime
+                    continue
+                if mtime == last_mtime:
+                    continue
+                last_mtime = mtime
+                if stop.wait(0.08):
+                    break
+                current = config_path.read_text(encoding="utf-8")
+                if _kimi_config_needs_repair(current, str(pc.get("model") or "")):
+                    write_kimi_files(provider, cfg, proxy)
+                    try:
+                        last_mtime = config_path.stat().st_mtime_ns
+                    except OSError:
+                        pass
+            except (OSError, UnicodeError):
+                continue
+
+    thread = threading.Thread(target=watch, name="lazydev-kimi-auth-bridge", daemon=True)
+    thread.start()
+    stop._thread = thread  # type: ignore[attr-defined]
+    return stop
+
+
+def _stop_kimi_auth_bridge(stop: threading.Event | None) -> None:
+    if stop is None:
+        return
+    stop.set()
+    thread = getattr(stop, "_thread", None)
+    if thread is not None:
+        thread.join(timeout=0.5)
+
 
 def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _ProviderProxy | None = None) -> tuple[Path, Path]:
     KIMI_HOME.mkdir(parents=True, exist_ok=True)
@@ -1894,7 +2292,15 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     lines = [line for line in lines if line is not None]
     config_path = KIMI_HOME / "config.toml"
     tui_path = KIMI_HOME / "tui.toml"
-    config_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    try:
+        existing_config = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    except (OSError, UnicodeError):
+        existing_config = ""
+    preserved_sections = _extract_external_kimi_sections(existing_config)
+    canonical_text = "\n".join(lines).rstrip() + "\n"
+    if preserved_sections:
+        canonical_text = canonical_text.rstrip() + "\n\n" + "\n\n".join(preserved_sections) + "\n"
+    config_path.write_text(canonical_text, encoding="utf-8")
     node_exe = shutil.which("node") or "node"
     if IS_WINDOWS:
         status_command = toml_quote(f'"{node_exe}" "{ROOT / "hooks" / "lazydev-statusline.mjs"}"')
@@ -1973,12 +2379,389 @@ def write_runtime_system(provider: dict[str, Any], model: str) -> None:
     (KIMI_HOME / "SYSTEM.md").write_text(base.rstrip() + "\n\n" + "\n".join(additions) + "\n", encoding="utf-8")
 
 
+def find_codex() -> str | None:
+    names = ("codex.exe", "codex.cmd", "codex") if IS_WINDOWS else ("codex",)
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def find_antigravity() -> str | None:
+    names = ("agy.exe", "agy.cmd", "agy") if IS_WINDOWS else ("agy",)
+    candidates = []
+    for name in names:
+        found = shutil.which(name)
+        if found: return found
+    if IS_WINDOWS:
+        candidates += [str(HOME / "AppData/Local/agy/bin/agy.exe")]
+    else:
+        candidates += [str(HOME / ".local/bin/agy")]
+    for candidate in candidates:
+        if Path(candidate).is_file(): return candidate
+    return None
+
+
+def installed_chat_uis() -> list[tuple[str, str, str]]:
+    items=[]
+    if find_kimi(): items.append(("kimi", "Kimi Code", "kimi"))
+    if find_codex(): items.append(("codex", "Codex", "codex"))
+    if find_antigravity(): items.append(("antigravity", "Antigravity", "agy"))
+    return items
+
+
+def choose_chat_ui(items: list[tuple[str, str, str]]) -> str | None:
+    if not items: return None
+    if len(items)==1: return items[0][0]
+    clear_terminal()
+    title(f"Lazy Developer {VERSION}")
+    print("Choose your AI UI\n")
+    for i, (_, label, _) in enumerate(items,1): print(f"{i}. {label}")
+    raw=prompt(f"\nUI [1-{len(items)}]: ").strip()
+    try: return items[int(raw)-1][0]
+    except (ValueError,IndexError):
+        print(ansi("31","Invalid UI selection.")); return None
+
+
+def _ensure_codex_skills() -> None:
+    target_root = HOME / ".agents" / "skills"
+    target_root.mkdir(parents=True, exist_ok=True)
+    for name, _description in SKILLS:
+        source = ROOT / "skills" / name
+        target = target_root / name
+        if target.exists() or target.is_symlink():
+            try:
+                if target.resolve() == source.resolve(): continue
+            except OSError: pass
+            continue
+        try:
+            target.symlink_to(source, target_is_directory=True)
+        except OSError:
+            # Windows without developer-mode/symlink permission: copy only the
+            # small skill tree so Codex still discovers the same SKILL.md files.
+            shutil.copytree(source, target, dirs_exist_ok=True)
+
+
+def _ensure_cross_ui_skills() -> None:
+    _ensure_codex_skills()
+    target_root = HOME / ".gemini" / "antigravity-cli" / "skills"
+    target_root.mkdir(parents=True, exist_ok=True)
+    for name, _description in SKILLS:
+        source = ROOT / "skills" / name
+        target = target_root / name
+        if target.exists() or target.is_symlink():
+            try:
+                if target.is_symlink() and target.resolve() == source.resolve():
+                    continue
+                if target.is_dir() and (target / "SKILL.md").is_file():
+                    continue
+            except OSError:
+                continue
+        try:
+            if target.exists() or target.is_symlink():
+                if target.is_dir() and not target.is_symlink(): shutil.rmtree(target)
+                else: target.unlink()
+            target.symlink_to(source, target_is_directory=True)
+        except OSError:
+            shutil.copytree(source, target, dirs_exist_ok=True)
+
+
+def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
+    # Codex stores its user config in ~/.codex; keep the selected setup model and
+    # the same LazyDev proxy/MCP layer that Kimi uses.
+    home = HOME / ".codex"
+    home.mkdir(parents=True, exist_ok=True)
+    base = f"http://127.0.0.1:{proxy.server.server_port}/v1"
+    model = str(pc.get("model") or "")
+    context = model_context_size(pc.get("provider") if isinstance(pc.get("provider"), dict) else {}, pc)
+    output = model_output_size(pc.get("provider") if isinstance(pc.get("provider"), dict) else {}, pc)
+    if not context:
+        context = DEFAULT_MODEL_CONTEXT
+    if not output:
+        output = DEFAULT_MODEL_OUTPUT
+    python_exe = str(Path(sys.executable).resolve())
+    browser = str((ROOT / "runtime" / "browser-mcp.py").resolve())
+    config = '\n'.join([
+        f'model = {toml_quote(model)}',
+        'model_provider = "lazydev"',
+        f'model_context_window = {int(context)}',
+        f'model_max_output_tokens = {int(min(output, CONTEXT_ABSOLUTE_OUTPUT_CAP))}',
+        'approval_policy = "never"',
+        'sandbox_mode = "danger-full-access"',
+        '',
+        '[model_providers.lazydev]',
+        'name = "LazyDev"',
+        f'base_url = {toml_quote(base)}',
+        'wire_api = "responses"',
+        'env_key = "LAZYDEV_CODEX_API_KEY"',
+        'requires_openai_auth = false',
+        'supports_websockets = false',
+        '',
+        '[mcp_servers.lazydev-search]',
+        f'command = {toml_quote(python_exe)}',
+        f'args = [{toml_quote(browser)}]',
+        f'cwd = {toml_quote(str(ROOT))}',
+        'startup_timeout_sec = 30',
+        'tool_timeout_sec = 60',
+        'env = { LAZYDEV_BROWSER_USER_AGENT = "LazyDev-Browser/1.0.2" }',
+    ])+'\n'
+    (home/'config.toml').write_text(config, encoding='utf-8')
+    return home
+
+
+class _ResponsesProxy:
+    """Thin Responses API adapter over the already-running LazyDev chat proxy."""
+    def __init__(self, proxy: _ProviderProxy, model: str):
+        self.proxy = proxy
+        self.model = str(model or "")
+        self.token = secrets.token_hex(24)
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
+        self.thread = threading.Thread(target=self.server.serve_forever, name="lazydev-codex-responses", daemon=True)
+        self.thread.start()
+
+    @property
+    def port(self) -> int:
+        return int(self.server.server_address[1])
+
+    def close(self) -> None:
+        try:
+            self.server.shutdown()
+        finally:
+            self.server.server_close()
+            self.thread.join(timeout=1.0)
+
+    def _handler(self):
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            server_version = "LazyDevResponsesProxy/1.0"
+            def log_message(self, fmt: str, *args: Any) -> None: return
+            def _send(self, status: int, payload: Any, content_type: str = "application/json") -> None:
+                raw = payload if isinstance(payload, (bytes, bytearray)) else json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(raw)))
+                self.send_header("Connection", "close")
+                self.end_headers(); self.wfile.write(raw); self.close_connection = True
+            def _auth(self) -> bool:
+                return self.headers.get("Authorization", "") == f"Bearer {outer.token}"
+            def do_GET(self) -> None:
+                if not self._auth(): return self._send(401, {"error":{"message":"Unauthorized"}})
+                path = self.path.split("?",1)[0]
+                if path == "/v1/models":
+                    return self._send(200, {"object":"list","data":[{"id":outer.model,"object":"model","owned_by":"lazydev"}]})
+                return self._send(404, {"error":{"message":"Not found"}})
+
+            def _input_text(self, content: Any) -> str:
+                if isinstance(content, str): return content
+                if not isinstance(content, list): return ""
+                parts=[]
+                for item in content:
+                    if not isinstance(item, dict): continue
+                    if item.get("type") in {"input_text","output_text","text"} and isinstance(item.get("text"), str): parts.append(item["text"])
+                return "\n".join(parts)
+
+            def _to_chat(self, body: dict[str, Any]) -> dict[str, Any]:
+                messages=[]
+                instructions=body.get("instructions")
+                if isinstance(instructions, str) and instructions.strip(): messages.append({"role":"system","content":instructions})
+                call_names={}
+                items=body.get("input")
+                if isinstance(items, str): items=[{"type":"message","role":"user","content":[{"type":"input_text","text":items}]}]
+                if not isinstance(items, list): items=[]
+                for item in items:
+                    if isinstance(item, str): messages.append({"role":"user","content":item}); continue
+                    if not isinstance(item, dict): continue
+                    typ=str(item.get("type") or "")
+                    if typ in {"message","input_text","text"}:
+                        role=str(item.get("role") or "user")
+                        content=item.get("content", item)
+                        txt=self._input_text(content)
+                        if txt: messages.append({"role":role if role in {"system","user","assistant"} else "user","content":txt})
+                    elif typ in {"function_call","tool_call"}:
+                        call_id=str(item.get("call_id") or item.get("id") or secrets.token_hex(8))
+                        name=str(item.get("name") or "tool")
+                        call_names[call_id]=name
+                        try: args=json.loads(item.get("arguments") or "{}") if isinstance(item.get("arguments"), str) else (item.get("arguments") or {})
+                        except Exception: args={}
+                        messages.append({"role":"assistant","content":None,"tool_calls":[{"id":call_id,"type":"function","function":{"name":name,"arguments":json.dumps(args,separators=(",",":"))}}]})
+                    elif typ in {"function_call_output","tool_result","function_result"}:
+                        call_id=str(item.get("call_id") or item.get("id") or "")
+                        out=item.get("output")
+                        if not isinstance(out, str): out=json.dumps(out if out is not None else "", separators=(",",":"))
+                        messages.append({"role":"tool","tool_call_id":call_id,"name":call_names.get(call_id,"tool"),"content":out})
+                chat={"model":outer.model,"messages":messages,"stream":False}
+                for src,dst in (("max_output_tokens","max_tokens"),("temperature","temperature"),("top_p","top_p"),("reasoning_effort","reasoning_effort"),("stop","stop")):
+                    if src in body: chat[dst]=body[src]
+                tools=[]
+                for tool in body.get("tools",[]) if isinstance(body.get("tools"), list) else []:
+                    if not isinstance(tool,dict) or tool.get("type")!="function": continue
+                    fn=tool.get("function") if isinstance(tool.get("function"),dict) else tool
+                    if not fn.get("name"): continue
+                    tools.append({"type":"function","function":{"name":str(fn["name"]),"description":str(fn.get("description") or ""),"parameters":fn.get("parameters") or {"type":"object","properties":{}}}})
+                if tools: chat["tools"]=tools
+                return chat
+
+            def _from_chat(self, completion: dict[str,Any]) -> dict[str,Any]:
+                choice=(completion.get("choices") or [{}])[0]
+                msg=choice.get("message") if isinstance(choice,dict) else {}
+                resp_id=str(completion.get("id") or f"resp_lazydev_{secrets.token_hex(8)}")
+                output=[]
+                if isinstance(msg,dict):
+                    for call in msg.get("tool_calls") or []:
+                        fn=call.get("function") if isinstance(call,dict) else {}
+                        if isinstance(fn,dict) and fn.get("name"):
+                            output.append({"type":"function_call","id":str(call.get("id") or f"fc_{secrets.token_hex(6)}"),"call_id":str(call.get("id") or f"call_{secrets.token_hex(6)}"),"name":str(fn["name"]),"arguments":str(fn.get("arguments") or "{}"),"status":"completed"})
+                    text=msg.get("content")
+                    if text:
+                        output.append({"type":"message","id":f"msg_{secrets.token_hex(6)}","role":"assistant","status":"completed","content":[{"type":"output_text","text":str(text),"annotations":[]}]})
+                usage=completion.get("usage") if isinstance(completion.get("usage"),dict) else {}
+                output_text="\n".join(
+                    str(part.get("text") or "")
+                    for item in output if item.get("type")=="message"
+                    for part in (item.get("content") or [])
+                    if isinstance(part,dict) and part.get("type")=="output_text"
+                )
+                return {"id":resp_id,"object":"response","created_at":int(time.time()),"model":outer.model,"status":"completed","output":output,"output_text":output_text,"usage":usage}
+
+            def do_POST(self) -> None:
+                if not self._auth(): return self._send(401,{"error":{"message":"Unauthorized"}})
+                if self.path.split("?",1)[0] != "/v1/responses": return self._send(404,{"error":{"message":"Not found"}})
+                try: size=int(self.headers.get("Content-Length","0") or "0")
+                except ValueError: size=0
+                if size<=0 or size>8*1024*1024: return self._send(400,{"error":{"message":"Invalid request body size"}})
+                try: body=json.loads(self.rfile.read(size).decode("utf-8"))
+                except Exception: return self._send(400,{"error":{"message":"Invalid JSON"}})
+                if not isinstance(body,dict): return self._send(400,{"error":{"message":"Request body must be an object"}})
+                chat=self._to_chat(body)
+                data=json.dumps(chat,separators=(",",":")).encode("utf-8")
+                target=f"http://127.0.0.1:{outer.proxy.port}/v1/chat/completions"
+                req=urllib.request.Request(target,data=data,headers={"Authorization":f"Bearer {outer.proxy.token}","Content-Type":"application/json","Accept":"application/json"},method="POST")
+                try:
+                    with urllib.request.urlopen(req,timeout=300) as response:
+                        payload=response.read(); status=response.status
+                except urllib.error.HTTPError as exc:
+                    raw=exc.read()
+                    try: err=json.loads(raw.decode("utf-8","replace"))
+                    except Exception: err={"error":{"message":raw.decode("utf-8","replace")}}
+                    return self._send(exc.code,err)
+                except Exception as exc:
+                    return self._send(502,{"error":{"message":f"LazyDev Responses bridge failed: {exc}"}})
+                try: completion=json.loads(payload.decode("utf-8"))
+                except Exception as exc: return self._send(502,{"error":{"message":f"Invalid upstream JSON: {exc}"}})
+                result=self._from_chat(completion)
+                if body.get("stream"):
+                    events=[
+                        {"type":"response.created","response":{k:result[k] for k in ("id","object","created_at","model","status")}},
+                    ]
+                    text=str(result.get("output_text") or "")
+                    if text:
+                        events.append({"type":"response.output_text.delta","item_id":result["output"][0]["id"],"output_index":0,"content_index":0,"delta":text})
+                        events.append({"type":"response.output_text.done","item_id":result["output"][0]["id"],"output_index":0,"content_index":0,"text":text})
+                    for item in result.get("output",[]):
+                        if item.get("type")=="function_call":
+                            events.append({"type":"response.output_item.added","output_index":0,"item":item})
+                            events.append({"type":"response.function_call_arguments.delta","item_id":item["id"],"output_index":0,"delta":item["arguments"]})
+                            events.append({"type":"response.function_call_arguments.done","item_id":item["id"],"output_index":0,"arguments":item["arguments"]})
+                    events.append({"type":"response.completed","response":result})
+                    raw=b"".join((b"data: "+json.dumps(e,separators=(",",":")).encode()+b"\n\n") for e in events)
+                    return self._send(200,raw,"text/event-stream")
+                return self._send(200,result)
+        return Handler
+
+
+_UI_ENV_KEYS = {
+    "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORGANIZATION", "OPENAI_PROJECT",
+    "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
+    "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GEMINI_BASE_URL",
+    "NVIDIA_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "LLM7_API_KEY",
+    "CODEBUDDY_API_KEY", "HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "NINEROUTER_API_KEY",
+    "KIMI_API_KEY",
+}
+
+def _clean_ui_env() -> dict[str, str]:
+    """Start each managed UI from a clean provider environment.
+
+    LazyDev stores the selected provider/key in its own config and proxy. Stale
+    provider environment variables from an older shell must not override the
+    managed route, especially OPENAI_BASE_URL and API keys.
+    """
+    env = os.environ.copy()
+    for key in list(env):
+        if key in _UI_ENV_KEYS or key.startswith("KIMI_MODEL_"):
+            env.pop(key, None)
+    return env
+
+
+def _launch_codex(codex: str, proxy: _ProviderProxy, pc: dict[str, Any], workspace: Path) -> int:
+    _ensure_cross_ui_skills()
+    responses = _ResponsesProxy(proxy, str(pc.get("model") or ""))
+    pc_for_config = dict(pc)
+    pc_for_config["provider"] = proxy.provider
+    home = _write_codex_runtime(responses, pc_for_config)
+    env = _clean_ui_env()
+    env['CODEX_HOME']=str(home); env['LAZYDEV_VERSION']=VERSION
+    env['LAZYDEV_ARTIFACT_DIR']=str(ARTIFACT_DIR); env['LAZYDEV_MODEL']=str(pc.get('model') or '')
+    env['LAZYDEV_CODEX_API_KEY']=str(responses.token)
+    env['LAZYDEV_CONTEXT_DIR']=str(HOME / ".lazydev")
+    args=["--config", f"model={toml_quote(str(pc.get('model')))}", "--config", "model_provider=lazydev"]
+    try: return subprocess.call([codex,*args],cwd=str(workspace),env=env)
+    except KeyboardInterrupt: return 130
+    finally: responses.close()
+
+
+def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
+    home = HOME / ".gemini" / "antigravity-cli"
+    settings_file = home / "settings.json"
+    home.mkdir(parents=True, exist_ok=True)
+    try:
+        settings=json.loads(settings_file.read_text(encoding="utf-8"))
+        if not isinstance(settings,dict): settings={}
+    except Exception: settings={}
+    settings["modelProvider"]="gemini"
+    settings_file.write_text(json.dumps(settings, indent=2)+"\n", encoding="utf-8")
+
+    config_root = HOME / ".gemini" / "config"
+    config_root.mkdir(parents=True, exist_ok=True)
+    mcp_file=config_root / "mcp_config.json"
+    try:
+        data=json.loads(mcp_file.read_text(encoding="utf-8"))
+        if not isinstance(data,dict): data={}
+    except Exception: data={}
+    servers=data.get("mcpServers") if isinstance(data.get("mcpServers"),dict) else {}
+    servers["lazydev-search"]={
+        "command":str(Path(sys.executable).resolve()),
+        "args":[str((ROOT/"runtime"/"browser-mcp.py").resolve())],
+        "cwd":str(ROOT),
+        "env":{"LAZYDEV_BROWSER_USER_AGENT":f"LazyDev-Browser/{VERSION}"},
+    }
+    data["mcpServers"]=servers
+    mcp_file.write_text(json.dumps(data, indent=2)+"\n", encoding="utf-8")
+    return settings_file, mcp_file
+
+
+def _launch_antigravity(agy: str, provider: dict[str,Any], pc: dict[str,Any], workspace: Path, proxy: _ProviderProxy) -> int:
+    _ensure_cross_ui_skills()
+    _write_antigravity_runtime(pc)
+    env=_clean_ui_env()
+    env['LAZYDEV_VERSION']=VERSION; env['LAZYDEV_ARTIFACT_DIR']=str(ARTIFACT_DIR)
+    env['LAZYDEV_MODEL']=str(pc.get('model') or '')
+    env['LAZYDEV_SKILLS_DIR']=str(ROOT/'skills')
+    env['GEMINI_API_KEY']=str(proxy.token)
+    env['GOOGLE_GEMINI_BASE_URL']=f'http://127.0.0.1:{proxy.port}'
+    # The official Antigravity UI owns the interactive model picker. The proxy
+    # pins every generation to the model selected in LazyDev setup, regardless
+    # of which native Gemini model name the UI sends on the wire.
+    env['LAZYDEV_ANTIGRAVITY_UPSTREAM_MODEL']=str(pc.get('model') or '')
+    args=[]
+    try: return subprocess.call([agy,*args],cwd=str(workspace),env=env)
+    except KeyboardInterrupt: return 130
+
+
 def chat(sessions: bool = False, continue_session: bool = False) -> int:
     clear_terminal()
-    kimi = find_kimi()
-    if not kimi:
-        print("Kimi Code launcher not found. Install Kimi Code with the LazyDev installer.", file=sys.stderr)
-        return 1
     cfg = read_config()
     provider = active_provider(cfg)
     pc = dict(provider_config(cfg, provider["id"]))
@@ -1989,22 +2772,45 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     if not pc.get("model"):
         print("No active provider is configured. Run: lazydev setup", file=sys.stderr)
         return 1
+    items=installed_chat_uis()
+    if not items:
+        print("No AI UI is installed. Run the LazyDev installer and choose Kimi Code, Codex, or Antigravity.", file=sys.stderr)
+        return 1
+    ui=choose_chat_ui(items)
+    if not ui: return 1
+    clear_terminal()
     pc["modelInfo"] = refresh_selected_model(cfg, provider, pc)
     if pc.get("modelInfo", {}).get("toolUse") is False:
         print(f"Synthetic tool mode: {pc.get('model')} has no native tool calling; LazyDev keeps this model and bridges tools locally.")
     proxy = None
-    if provider["id"] not in {"anthropic", "gemini"}:
+    # All three surfaces consume the same LazyDev setup/model/skills layer.
+    # Kimi and Codex use the existing OpenAI-compatible provider proxy;
+    # Antigravity keeps its native UI and uses the existing Gemini runtime path.
+    if provider["id"] not in {"anthropic", "gemini"} or ui in {"codex", "antigravity"}:
         proxy = _ProviderProxy(provider, pc)
     try:
         update_session_alias_history(cfg, discover_session_model_aliases(f"lazydev/{pc.get('model')}") + [_normalize_session_alias(pc.get("model", ""))])
         write_config(cfg)
-        write_kimi_files(provider, cfg, proxy)
+        kimi_config_path, _ = write_kimi_files(provider, cfg, proxy)
         write_kimi_mcp_config()
     except Exception:
         proxy and proxy.close()
         raise
     ensure_artifact_directory()
     workspace = _workspace_for_chat()
+    if ui == "codex":
+        try: return _launch_codex(find_codex() or "codex", proxy, pc, workspace)
+        finally:
+            if proxy is not None: proxy.close()
+    if ui == "antigravity":
+        try: return _launch_antigravity(find_antigravity() or "agy", provider, pc, workspace, proxy)
+        finally:
+            if proxy is not None: proxy.close()
+    kimi = find_kimi()
+    if not kimi:
+        proxy and proxy.close()
+        print("Kimi Code launcher not found.", file=sys.stderr)
+        return 1
     # Kimi Code uses the child process working directory as its workspace root.
     # Do not pass --work-dir: that flag is not supported by every standalone Kimi Code build.
     args = ["--add-dir", str(ARTIFACT_DIR)]
@@ -2014,13 +2820,48 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
         args += ["--continue", "--model", f"lazydev/{pc.get('model')}"]
     else:
         args += ["--agent", "default"]
-    env = os.environ.copy()
+    context = model_context_size(provider, pc)
+    output = model_output_size(provider, pc)
+    output_fraction = 0.20 if context <= 8192 else 0.25 if context <= 131072 else 0.20
+    safe_output = max(256, min(output, max(256, int(context * output_fraction)), CONTEXT_ABSOLUTE_OUTPUT_CAP))
+    env = _clean_ui_env()
     env["KIMI_CODE_HOME"] = str(KIMI_HOME)
     env["KIMI_LOOP_MAX_STEPS_PER_TURN"] = "0"
     env["LAZYDEV_ARTIFACT_DIR"] = str(ARTIFACT_DIR)
     env["LAZYDEV_VERSION"] = VERSION
     env["LAZYDEV_CONTEXT_DIR"] = str(HOME / ".lazydev")
     env["LAZYDEV_MODEL"] = str(pc.get("model"))
+    # Keep Kimi's established in-memory model override contract. These fields
+    # outrank on-disk defaults and keep the selected LazyDev provider/model fixed
+    # for the lifetime of the child process, including native login/logout edits.
+    env["KIMI_MODEL_NAME"] = str(pc.get("model"))
+    env["KIMI_MODEL_API_KEY"] = str(proxy.token if proxy is not None else pc.get("apiKey") or "")
+    env["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(max(1024, context))
+    env["KIMI_MODEL_DISPLAY_NAME"] = f"{provider["label"]} · {pc.get("model")}"
+    capabilities = []
+    if proxy is not None or native_tool_capability(pc) is not False:
+        capabilities.append("tool_use")
+    if provider["id"] == "gemini":
+        capabilities.append("thinking")
+    if capabilities:
+        env["KIMI_MODEL_CAPABILITIES"] = ",".join(capabilities)
+    if safe_output:
+        env["KIMI_MODEL_MAX_COMPLETION_TOKENS"] = str(max(256, safe_output))
+        env["KIMI_MODEL_MAX_TOKENS"] = str(max(256, safe_output))
+    if provider["id"] == "gemini":
+        env["KIMI_MODEL_THINKING_EFFORT"] = "low"
+    if proxy is not None:
+        env["KIMI_MODEL_PROVIDER_TYPE"] = "anthropic" if provider["id"] == "anthropic" else "openai"
+        env["KIMI_MODEL_BASE_URL"] = f"http://127.0.0.1:{proxy.port}/v1"
+    elif provider["id"] == "gemini":
+        env["KIMI_MODEL_PROVIDER_TYPE"] = "google-genai"
+        env["KIMI_MODEL_BASE_URL"] = "https://generativelanguage.googleapis.com"
+    elif provider["id"] == "anthropic":
+        env["KIMI_MODEL_PROVIDER_TYPE"] = "anthropic"
+        env["KIMI_MODEL_BASE_URL"] = "https://api.anthropic.com"
+    else:
+        env["KIMI_MODEL_PROVIDER_TYPE"] = "openai"
+        env["KIMI_MODEL_BASE_URL"] = "https://api.openai.com/v1"
     env["LAZYDEV_CONTEXT_EXTRA_MULTIPLIER"] = str(CONTEXT_EXTRA_MULTIPLIER)
     env["LAZYDEV_TRANSIENT_RETRIES"] = str(PROXY_MAX_RETRIES)
     env["LAZYDEV_READ_MAX_CHARS"] = os.environ.get("LAZYDEV_READ_MAX_CHARS", "500000")
@@ -2029,22 +2870,13 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     env["LAZYDEV_CONTEXT_OUTPUT_KEEP_CHARS"] = str(CONTEXT_OUTPUT_KEEP_CHARS)
     env["LAZYDEV_CONTEXT_ARCHIVE_DIR"] = str(CONTEXT_ARCHIVE_DIR)
     env["LAZYDEV_CONTEXT_RECENT_MESSAGES"] = str(CONTEXT_RECENT_MESSAGES)
-    for name in list(env):
-        if name.startswith("KIMI_MODEL_"):
-            env.pop(name, None)
-    context = model_context_size(provider, pc)
-    output = model_output_size(provider, pc)
-    output_fraction = 0.20 if context <= 8192 else 0.25 if context <= 131072 else 0.20
-    safe_output = max(256, min(output, max(256, int(context * output_fraction)), CONTEXT_ABSOLUTE_OUTPUT_CAP))
-    if provider["id"] != "ninerouter":
-        env["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(context)
-        env["KIMI_MODEL_MAX_COMPLETION_TOKENS"] = str(safe_output)
-        env["KIMI_MODEL_MAX_TOKENS"] = str(safe_output)
+    bridge_stop = _start_kimi_auth_bridge(kimi_config_path, provider, cfg, proxy)
     try:
         return subprocess.call([kimi, *args], cwd=str(workspace), env=env)
     except KeyboardInterrupt:
         return 130
     finally:
+        _stop_kimi_auth_bridge(bridge_stop)
         if proxy is not None:
             proxy.close()
 
@@ -2344,7 +3176,7 @@ def help_command() -> int:
     title(f"Lazy Developer {VERSION}")
     print("Build · debug · review · test · ship\n")
     rows = [
-        ("lazydev chat", "Start the LazyDev + Kimi Code session"),
+        ("lazydev chat", "Open the installed Kimi Code, Codex, or Antigravity UI"),
         ("lazydev setup", "Choose provider, API key, and live model"),
         ("lazydev sessions", "Open saved Kimi sessions"),
         ("lazydev skills", "Browse bundled LazyDev skills"),

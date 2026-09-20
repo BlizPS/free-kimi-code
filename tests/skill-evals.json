@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "purpose": "Static contract, routing-pressure, and compression gate; not a model benchmark.",
   "baseline_approx_tokens": 4042,
   "max_approx_tokens": 900,

@@ -36,7 +36,7 @@ def run_server(command: list[str]) -> list[dict]:
 
 def main() -> None:
     py = run_server([sys.executable, str(PY_SERVER)])
-    assert py[0]["result"]["serverInfo"] == {"name": "lazydev-browser", "version": "1.0.1"}
+    assert py[0]["result"]["serverInfo"] == {"name": "lazydev-browser", "version": "1.0.2"}
     names = {item["name"] for item in py[1]["result"]["tools"]}
     assert {"search_web", "browser_open", "browser_links"} <= names
     assert "error" not in py[2], "network failure must be a tool result, not MCP transport error"
@@ -47,7 +47,7 @@ def main() -> None:
     node = shutil.which("node")
     if node:
         js = run_server([node, str(MJS_SERVER)])
-        assert js[0]["result"]["serverInfo"] == {"name": "lazydev-browser", "version": "1.0.1"}
+        assert js[0]["result"]["serverInfo"] == {"name": "lazydev-browser", "version": "1.0.2"}
         names = {item["name"] for item in js[1]["result"]["tools"]}
         assert {"search_web", "browser_open", "browser_links"} <= names
         assert "error" not in js[2]

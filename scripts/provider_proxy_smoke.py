@@ -73,6 +73,30 @@ try:
     assert int(huge_normalized["max_tokens"]) <= 32768, huge_normalized
 
     tool = {"type": "function", "function": {"name": "ReadFile", "description": "Read a file", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}
+
+    # Anthropic native wire adapter must still look like one unified OpenAI-style
+    # provider to the UI layer, while using Anthropic's /v1/messages contract upstream.
+    anthropic_provider = {"id": "anthropic", "label": "Anthropic", "kind": "anthropic", "base": "http://127.0.0.1:1"}
+    anthropic_pc = {"apiKey": "anthropic-key", "model": "claude-test", "modelInfo": {"context": 32768, "output": 4096}}
+    anthropic_body = {"model": "claude-test", "messages": [
+        {"role": "system", "content": "You are LazyDev."},
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "ReadFile", "arguments": "{\"path\":\"README.md\"}"}}]},
+        {"role": "tool", "tool_call_id": "call_1", "content": "file body"},
+    ], "tools": [tool], "tool_choice": "auto", "max_tokens": 512}
+    converted = mod._openai_to_anthropic(anthropic_body, "claude-test")
+    assert converted["model"] == "claude-test"
+    assert converted["system"] == "You are LazyDev."
+    assert converted["tools"][0]["input_schema"]["required"] == ["path"]
+    assert converted["messages"][1]["content"][0]["type"] == "tool_use"
+    assert converted["messages"][2]["content"][0]["type"] == "tool_result"
+    back = mod._anthropic_to_openai({"id":"msg_1","model":"claude-test","content":[{"type":"text","text":"done"},{"type":"tool_use","id":"call_1","name":"ReadFile","input":{"path":"README.md"}}],"stop_reason":"tool_use","usage":{"input_tokens":11,"output_tokens":7}}, "claude-test")
+    assert back["choices"][0]["finish_reason"] == "tool_calls"
+    assert back["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == "ReadFile"
+    stream_sample = b'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_2","model":"claude-test"}}\n\nevent: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\nevent: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}\n\nevent: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n'
+    stream_out = mod._anthropic_sse_to_openai(stream_sample, "claude-test").decode()
+    assert "chat.completion.chunk" in stream_out and '"content":"hi"' in stream_out and "[DONE]" in stream_out, stream_out
+
     no_native_pc = {"apiKey": "test-key", "model": "same-model", "modelInfo": {"context": 32768, "output": 4096, "toolUse": False}}
 
     # Verify Kimi config keeps tool_use enabled because the loopback proxy provides the bridge.

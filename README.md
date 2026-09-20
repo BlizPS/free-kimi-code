@@ -7,7 +7,7 @@
   <br>
   <br>
 
-  [![Version](https://img.shields.io/badge/version-1.0.1-7C3AED?style=for-the-badge)](https://github.com/BlizPS/free-kimi-code)
+  [![Version](https://img.shields.io/badge/version-1.0.2-7C3AED?style=for-the-badge)](https://github.com/BlizPS/free-kimi-code)
   [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E?style=for-the-badge)](LICENSE)
   [![Platforms](https://img.shields.io/badge/platform-macOS%20·%20Linux%20·%20Windows%20·%20Termux-0EA5E9?style=for-the-badge)](#-installation)
   [![Stars](https://img.shields.io/github/stars/BlizPS/free-kimi-code?style=for-the-badge&color=F59E0B)](https://github.com/BlizPS/free-kimi-code/stargazers)
@@ -18,14 +18,14 @@
   </p>
 
   <p>
-    <strong>Supercharge Kimi Code with portable AI skills, live model routing, plugins, and powerful developer tools.</strong><br>
+    <strong>Supercharge Kimi Code, Codex, and Antigravity with one portable LazyDev skill + routing layer.</strong><br>
     <em>Keep the familiar Kimi Code workflow while adding a stronger, cleaner developer experience.</em>
   </p>
 </div>
 
 ## What is Lazy Developer?
 
-Lazy Developer is a free, open-source toolkit built around Kimi Code. It adds reusable AI skills, live provider/model discovery, model-aware tool handling, context protection, safer artifacts, search/browser resilience, and a cleaner terminal workflow without replacing the core Kimi Code experience.
+Lazy Developer is a free, open-source toolkit that keeps Kimi Code, Codex, and Antigravity as the UI surfaces while sharing one setup, model selection, proxy/routing layer, token/context optimization, and the bundled LazyDev skills.
 
 ## Why Lazy Developer?
 
@@ -45,9 +45,9 @@ Kimi Code
 
 The goal is simple: keep the familiar agent experience while making longer, tool-heavy coding sessions easier to manage.
 
-## Built on Kimi Code
+## Kimi Code · Codex · Antigravity
 
-Lazy Developer is designed around the Kimi Code workflow rather than replacing it.
+Lazy Developer keeps the native **Kimi Code, Codex, and Antigravity** CLI UIs and unifies the layer underneath them. Install whichever UIs you want; `lazydev chat` automatically opens the only installed UI or asks you to pick when multiple UIs are installed. The selected provider/model still comes from `lazydev setup`, while the same proxy, context/token layer, MCP server, and bundled LazyDev Skills are reused across all three surfaces.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/MoonshotAI/kimi-code/main/docs/media/intro.gif" alt="Kimi Code demo" width="860">
@@ -140,6 +140,8 @@ Large outputs can also be handled without blindly filling the active context.
 
 ### macOS / Linux
 
+During installation, LazyDev asks separately whether to install/update **Kimi Code**, **Codex**, and **Antigravity**. The official CLIs are used; LazyDev keeps the setup, model, proxy/routing, context optimization, and skills layer shared.
+
 ```sh
 curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install.sh" | sh
 ```
@@ -200,7 +202,8 @@ Lazy Developer is designed so its skills can be used beyond the main CLI in comp
 The repository includes reusable skill assets and compatibility-oriented project integrations for agent workflows such as:
 
 - Kimi Code
-- Codex-compatible environments
+- Codex CLI
+- Antigravity CLI
 - Claude-compatible plugin environments
 - OpenCode
 - OpenClaw
@@ -266,5 +269,5 @@ Use GitHub Issues and Discussions for project feedback, compatibility reports, i
 MIT — see [LICENSE](LICENSE)
 
 <div align="center">
-  <sub>Built by <strong>BlizPS</strong> · Lazy Developer 1.0.1</sub>
+  <sub>Built by <strong>BlizPS</strong> · Lazy Developer 1.0.2 · Kimi Code + Codex + Antigravity</sub>
 </div>

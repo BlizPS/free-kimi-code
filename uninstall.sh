@@ -22,6 +22,8 @@ else
   RTK_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rtk"
 fi
 KIMI_NATIVE_HOME="$HOME/.kimi-code"
+CODEX_HOME="$HOME/.codex"
+ANTIGRAVITY_HOME="$HOME/.gemini/antigravity-cli"
 KIMI_LEGACY_HOME="$HOME/.kimi"
 KIMI_CONFIG_DIRS="${XDG_CONFIG_HOME:-$HOME/.config}/kimi ${XDG_CONFIG_HOME:-$HOME/.config}/kimi-code $HOME/.config/kimi $HOME/.config/kimi-code"
 if [ "$TERMUX_LINUX" -eq 1 ]; then
@@ -55,7 +57,7 @@ remove_managed_launchers_from_path() {
   for dir in $paths; do
     IFS="$old_ifs"
     [ -n "$dir" ] || { IFS=':'; continue; }
-    for name in lazydev kimi rtk; do
+    for name in lazydev kimi codex agy rtk; do
       candidate="$dir/$name"
       if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then continue; fi
       case "$name" in
@@ -69,6 +71,8 @@ remove_managed_launchers_from_path() {
         kimi)
           if is_managed_file "$candidate" '\.kimi-code|kimi-code|@moonshot-ai/kimi-code'; then rm -f "$candidate" 2>/dev/null || true; fi
           ;;
+        codex) if is_managed_file "$candidate" 'openai/codex|Codex CLI'; then rm -f "$candidate" 2>/dev/null || true; fi ;;
+        agy) if is_managed_file "$candidate" 'antigravity|google-antigravity'; then rm -f "$candidate" 2>/dev/null || true; fi ;;
         rtk)
           if is_managed_file "$candidate" 'rtk-ai/rtk|Rust Token Killer'; then rm -f "$candidate" 2>/dev/null || true; fi
           ;;
@@ -108,6 +112,8 @@ assert_stopped() {
   running=""
   process_running 'scripts/lazydev\.mjs' && running="$running lazydev"
   process_running '(^|/)kimi([[:space:]]|$)' && running="$running kimi"
+  process_running '(^|/)codex([[:space:]]|$)' && running="$running codex"
+  process_running '(^|/)agy([[:space:]]|$)' && running="$running agy"
   process_running '(^|/)rtk([[:space:]]|$)' && running="$running rtk"
   [ -z "$running" ] || fatal "Stop running${running} processes before uninstalling."
 }
@@ -143,6 +149,29 @@ for npm_root in \
 done
 rm -f "$LAZYDEV_BIN_DIR/kimi" "$LAZYDEV_BIN_DIR/kimi.exe" "$LAZYDEV_BIN_DIR/kimi.cmd" "$HOME/.local/bin/kimi" "$HOME/.local/bin/kimi.exe" "$HOME/.local/bin/kimi.cmd" 2>/dev/null || true
 
+step "Removing Codex and Antigravity"
+rm -rf "$CODEX_HOME" "$ANTIGRAVITY_HOME" 2>/dev/null || true
+# Preserve other Antigravity MCP servers while removing only LazyDev's managed entry.
+AGY_MCP_FILE="$HOME/.gemini/config/mcp_config.json"
+if [ -f "$AGY_MCP_FILE" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$AGY_MCP_FILE" <<'PY' 2>/dev/null || true
+import json, pathlib, sys
+p=pathlib.Path(sys.argv[1])
+try: data=json.loads(p.read_text(encoding='utf-8'))
+except Exception: raise SystemExit(0)
+servers=data.get('mcpServers') if isinstance(data,dict) else None
+if isinstance(servers,dict) and 'lazydev-search' in servers:
+    servers.pop('lazydev-search', None)
+    data['mcpServers']=servers
+    if servers: p.write_text(json.dumps(data,indent=2)+'\n',encoding='utf-8')
+    else: p.unlink(missing_ok=True)
+PY
+  fi
+fi
+rm -f "$LAZYDEV_BIN_DIR/codex" "$LAZYDEV_BIN_DIR/codex.exe" "$LAZYDEV_BIN_DIR/codex.cmd" "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.exe" "$HOME/.local/bin/codex.cmd" 2>/dev/null || true
+rm -f "$LAZYDEV_BIN_DIR/agy" "$LAZYDEV_BIN_DIR/agy.exe" "$LAZYDEV_BIN_DIR/agy.cmd" "$HOME/.local/bin/agy" "$HOME/.local/bin/agy.exe" "$HOME/.local/bin/agy.cmd" 2>/dev/null || true
+
 step "Removing RTK"
 RTK_PATH="$(command -v rtk 2>/dev/null || true)"
 if [ -n "$RTK_PATH" ]; then
@@ -165,7 +194,7 @@ case "${SHELL:-}" in
 esac
 
 step "Checking cleanup"
-for path in "$LAZYDEV_HOME" "$LAZYDEV_CONFIG_DIR" "$KIMI_NATIVE_HOME" "$KIMI_LEGACY_HOME" "$RTK_CONFIG_DIR" "$RTK_DATA_DIR" "$RTK_CACHE_DIR" "$LAZYDEV_BIN_DIR/lazydev" "$HOME/.local/bin/lazydev" "$LAZYDEV_BIN_DIR/rtk" "$ARTIFACT_DIR"; do
+for path in "$LAZYDEV_HOME" "$LAZYDEV_CONFIG_DIR" "$KIMI_NATIVE_HOME" "$KIMI_LEGACY_HOME" "$CODEX_HOME" "$ANTIGRAVITY_HOME" "$RTK_CONFIG_DIR" "$RTK_DATA_DIR" "$RTK_CACHE_DIR" "$LAZYDEV_BIN_DIR/lazydev" "$HOME/.local/bin/lazydev" "$LAZYDEV_BIN_DIR/rtk" "$ARTIFACT_DIR"; do
   [ ! -e "$path" ] || fatal "Cleanup incomplete: $path still exists."
 done
 

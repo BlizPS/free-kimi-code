@@ -24,7 +24,7 @@ import { buildLanguageFrame, getLanguageReport } from '../systems/languages/inde
 import { buildGeminiRetryRequest, chunkFinishReason, chunkHasVisibleOutput, geminiOpenAIEndpoint, parseSseEvent, prepareGeminiRequest, responseHasUsableOutput, streamNeedsGeminiRetry } from '../runtime/gemini-resilience.mjs';
 import { compressAgenticMessages, FOVEANCE_DEFAULTS } from '../systems/token/foveance.mjs';
 
-const version = '1.0.1';
+const version = '1.0.2';
 const CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768;
 const TOKEN_SAVINGS_FLOOR = 0.75;
 const TOKEN_SAVINGS_TARGET = 0.80;
@@ -43,7 +43,7 @@ const TOKEN_CODEC_TEMPLATE_MODE = (() => {
 })();
 const TOKEN_CODEC_TEMPLATE_PRESSURE = Math.max(0.55, Math.min(0.95, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_PRESSURE || 0.78)));
 const TOKEN_CODEC_TEMPLATE_MIN_SAVED = Math.max(64, Math.min(4096, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_MIN_SAVED || 128)));
-const ANTIGRAVITY_AGENT = 'antigravity-preview-09-2026';
+const ANTIGRAVITY_AGENT = 'gemini-3.8-flash-medium';
 const KIMI_BUILTIN_TOOLS = [
   'Read','Write','Edit','Grep','Glob','ReadMediaFile','Bash',
   'WebSearch','FetchURL','EnterPlanMode','ExitPlanMode','TodoList',
@@ -380,7 +380,7 @@ function applyKnownModelLimits(info, provider) {
   return out;
 }
 function isAntigravityModel(modelId) {
-  return /^antigravity-preview(?:-|$)/i.test(String(modelId || '').trim());
+  return false;
 }
 function modelSupportsKimiTools(provider, pc) { return pc?.toolUse !== false; }
 function normalizeOllamaBaseUrl(value) {
@@ -1609,7 +1609,7 @@ async function help() {
   line(`${ansi('1;36','◆')} Command center`);
   line(`${dim('Build · debug · review · test · ship')}`);
   line();
-  line(`  ${ansi('36','lazydev chat'.padEnd(24))} Start the LazyDev + Kimi Code session`);
+  line(`  ${ansi('36','lazydev chat'.padEnd(24))} Open the installed Kimi Code, Codex, or Antigravity UI`);
   line(`  ${ansi('36','lazydev setup'.padEnd(24))} Choose your provider, API key, and model`);
   line(`  ${ansi('36','lazydev sessions'.padEnd(24))} Work with saved Kimi sessions`);
   line(`  ${ansi('36','lazydev skills'.padEnd(24))} Browse bundled LazyDev skills`);

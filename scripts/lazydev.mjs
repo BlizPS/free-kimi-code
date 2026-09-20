@@ -26,7 +26,7 @@ import { compressAgenticMessages, FOVEANCE_DEFAULTS } from '../systems/token/fov
 import { VirtualContextStore, extractContextPaths } from '../systems/context/virtual-store.mjs';
 import { pruneLazyDevSystemMessages } from '../systems/context/prompt-prune.mjs';
 
-const version = '1.0.1';
+const version = '1.0.2';
 const TOKEN_SAVINGS_FLOOR = 0.75;
 const TOKEN_SAVINGS_TARGET = 0.80;
 const MAX_SKILL_FRACTION = 0.24;
@@ -56,7 +56,6 @@ const CONTEXT_RECENT_MESSAGES = Math.max(4, Math.min(20, Number(process.env.LAZY
 const CONTEXT_ARCHIVE_SNIPPET_CHARS = Math.max(80, Math.min(800, Number(process.env.LAZYDEV_CONTEXT_ARCHIVE_SNIPPET_CHARS || 240)));
 const CONTEXT_TOOL_RESULT_CHARS = Math.max(400, Math.min(6000, Number(process.env.LAZYDEV_CONTEXT_TOOL_RESULT_CHARS || 1200)));
 const TOKEN_CODEC_TEMPLATE_MIN_SAVED = Math.max(64, Math.min(4096, Number(process.env.LAZYDEV_TOKEN_CODEC_TEMPLATE_MIN_SAVED || 128)));
-const ANTIGRAVITY_AGENT = 'antigravity-preview-09-2026';
 const KIMI_BUILTIN_TOOLS = [
   // Current Kimi Code default-agent tool names. LazyDev exposes these to the
   // local agent even when the upstream model has no native tool-call wire format.
@@ -273,19 +272,7 @@ function normalizeConfig(raw) {
 function writeConfig(data) { writeJsonAtomic(configFile(), data); }
 function providerConfig(cfg, id) { const x = cfg.providers?.[id]; return x && typeof x === 'object' ? x : {}; }
 function providerRequiresApiKey(provider) { return provider?.auth !== 'none' && provider?.id !== 'ollama'; }
-function migrateDisabledModelConfig(cfg) {
-  const active = providers.find((x) => x.id === cfg.activeProvider);
-  const activePc = active ? providerConfig(cfg, active.id) : {};
-  if (active?.id !== 'gemini' || !isAntigravityModel(activePc.model)) return cfg;
-  const fallback = providers.find((candidate) => {
-    if (candidate.id === 'gemini') return false;
-    const c = providerConfig(cfg, candidate.id);
-    return Boolean(c.model) && (!providerRequiresApiKey(candidate) || Boolean(c.apiKey) || candidate.id === 'ollama');
-  });
-  if (fallback) cfg.activeProvider = fallback.id;
-  else activePc.model = '';
-  return cfg;
-}
+function migrateDisabledModelConfig(cfg) { return cfg; }
 function activeProvider(cfg) { return providers.find((x) => x.id === cfg.activeProvider) || providers.find((x) => x.id === 'gemini') || providers[0]; }
 async function fetchOpenRouterEndpointLimits(modelId, apiKey) {
   const id = String(modelId || '').trim();
@@ -440,9 +427,6 @@ function applyKnownModelLimits(info, provider) {
   if (known.toolUse !== undefined) out.toolUse = known.toolUse;
   if (known.offEffort) out.offEffort = known.offEffort;
   return out;
-}
-function isAntigravityModel(modelId) {
-  return /^antigravity-preview(?:-|$)/i.test(String(modelId || '').trim());
 }
 function nativeToolCapability(provider, pc) {
   const explicit = pc?.toolUse;
@@ -879,7 +863,7 @@ async function fetchModels(provider, apiKey, options = {}) {
     const models = (Array.isArray(data.models) ? data.models : [])
       .filter((x) => Array.isArray(x.supportedGenerationMethods) && x.supportedGenerationMethods.includes('generateContent'))
       .map((x) => normalizeModel(x, provider)).filter((x) => x.id);
-    return models.filter((m) => !isAntigravityModel(m.id));
+    return models;
   }
   if (provider.kind === 'anthropic') {
     const data = await requestJson(provider.modelsUrl, { timeout, headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'user-agent': `lazydev/${version}` } });
@@ -1563,16 +1547,16 @@ function buildKimiModelEnv(provider, pc, proxy, budget) {
   env.KIMI_MODEL_DISPLAY_NAME = `${provider.label} · ${pc.model}`;
   const capabilities = [];
   if (modelSupportsKimiTools(provider, pc)) capabilities.push('tool_use');
-  if (provider.id === 'gemini' && !isAntigravityModel(pc.model)) capabilities.push('thinking');
+  if (provider.id === 'gemini') capabilities.push('thinking');
   if (capabilities.length) env.KIMI_MODEL_CAPABILITIES = capabilities.join(',');
   if (budget.output) {
     env.KIMI_MODEL_MAX_COMPLETION_TOKENS = String(Math.max(256, budget.output));
     env.KIMI_MODEL_MAX_TOKENS = String(Math.max(256, budget.output));
   }
-  if (provider.id === 'gemini' && !isAntigravityModel(pc.model)) env.KIMI_MODEL_THINKING_EFFORT = 'low';
+  if (provider.id === 'gemini') env.KIMI_MODEL_THINKING_EFFORT = 'low';
 
   if (proxy) {
-    env.KIMI_MODEL_PROVIDER_TYPE = provider.id === 'anthropic' && !isAntigravityModel(pc.model) ? 'anthropic' : 'openai';
+    env.KIMI_MODEL_PROVIDER_TYPE = provider.id === 'anthropic' ? 'anthropic' : 'openai';
     env.KIMI_MODEL_BASE_URL = `http://127.0.0.1:${proxy.port}/v1`;
   } else if (provider.id === 'gemini') {
     env.KIMI_MODEL_PROVIDER_TYPE = 'google-genai';
@@ -1825,9 +1809,8 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
   const budget = contextBudget(pc.modelInfo);
   const context = budget.max;
   const output = budget.output;
-  const antigravity = provider.id === 'gemini' && isAntigravityModel(pc.model) && proxy;
-  const geminiProxy = provider.id === 'gemini' && Boolean(proxy);
-  const providerType = provider.id === 'gemini' && !antigravity && !geminiProxy ? 'google-genai' : antigravity || geminiProxy ? 'openai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
+    const geminiProxy = provider.id === 'gemini' && Boolean(proxy);
+  const providerType = provider.id === 'gemini' && !geminiProxy ? 'google-genai' : geminiProxy ? 'openai' : provider.id === 'anthropic' ? 'anthropic' : 'openai';
   const intelligence = modelIntelligenceProfile(pc.model);
   const nativeTools = nativeToolCapability(provider, pc);
   const toolUse = proxy ? true : nativeTools !== false;
@@ -1913,8 +1896,8 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
         ``,
       ]),
     `[thinking]`,
-    `enabled = ${provider.id === 'gemini' && !antigravity ? 'true' : 'false'}`,
-    ...(provider.id === 'gemini' && !antigravity ? [`effort = ${tomlQuote('low')}`] : []),
+    `enabled = ${provider.id === 'gemini' ? 'true' : 'false'}`,
+    ...(provider.id === 'gemini' ? [`effort = ${tomlQuote('low')}`] : []),
     ``,
     `[loop_control]`,
     `max_attempts_per_step = 10`,
@@ -2275,7 +2258,7 @@ async function help() {
   line(`${ansi('1;36','◆')} Command center`);
   line(`${dim('Build · debug · review · test · ship')}`);
   line();
-  line(`  ${ansi('36','lazydev chat'.padEnd(24))} Start the LazyDev + Kimi Code session`);
+  line(`  ${ansi('36','lazydev chat'.padEnd(24))} Open the installed Kimi Code, Codex, or Antigravity UI`);
   line(`  ${ansi('36','lazydev setup'.padEnd(24))} Choose your provider, API key, and model`);
   line(`  ${ansi('36','lazydev sessions'.padEnd(24))} Work with saved Kimi sessions`);
   line(`  ${ansi('36','lazydev skills'.padEnd(24))} Browse bundled LazyDev skills`);
@@ -2310,113 +2293,31 @@ function findAvailableAgentCli() {
   for (const command of candidates) if (commandExists(command)) return { command, args: [] };
   return null;
 }
+function runNativeChat() {
+  const pythonFile = path.join(root, 'cli', 'lazydev.py');
+  if (!fs.existsSync(pythonFile)) {
+    line(red('LazyDev Python runtime is missing: cli/lazydev.py'));
+    return 1;
+  }
+  const candidates = isWin
+    ? [['py.exe', ['-3', pythonFile, 'chat']], ['python.exe', [pythonFile, 'chat']]]
+    : [['python3', [pythonFile, 'chat']], ['python', [pythonFile, 'chat']]];
+  for (const [command, args] of candidates) {
+    const result = spawnSync(command, args, {
+      cwd: process.cwd(),
+      stdio: 'inherit',
+      env: { ...process.env, LAZYDEV_NODE_WRAPPER: '1', LAZYDEV_VERSION: version },
+      windowsHide: false,
+    });
+    if (result.error && result.error.code === 'ENOENT') continue;
+    return typeof result.status === 'number' ? result.status : 1;
+  }
+  line(red('Python 3 is required for LazyDev chat. Re-run the official LazyDev installer to repair the runtime.'));
+  return 1;
+}
+
 async function chat() {
-  clearScreen();
-  if (!ensureKimiInstalled()) return;
-  const cfg = normalizeConfig(readConfig());
-  const provider = activeProvider(cfg);
-  const savedPc = providerConfig(cfg, provider.id);
-  if (provider.auth === 'none' && savedPc.apiKey) {
-    savedPc.apiKey = '';
-    cfg.providers[provider.id] = { ...savedPc, apiKey: '' };
-    writeConfig(cfg);
-  }
-  let pc = { ...savedPc, apiKey: provider.auth === 'none' ? '' : savedPc.apiKey, toolUse: modelSupportsKimiTools(provider, savedPc) };
-  if ((providerRequiresApiKey(provider) && !pc.apiKey) || !pc.model) { line(red(`No active provider is configured. Run: lazydev setup`)); return; }
-  if (provider.id === 'openrouter') {
-    const live = await verifyLiveModel(provider, pc);
-    if (live.status === 'missing') {
-      line(red(`OpenRouter model check failed: ${pc.model} is not currently exposed by the live model catalog.`));
-      line(dim(`Run: lazydev setup → OpenRouter → choose a current model from the live catalog.`));
-      return;
-    }
-    if (live.model) {
-      pc.modelInfo = live.model;
-      // Preserve unknown capability as unknown so the proxy can learn it from
-      // the first tool-call response instead of assuming support.
-      pc.toolUse = live.model.toolUse;
-    }
-    if (live.status === 'no-tools') {
-      line(yellow(`Synthetic tool mode: ${pc.model} has no native tool-calling capability; LazyDev keeps this model and bridges tools locally.`));
-    }
-  }
-  // The selected model is never replaced because native tool calling is unavailable.
-  if (isAntigravityModel(pc.model)) {
-    line(red('That model is temporarily disabled in LazyDev. Choose another configured provider/model with `lazydev setup`.'));
-    return;
-  }
-  // Route OpenAI-compatible providers and Ollama through the loopback proxy.
-  // Gemini and Anthropic keep their native wire adapters; OpenRouter/Ollama use
-  // the proxy as the synthetic-tool boundary when native tool calling is absent.
-  pc.modelInfo = effectiveModelInfo(provider, pc);
-  const proxy = !['gemini', 'anthropic'].includes(provider.id)
-    ? await createProxy(provider, pc)
-    : null;
-  const sessionAliases = [...new Set([...(Array.isArray(cfg.sessionModelAliases) ? cfg.sessionModelAliases : []), ...discoverSessionModelAliases(`lazydev/${pc.model}`)])]
-    .filter((alias) => alias && alias !== `lazydev/${pc.model}`).slice(-256);
-  updateSessionModelAliasHistory(cfg, [...sessionAliases, `lazydev/${pc.model}`]);
-  writeConfig(cfg);
-  if (provider.id === 'ollama') assertHttpUrl(ollamaChatUrl(pc.baseUrl), 'Ollama API URL');
-  else if (provider.id === 'gemini') {
-    // Standard Gemini models use Kimi Code's native Google GenAI adapter.
-  } else if (provider.id === 'anthropic') assertHttpUrl('https://api.anthropic.com', 'Anthropic API URL');
-  else if (provider.id === 'openai') assertHttpUrl('https://api.openai.com/v1', 'OpenAI API URL');
-  else if (proxy) assertHttpUrl(`http://127.0.0.1:${proxy.port}/v1`, 'LazyDev proxy URL');
-  else assertHttpUrl(provider.chatUrl, `${provider.label} API URL`);
-  fs.mkdirSync(kimiHome(), { recursive: true, mode: 0o700 });
-  const configPath = path.join(kimiHome(), 'config.toml');
-  const tuiPath = path.join(kimiHome(), 'tui.toml');
-  fs.writeFileSync(configPath, composeLazyDevConfig(provider, pc, proxy, sessionAliases), { mode: 0o600 });
-  fs.writeFileSync(tuiPath, buildTuiConfig(), { mode: 0o600 });
-  writeKimiAgentGuidance();
-  writeLazyDevMcpConfig();
-  const invocation = findKimiInvocation();
-  if (!invocation) { try { proxy?.server.close(); } catch {} line(red(`Kimi Code launcher not found. Install Kimi Code with the LazyDev installer.`)); return; }
-  // Kimi Code standalone resolves its managed runtime from KIMI_CODE_HOME.
-  // Do not pass the legacy explicit-config flag: recent standalone builds
-  // resolve their runtime config from KIMI_CODE_HOME instead.
-  // The config written above is therefore the canonical runtime configuration.
-  const artifactDir = ensureOutputDirectory();
-  // Kimi Code derives its workspace from the child process cwd. Avoid --work-dir because
-  // standalone Kimi Code builds do not all expose that option.
-  const workspaceDir = path.resolve(process.cwd());
-  const launchArgs = [...invocation.args, '--add-dir', artifactDir];
-  const mode = process.argv.includes('--new') ? 'new' : process.argv.includes('--sessions') || process.argv.includes('--session') ? 'sessions' : process.argv.includes('--resume') || process.argv.includes('--continue') ? 'continue' : 'new';
-  if (mode === 'sessions') launchArgs.push('--session');
-  else if (mode === 'continue') launchArgs.push('--continue');
-  else launchArgs.push('--agent', 'default');
-  const budget = contextBudget(pc.modelInfo);
-  writeContextMeter({ provider, pc, context: budget.max, beforeMessages: [], afterMessages: [], fit: null });
-  const authBridgeStop = startKimiAuthBridge({ configPath, provider, pc, proxy, sessionAliases });
-  // The runtime model override keeps the selected LazyDev route stable during the child TUI.
-  // 9Router needs the generated [models] entry (including off_effort) to remain authoritative.
-  // KIMI_MODEL_* creates a temporary in-memory model definition and would drop off_effort.
-  const modelEnv = proxy && provider.id !== 'ninerouter' ? buildKimiModelEnv(provider, pc, proxy, budget) : {};
-  const childEnv = {
-    ...sanitizeKimiChildEnv(provider),
-    ...modelEnv,
-    KIMI_CODE_HOME: kimiHome(),
-    KIMI_CODE_NO_AUTO_UPDATE: '1',
-    KIMI_LOOP_MAX_STEPS_PER_TURN: '0',
-    LAZYDEV_ARTIFACT_DIR: outputDirectory(),
-    LAZYDEV_VERSION: version,
-    LAZYDEV_MODEL: pc.model,
-    LAZYDEV_CONTEXT_EXTRA_MULTIPLIER: String(CONTEXT_EXTRA_MULTIPLIER),
-    LAZYDEV_TRANSIENT_RETRIES: String(PROVIDER_TRANSIENT_MAX_RETRIES),
-    LAZYDEV_READ_MAX_CHARS: process.env.LAZYDEV_READ_MAX_CHARS || '500000',
-    LAZYDEV_CONTEXT_FIT_RATIO: String(CONTEXT_FIT_RATIO),
-    LAZYDEV_CONTEXT_RECENT_MESSAGES: String(CONTEXT_RECENT_MESSAGES),
-  };
-  const child = spawn(invocation.command, launchArgs, {
-    cwd: workspaceDir,
-    stdio: 'inherit',
-    env: childEnv,
-    windowsHide: false,
-  });
-  const shutdown = () => { try { authBridgeStop(); } catch {} try { proxy?.server.close(); } catch {} };
-  child.on('exit', (code, signal) => { shutdown(); if (signal) process.exitCode = 1; else process.exitCode = code ?? 0; });
-  child.on('error', (error) => { shutdown(); line(red(`Kimi Code failed to start: ${error.message}`)); process.exitCode = 1; });
-  process.on('exit', shutdown);
+  return runNativeChat();
 }
 
 async function main() {

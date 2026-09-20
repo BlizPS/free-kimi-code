@@ -4,8 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const runtime = fs.readFileSync(path.join(root, 'cli', 'lazydev.py'), 'utf8');
 const launcher = fs.readFileSync(path.join(root, 'scripts', 'lazydev.mjs'), 'utf8');
-const launchNeedle = "const artifactDir = ensureOutputDirectory();\n  const launchArgs = [...invocation.args, '--add-dir', artifactDir];";
-assert.ok(launcher.includes(launchNeedle), 'Kimi must receive a materialized artifact directory');
-assert.ok(launcher.includes("function ensureOutputDirectory() {\n  const dir = outputDirectory();"), 'artifact directory helper missing');
+assert.match(runtime, /args = \["--add-dir", str\(ARTIFACT_DIR\)\]/);
+assert.match(runtime, /ARTIFACT_DIR = Path\(_PLATFORM_PATHS\["artifactDirectory"\]\)/);
+assert.match(launcher, /path\.join\(root, 'cli', 'lazydev\.py'\)/);
 console.log('workspace add-dir smoke: PASS');

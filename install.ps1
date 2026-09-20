@@ -7,8 +7,10 @@ $ProgressPreference = 'SilentlyContinue'
 
 $Repo = 'BlizPS/free-kimi-code'
 $Branch = if ($env:LAZYDEV_BRANCH) { $env:LAZYDEV_BRANCH } else { 'main' }
-$LazyDevVersion = '1.0.1'
+$LazyDevVersion = '1.0.2'
 $KimiInstallUrl = 'https://code.kimi.com/kimi-code/install.ps1'
+$CodexInstallUrl = 'https://chatgpt.com/codex/install.ps1'
+$AntigravityInstallUrl = 'https://antigravity.google/cli/install.ps1'
 $KimiReleasesApiUrl = 'https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest'
 $ArchiveUrl = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
 $GitHubApiUrl = "https://api.github.com/repos/$Repo/commits/$Branch"
@@ -51,6 +53,28 @@ function Get-KimiVersion([string]$Exe) {
     if (-not $Exe) { return '' }
     try { return Get-VersionFromText ((& $Exe --version 2>$null) -join "`n") } catch { return '' }
 }
+function Find-Codex {
+    foreach ($candidate in @((Join-Path $HOME '.local\bin\codex.exe'), (Join-Path $HOME '.local\bin\codex.cmd'))) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    $cmd = Get-Command codex.exe,codex.cmd,codex -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+function Find-Antigravity {
+    foreach ($candidate in @((Join-Path $env:LOCALAPPDATA 'agy\bin\agy.exe'), (Join-Path $HOME '.local\bin\agy.exe'))) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    $cmd = Get-Command agy.exe,agy.cmd,agy -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+function Ask-InstallUi([string]$Label) {
+    $answer = Read-Host "$Label [Y/n]"
+    if ([string]::IsNullOrWhiteSpace($answer)) { return $true }
+    return $answer -match '^(?i)y|yes$'
+}
+
 function Find-Rtk {
     foreach ($name in @('rtk.exe','rtk')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -91,7 +115,7 @@ function Ensure-PythonRunner {
     Write-Host '✓ uv is available as the Python bootstrapper.'
 }
 function Get-GitHubRevision {
-    $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.1' }
+    $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.2' }
     try {
         $data = Invoke-RestMethod -Headers $headers -Uri $GitHubApiUrl
         if ($data.sha -match '^[0-9a-fA-F]{40}$') { return $data.sha }
@@ -100,7 +124,7 @@ function Get-GitHubRevision {
 }
 function Get-RtkLatestVersion {
     try {
-        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.1' }
+        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.2' }
         $data = Invoke-RestMethod -Headers $headers -Uri $RtkApiUrl
         if ($data.tag_name -match '^v(\d+\.\d+\.\d+)$') { return $Matches[1] }
     } catch {}
@@ -108,7 +132,7 @@ function Get-RtkLatestVersion {
 }
 function Get-KimiLatestVersion {
     try {
-        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.1' }
+        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.2' }
         $data = Invoke-RestMethod -Headers $headers -Uri $KimiReleasesApiUrl
         $tag = [string]$data.tag_name
         $m = [regex]::Match($tag, '(\d+\.\d+\.\d+)$')
@@ -138,7 +162,7 @@ function Install-Rtk {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-rtk-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmp -Force | Out-Null
     try {
-        $release = Invoke-RestMethod -Headers @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.1' } -Uri $RtkApiUrl
+        $release = Invoke-RestMethod -Headers @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.2' } -Uri $RtkApiUrl
         $asset = $release.assets | Where-Object { $_.name -eq "rtk-$target.zip" } | Select-Object -First 1
         if (-not $asset) { Fail "RTK release $latest does not contain rtk-$target.zip." }
         $archive = Join-Path $tmp $asset.name
@@ -208,6 +232,10 @@ if ($KimiCurrentVersion) {
     Write-Host 'Kimi Code not found — installing the latest available release.'
 }
 
+$InstallKimi = Ask-InstallUi 'Install/update Kimi Code?'
+$InstallCodex = Ask-InstallUi 'Install/update Codex?'
+$InstallAntigravity = Ask-InstallUi 'Install/update Antigravity?'
+
 $RemoteRevision = Get-GitHubRevision
 if (-not $RemoteRevision) { Fail 'Could not read the current Lazy Developer revision from GitHub.' }
 $InstalledLazyVersion = Get-InstalledLazyVersion
@@ -234,6 +262,25 @@ if ($InstalledLazyVersion -and $InstalledLazyVersion -ne $LazyDevVersion) {
 if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Container) {
     $LazyDevNeedsUpdate = $true
     Write-Host 'Legacy private Node.js runtime detected — it will be removed during the Lazy Developer update.'
+}
+
+if ($InstallCodex) {
+    Step 'Installing/updating official Codex CLI'
+    $env:CODEX_NON_INTERACTIVE = '1'
+    try {
+        Invoke-RestMethod -Uri $CodexInstallUrl | Invoke-Expression
+        if ($LASTEXITCODE -ne 0) { Fail "Codex installer exited with code $LASTEXITCODE." }
+    } finally { Remove-Item Env:CODEX_NON_INTERACTIVE -ErrorAction SilentlyContinue }
+    $CodexExe = Find-Codex
+    if (-not $CodexExe) { Fail 'Codex did not install a usable launcher.' }
+    Write-Host "✓ Codex ready: $CodexExe"
+}
+if ($InstallAntigravity) {
+    Step 'Installing/updating official Antigravity CLI'
+    Invoke-RestMethod -Uri $AntigravityInstallUrl | Invoke-Expression
+    $AgyExe = Find-Antigravity
+    if (-not $AgyExe) { Fail 'Antigravity did not install a usable launcher.' }
+    Write-Host "✓ Antigravity ready: $AgyExe"
 }
 
 $RtkExe = Find-Rtk

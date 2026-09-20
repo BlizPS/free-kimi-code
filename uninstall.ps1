@@ -8,6 +8,8 @@ $LazyDevHome = if ($env:LAZYDEV_HOME) { $env:LAZYDEV_HOME } else { Join-Path $HO
 $LazyDevBin = if ($env:LAZYDEV_BIN_DIR) { $env:LAZYDEV_BIN_DIR } else { Join-Path $HOME '.local\bin' }
 $LazyDevConfig = if ($env:LAZYDEV_CONFIG_DIR) { $env:LAZYDEV_CONFIG_DIR } else { Join-Path $env:APPDATA 'lazydev' }
 $KimiNativeHome = Join-Path $HOME '.kimi-code'
+$CodexHome = Join-Path $HOME '.codex'
+$AntigravityHome = Join-Path $HOME '.gemini\antigravity-cli'
 $KimiLegacyHome = Join-Path $HOME '.kimi'
 $KimiLegacyDirs = @($KimiLegacyHome, (Join-Path $env:APPDATA 'kimi'), (Join-Path $env:APPDATA 'kimi-code'), (Join-Path $env:LOCALAPPDATA 'kimi'), (Join-Path $env:LOCALAPPDATA 'kimi-code'))
 $RtkDataDirs = @((Join-Path $HOME '.local\share\rtk'), (Join-Path $HOME '.cache\rtk'))
@@ -38,13 +40,15 @@ function Remove-IfManagedFile([string]$Path, [string]$Pattern) {
     } catch {}
 }
 function Remove-CommandShims {
-    $commands = @(Get-Command lazydev,kimi,rtk -All -ErrorAction SilentlyContinue)
+    $commands = @(Get-Command lazydev,kimi,codex,agy,rtk -All -ErrorAction SilentlyContinue)
     foreach ($cmd in $commands) {
         $path = $cmd.Source
         if (-not $path) { continue }
         switch -Regex ($cmd.Name) {
             '^lazydev' { Remove-IfManagedFile $path 'Lazy Developer managed launcher|lazydev\.mjs|@blizps/lazy-developer|free-kimi-code' }
             '^kimi' { Remove-IfManagedFile $path '\.kimi-code|kimi-code|@moonshot-ai/kimi-code' }
+            '^codex' { Remove-IfManagedFile $path 'openai/codex|Codex CLI' }
+            '^agy' { Remove-IfManagedFile $path 'antigravity|google-antigravity' }
             '^rtk' { Remove-IfManagedFile $path 'rtk-ai/rtk|Rust Token Killer' }
         }
     }
@@ -64,6 +68,8 @@ function Stop-LazyDevProcess {
 Write-Host "`n==> Checking running processes"
 Stop-LazyDevProcess
 Stop-IfRunning 'kimi'
+Stop-IfRunning 'codex'
+Stop-IfRunning 'agy'
 Stop-IfRunning 'rtk'
 
 Write-Host "`n==> Removing Lazy Developer"
@@ -95,6 +101,28 @@ $LegacyNpmRoots = @(
 foreach ($npmRoot in $LegacyNpmRoots) {
     Remove-Item -LiteralPath (Join-Path $npmRoot '@blizps\lazy-developer') -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $npmRoot '@moonshot-ai\kimi-code') -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "`n==> Removing Codex and Antigravity"
+Remove-Item -LiteralPath $CodexHome -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $AntigravityHome -Recurse -Force -ErrorAction SilentlyContinue
+$AgyMcpFile = Join-Path $HOME '.gemini\config\mcp_config.json'
+if (Test-Path -LiteralPath $AgyMcpFile) {
+    try {
+        $mcp = Get-Content -Raw -LiteralPath $AgyMcpFile | ConvertFrom-Json
+        if ($mcp.mcpServers -and ($mcp.mcpServers.PSObject.Properties.Name -contains 'lazydev-search')) {
+            $mcp.mcpServers.PSObject.Properties.Remove('lazydev-search')
+            if ($mcp.mcpServers.PSObject.Properties.Count -eq 0) {
+                Remove-Item -LiteralPath $AgyMcpFile -Force -ErrorAction SilentlyContinue
+            } else {
+                $mcp | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $AgyMcpFile -Encoding UTF8
+            }
+        }
+    } catch {}
+}
+foreach ($file in @('codex.exe','codex.cmd','agy.exe','agy.cmd')) {
+    Remove-Item -LiteralPath (Join-Path $LazyDevBin $file) -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $HOME ('.local\bin\' + $file)) -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host "`n==> Removing RTK"
@@ -132,6 +160,8 @@ $paths = @(
     $LazyDevConfig,
     $KimiNativeHome,
     $KimiLegacyHome,
+    $CodexHome,
+    $AntigravityHome,
     (Join-Path $LazyDevBin 'lazydev.cmd'),
     (Join-Path $LazyDevBin 'rtk.exe'),
     (Join-Path $LazyDevBin 'kimi.exe'),

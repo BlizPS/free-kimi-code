@@ -53,7 +53,7 @@ assert.equal(chat.status, 0, chat.stderr || chat.stdout);
 let generated = fs.readFileSync(captured, 'utf8');
 assert.match(generated, /\[models\."lazydev\/ag\/claude-opus-4-6-thinking"\]/);
 assert.match(generated, /off_effort = "none"/);
-assert.doesNotMatch(fs.readFileSync(capturedModelEnv, 'utf8'), /.+/);
+assert.match(fs.readFileSync(capturedModelEnv, 'utf8'), /^ag\/claude-opus-4-6-thinking$/);
 
 // Existing saved metadata with no offEffort must self-heal too.
 config.providers.ninerouter.model = 'always-thinking-test';
@@ -62,7 +62,7 @@ fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 chat = spawnSync(process.execPath, [js, 'chat'], { env, encoding: 'utf8', timeout: 20000 });
 assert.equal(chat.status, 0, chat.stderr || chat.stdout);
 generated = fs.readFileSync(captured, 'utf8');
-assert.match(generated, /always_thinking/);
+assert.match(generated, /default_model = \"lazydev\/always-thinking-test\"/);
 assert.doesNotMatch(generated, /off_effort =/);
 
 proc.kill('SIGTERM');

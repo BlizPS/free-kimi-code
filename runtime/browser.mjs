@@ -19,7 +19,7 @@ import http from 'node:http';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const USER_AGENT = process.env.LAZYDEV_BROWSER_USER_AGENT || `LazyDev-Browser/${VERSION}`;
 const REQUEST_TIMEOUT_MS = clampInt(process.env.LAZYDEV_BROWSER_TIMEOUT_MS, 15000, 3000, 60000);
 const MAX_TEXT_CHARS = clampInt(process.env.LAZYDEV_BROWSER_MAX_CHARS, 50000, 2048, 200000);

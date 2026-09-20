@@ -15,7 +15,7 @@ for d in sorted(p for p in SOURCE.iterdir() if p.is_dir()):
     if not nm or nm.group(1).strip()!=name: errors.append(f"{name}: invalid name")
     if not desc or not desc.group(1).strip(): errors.append(f"{name}: missing description")
     if len(t)<400: errors.append(f"{name}: suspiciously small skill")
-    if 'version: "1.0.1"' not in t: errors.append(f"{name}: missing version 1.0.1")
+    if 'version: "1.0.2"' not in t: errors.append(f"{name}: missing version 1.0.2")
     if not (d/"agents/openai.yaml").is_file(): errors.append(f"{name}: missing agents/openai.yaml")
     for target in re.findall(r'\]\(([^)]+)\)',t):
         if target.startswith(("http://","https://","#","mailto:")): continue

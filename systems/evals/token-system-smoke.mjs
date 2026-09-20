@@ -48,7 +48,7 @@ assert.match(buildSkillTokenDirective(), /progressive disclosure/i);
 assert.match(buildClaudeTokenHookContext(), /Result first/);
 for (const directive of [buildCursorTokenDirective(), buildCodexTokenDirective(), buildGeminiTokenDirective(), buildAgentsTokenDirective(), buildOpenCodeTokenDirective()]) assert.match(directive, /context|instructions|progressive/i);
 const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../token/manifest.json'), 'utf8'));
-assert.equal(manifest.version, '1.0.1');
+assert.equal(manifest.version, '1.0.2');
 for (const host of ['cli', 'plugins', 'kimi', 'claude', 'cursor', 'codex', 'agents', 'gemini', 'opencode']) assert.ok(manifest.hosts.includes(host));
 
 const runtime = createTokenSystem({ maxContext: 32768 });

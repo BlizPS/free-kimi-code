@@ -3,8 +3,10 @@ set -eu
 
 REPO="BlizPS/free-kimi-code"
 BRANCH="${LAZYDEV_BRANCH:-main}"
-LAZYDEV_VERSION="1.0.1"
+LAZYDEV_VERSION="1.0.2"
 KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"
+CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
+ANTIGRAVITY_INSTALL_URL="https://antigravity.google/cli/install.sh"
 KIMI_RELEASE_API_URL="https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest"
 RTK_INSTALL_URL="https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh"
 REPO_ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz"
@@ -86,7 +88,7 @@ get_kimi_latest_version() {
   response="$TMP_DIR/kimi-release.json"
   if curl -fsSL \
     -H 'Accept: application/vnd.github+json' \
-    -H 'User-Agent: lazy-developer-installer/1.0.1' \
+    -H 'User-Agent: lazy-developer-installer/1.0.2' \
     "$KIMI_RELEASE_API_URL" -o "$response" 2>/dev/null; then
     tag_line="$(grep -m1 -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' "$response" 2>/dev/null || true)"
     version="$(printf '%s\n' "$tag_line" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | tail -n 1 || true)"
@@ -112,6 +114,29 @@ find_kimi() {
     return 0
   fi
   return 1
+}
+
+find_codex() {
+  for candidate in "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.cmd"; do
+    if [ -x "$candidate" ] || [ -f "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
+  done
+  command -v codex 2>/dev/null || return 1
+}
+
+find_antigravity() {
+  for candidate in "$HOME/.local/bin/agy"; do
+    if [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
+  done
+  command -v agy 2>/dev/null || return 1
+}
+
+ask_install_ui() {
+  label="$1"
+  default="${2:-y}"
+  printf '%s [Y/n]: ' "$label"
+  read -r answer || answer="$default"
+  answer="${answer:-$default}"
+  case "$answer" in y|Y|yes|YES|Yes) return 0;; *) return 1;; esac
 }
 
 find_rtk() {
@@ -305,11 +330,18 @@ get_remote_revision() {
   curl -fsSL \
     -H 'Accept: application/vnd.github+json' \
     -H 'X-GitHub-Api-Version: 2022-11-28' \
-    -H 'User-Agent: lazy-developer-installer/1.0.1' \
+    -H 'User-Agent: lazy-developer-installer/1.0.2' \
     "$GITHUB_API_URL" -o "$response" || return 1
   grep -m1 -o '"sha"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]\{40\}"' "$response" 2>/dev/null \
     | sed 's/.*"\([0-9a-fA-F]\{40\}\)"/\1/' | head -n 1
 }
+
+INSTALL_KIMI=0
+INSTALL_CODEX=0
+INSTALL_ANTIGRAVITY=0
+if ask_install_ui "Install/update Kimi Code?"; then INSTALL_KIMI=1; fi
+if ask_install_ui "Install/update Codex?"; then INSTALL_CODEX=1; fi
+if ask_install_ui "Install/update Antigravity?"; then INSTALL_ANTIGRAVITY=1; fi
 
 REMOTE_REVISION="$(get_remote_revision || true)"
 [ -n "$REMOTE_REVISION" ] || fatal "Could not read the current Lazy Developer revision from GitHub."
@@ -360,7 +392,7 @@ get_rtk_latest_version() {
   response="$TMP_DIR/rtk-release.json"
   curl -fsSL \
     -H 'Accept: application/vnd.github+json' \
-    -H 'User-Agent: lazy-developer-installer/1.0.1' \
+    -H 'User-Agent: lazy-developer-installer/1.0.2' \
     'https://api.github.com/repos/rtk-ai/rtk/releases/latest' -o "$response" || return 1
   grep -m1 -o '"tag_name"[[:space:]]*:[[:space:]]*"v[0-9.]*"' "$response" \
     | sed 's/.*"v\([0-9.]*\)".*/\1/' | head -n 1
@@ -379,7 +411,7 @@ else
   say "RTK not found — installing."
 fi
 
-if [ "$KIMI_NEEDS_UPDATE" -eq 1 ]; then
+if [ "$INSTALL_KIMI" -eq 1 ] && [ "$KIMI_NEEDS_UPDATE" -eq 1 ]; then
   step "Installing/updating Kimi Code to the latest available release"
   KIMI_INSTALL_SCRIPT="$TMP_DIR/kimi-install.sh"
   KIMI_INSTALL_LOG="$TMP_DIR/kimi-install.log"
@@ -400,6 +432,26 @@ if [ "$KIMI_NEEDS_UPDATE" -eq 1 ]; then
   say "✓ Kimi Code $KIMI_CURRENT_VERSION ready"
 fi
 
+if [ "$INSTALL_CODEX" -eq 1 ]; then
+  step "Installing/updating official Codex CLI"
+  CODEX_LOG="$TMP_DIR/codex-install.log"
+  if ! curl -fsSL "$CODEX_INSTALL_URL" | sh >"$CODEX_LOG" 2>&1; then cat "$CODEX_LOG" >&2 || true; fatal "Codex installer failed."; fi
+  PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
+  CODEX_COMMAND="$(find_codex 2>/dev/null || true)"
+  [ -n "$CODEX_COMMAND" ] || fatal "Codex did not install a usable launcher."
+  say "✓ Codex ready: $CODEX_COMMAND"
+fi
+
+if [ "$INSTALL_ANTIGRAVITY" -eq 1 ]; then
+  step "Installing/updating official Antigravity CLI"
+  AGY_LOG="$TMP_DIR/antigravity-install.log"
+  if ! curl -fsSL "$ANTIGRAVITY_INSTALL_URL" | bash --skip-aliases >"$AGY_LOG" 2>&1; then cat "$AGY_LOG" >&2 || true; fatal "Antigravity installer failed."; fi
+  PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
+  AGY_COMMAND="$(find_antigravity 2>/dev/null || true)"
+  [ -n "$AGY_COMMAND" ] || fatal "Antigravity did not install a usable launcher."
+  say "✓ Antigravity ready: $AGY_COMMAND"
+fi
+
 if [ "$RTK_NEEDS_UPDATE" -eq 1 ]; then
   step "Installing/updating RTK"
   mkdir -p "$LAZYDEV_BIN_DIR"
@@ -415,7 +467,7 @@ fi
 
 # Make RTK available to Kimi without touching the user's project files.
 RTK_CONNECT_NEEDED=0
-if [ -n "$RTK_COMMAND" ]; then
+if [ -n "$RTK_COMMAND" ] && [ -n "$(find_kimi 2>/dev/null || true)" ]; then
   if [ "$KIMI_NEEDS_UPDATE" -ne 0 ] || [ "$RTK_NEEDS_UPDATE" -ne 0 ] || [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
     RTK_CONNECT_NEEDED=1
   elif [ ! -f "$KIMI_RUNTIME_HOME/AGENTS.md" ] || ! grep -qi 'rtk' "$KIMI_RUNTIME_HOME/AGENTS.md" 2>/dev/null; then
@@ -510,6 +562,7 @@ esac
 
 printf '\n'
 say "Lazy Developer installer finished."
+say "AI UIs: Kimi Code=$([ -n "$(find_kimi 2>/dev/null || true)" ] && echo installed || echo skipped) · Codex=$([ -n "$(find_codex 2>/dev/null || true)" ] && echo installed || echo skipped) · Antigravity=$([ -n "$(find_antigravity 2>/dev/null || true)" ] && echo installed || echo skipped)"
 say "Kimi Code: ${KIMI_CURRENT_VERSION:-unknown}"
 say "RTK: ${RTK_CURRENT_VERSION:-unknown}"
 say "Lazy Developer: $LAZYDEV_VERSION"
