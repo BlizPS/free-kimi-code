@@ -89,9 +89,17 @@ export async function createAntigravityProxy({ upstreamUrl, upstreamToken, model
       if (!response.ok) { let error; try { error=JSON.parse(raw); } catch { error={error:{message:raw || `HTTP ${response.status}`}}; } return json(res,response.status,error); }
       const completion=JSON.parse(raw); const result=chatToGemini(completion,selectedModel);
       if (pathname.endsWith(':streamGenerateContent')) {
+        // Gemini/Antigravity SSE streams are terminated by the HTTP stream EOF.
+        // Do not append OpenAI's `data: [DONE]` sentinel: Antigravity parses
+        // every SSE data payload as Gemini JSON and would try to JSON-decode
+        // the literal string `[DONE]`.
         const payload=`data: ${JSON.stringify(result)}\n\n`;
-        res.writeHead(200,{ 'content-type':'text/event-stream','content-length':Buffer.byteLength(payload)+14,'connection':'close' });
-        res.end(payload+'data: [DONE]\n\n');
+        res.writeHead(200,{
+          'content-type':'text/event-stream',
+          'cache-control':'no-cache',
+          'connection':'close'
+        });
+        res.end(payload);
         return;
       }
       return json(res,200,result);

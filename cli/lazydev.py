@@ -1687,9 +1687,38 @@ class _ProviderProxy:
                 if self.headers.get("Authorization", "") != f"Bearer {outer.token}" and self.headers.get("x-goog-api-key", "") != outer.token:
                     return self._send_json(401, {"error": {"message": "Unauthorized"}})
                 path=self.path.split("?",1)[0]
-                if path.startswith("/v1beta/models") or path.startswith("/v1/models"):
-                    model=str(outer.pc.get("model") or "lazydev")
-                    return self._send_json(200, {"models":[{"name":f"models/{model}","displayName":model,"supportedGenerationMethods":["generateContent","streamGenerateContent"]}]})
+                model=str(outer.pc.get("model") or "lazydev")
+                info = outer.pc.get("modelInfo") if isinstance(outer.pc.get("modelInfo"), dict) else {}
+                context = model_context_size(outer.provider, outer.pc)
+                output = model_output_size(outer.provider, outer.pc)
+                if path == "/v1/models":
+                    return self._send_json(200, {"object":"list","data":[{
+                        "id":model,
+                        "object":"model",
+                        "owned_by":"lazydev",
+                        "display_name":str(info.get("name") or model),
+                        "context_window":int(context),
+                        "max_context_window":int(context),
+                        "effective_context_window_percent":95,
+                        "supported_in_api":True,
+                    }]})
+                if path.startswith("/v1/models/"):
+                    requested=path.rsplit("/",1)[-1]
+                    if requested == model:
+                        return self._send_json(200, {
+                            "id":model,
+                            "object":"model",
+                            "owned_by":"lazydev",
+                            "display_name":str(info.get("name") or model),
+                            "context_window":int(context),
+                            "max_context_window":int(context),
+                            "effective_context_window_percent":95,
+                            "supported_in_api":True,
+                        })
+                    return self._send_json(404, {"error":{"message":"Model not found"}})
+                if path == "/v1beta/models" or path.startswith("/v1beta/models/"):
+                    if path == "/v1beta/models":
+                        return self._send_json(200, {"models":[{"name":f"models/{model}","displayName":model,"supportedGenerationMethods":["generateContent","streamGenerateContent"]}]})
                 return self._send_json(404, {"error":{"message":"Not found"}})
 
             def _gemini_to_openai(self, body: dict[str, Any], model: str) -> dict[str, Any]:
@@ -1792,9 +1821,20 @@ class _ProviderProxy:
                         completion=json.loads(payload.decode("utf-8","replace"))
                         result=self._openai_to_gemini(completion,model)
                         if path.endswith(":streamGenerateContent"):
+                            # Antigravity expects Gemini SSE JSON frames and uses
+                            # stream EOF as the terminator. OpenAI's `[DONE]`
+                            # sentinel is not valid Gemini JSON and makes the
+                            # official CLI report: invalid character 'D'.
                             raw=json.dumps(result,separators=(",",":"))
-                            data=f"data: {raw}\n\n".encode("utf-8")+b"data: [DONE]\n\n"
-                            self.send_response(200); self.send_header("Content-Type","text/event-stream"); self.send_header("Content-Length",str(len(data))); self.send_header("Connection","close"); self.end_headers(); self.wfile.write(data); self.close_connection=True; return
+                            data=f"data: {raw}\n\n".encode("utf-8")
+                            self.send_response(200)
+                            self.send_header("Content-Type","text/event-stream")
+                            self.send_header("Cache-Control","no-cache")
+                            self.send_header("Connection","close")
+                            self.end_headers()
+                            self.wfile.write(data)
+                            self.close_connection=True
+                            return
                         return self._send_json(200,result)
                     except Exception as exc:
                         return self._send_json(502,{"error":{"message":f"Gemini proxy request failed: {exc}"}})
@@ -2424,53 +2464,141 @@ def choose_chat_ui(items: list[tuple[str, str, str]]) -> str | None:
         print(ansi("31","Invalid UI selection.")); return None
 
 
-def _ensure_codex_skills() -> None:
-    target_root = HOME / ".agents" / "skills"
-    target_root.mkdir(parents=True, exist_ok=True)
+def _ensure_shared_skill_root() -> Path:
+    """Keep one canonical LazyDev skill tree under the visible lazydevfile root."""
+    shared = ARTIFACT_DIR / "skills"
+    shared.parent.mkdir(parents=True, exist_ok=True)
+    shared.mkdir(parents=True, exist_ok=True)
     for name, _description in SKILLS:
         source = ROOT / "skills" / name
-        target = target_root / name
-        if target.exists() or target.is_symlink():
+        target = shared / name
+        if target.is_symlink():
             try:
-                if target.resolve() == source.resolve(): continue
-            except OSError: pass
-            continue
+                if target.resolve() == source.resolve():
+                    continue
+            except OSError:
+                pass
+            target.unlink()
+        if not target.exists():
+            try:
+                target.symlink_to(source, target_is_directory=True)
+            except OSError:
+                shutil.copytree(source, target, dirs_exist_ok=True)
+    return shared
+
+
+def _ensure_codex_skills(shared: Path | None = None) -> None:
+    shared = shared or _ensure_shared_skill_root()
+    # Current Codex uses ~/.agents/skills for user-scoped skills. Keep that
+    # native discovery path as a thin shim to the single canonical LazyDev tree.
+    target_root = HOME / ".agents" / "skills"
+    target_root.parent.mkdir(parents=True, exist_ok=True)
+    if target_root.is_symlink():
         try:
-            target.symlink_to(source, target_is_directory=True)
+            if target_root.resolve() == shared.resolve():
+                return
         except OSError:
-            # Windows without developer-mode/symlink permission: copy only the
-            # small skill tree so Codex still discovers the same SKILL.md files.
-            shutil.copytree(source, target, dirs_exist_ok=True)
-
-
-def _ensure_cross_ui_skills() -> None:
-    _ensure_codex_skills()
-    target_root = HOME / ".gemini" / "antigravity-cli" / "skills"
-    target_root.mkdir(parents=True, exist_ok=True)
+            pass
+        target_root.unlink()
+    if not target_root.exists():
+        try:
+            target_root.symlink_to(shared, target_is_directory=True)
+            return
+        except OSError:
+            target_root.mkdir(parents=True, exist_ok=True)
     for name, _description in SKILLS:
-        source = ROOT / "skills" / name
+        source = shared / name
         target = target_root / name
         if target.exists() or target.is_symlink():
             try:
                 if target.is_symlink() and target.resolve() == source.resolve():
                     continue
-                if target.is_dir() and (target / "SKILL.md").is_file():
-                    continue
             except OSError:
-                continue
+                pass
+            continue
         try:
-            if target.exists() or target.is_symlink():
-                if target.is_dir() and not target.is_symlink(): shutil.rmtree(target)
-                else: target.unlink()
             target.symlink_to(source, target_is_directory=True)
         except OSError:
             shutil.copytree(source, target, dirs_exist_ok=True)
 
 
+def _ensure_antigravity_home(shared: Path | None = None) -> Path:
+    """Put Antigravity's managed app-data under lazydevfile and shim its native path."""
+    shared = shared or _ensure_shared_skill_root()
+    canonical = ARTIFACT_DIR / ".antigravity-cli"
+    canonical.mkdir(parents=True, exist_ok=True)
+    native = HOME / ".gemini" / "antigravity-cli"
+    native.parent.mkdir(parents=True, exist_ok=True)
+    if native.is_symlink():
+        try:
+            if native.resolve() == canonical.resolve():
+                return canonical
+        except OSError:
+            pass
+        try:
+            native.unlink()
+        except OSError:
+            return native
+    elif native.exists():
+        # Migrate the existing native tree into the canonical LazyDev root so
+        # previous Antigravity settings/plugins/logs are preserved. Only after
+        # a successful copy do we replace the old path with a compatibility shim.
+        try:
+            shutil.copytree(native, canonical, dirs_exist_ok=True, symlinks=True)
+            backup = ARTIFACT_DIR / ".backups" / "antigravity-cli-native"
+            if not backup.exists():
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                native.rename(backup)
+            else:
+                shutil.rmtree(native)
+        except OSError:
+            # Fall back to the existing native root if the filesystem forbids
+            # migration/symlinks; the shared skills/artifacts still remain canonical.
+            return native
+    try:
+        native.symlink_to(canonical, target_is_directory=True)
+        return canonical
+    except OSError:
+        return native
+
+
+def _ensure_cross_ui_skills() -> None:
+    shared = _ensure_shared_skill_root()
+    _ensure_codex_skills(shared)
+    agy_home = _ensure_antigravity_home(shared)
+    target_root = agy_home / "skills"
+    if target_root.is_symlink():
+        try:
+            if target_root.resolve() == shared.resolve():
+                return
+        except OSError:
+            pass
+        target_root.unlink()
+    if not target_root.exists():
+        try:
+            target_root.symlink_to(shared, target_is_directory=True)
+            return
+        except OSError:
+            target_root.mkdir(parents=True, exist_ok=True)
+    for name, _description in SKILLS:
+        source = shared / name
+        target = target_root / name
+        if target.exists() or target.is_symlink():
+            try:
+                if target.is_symlink() and target.resolve() == source.resolve():
+                    continue
+            except OSError:
+                pass
+            continue
+        try:
+            target.symlink_to(source, target_is_directory=True)
+        except OSError:
+            shutil.copytree(source, target, dirs_exist_ok=True)
+
 def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
-    # Codex stores its user config in ~/.codex; keep the selected setup model and
-    # the same LazyDev proxy/MCP layer that Kimi uses.
-    home = HOME / ".codex"
+    # Keep Codex configuration and its process working directory under the
+    # same canonical lazydevfile root used by Kimi artifacts.
+    home = ARTIFACT_DIR / ".codex"
     home.mkdir(parents=True, exist_ok=True)
     base = f"http://127.0.0.1:{proxy.server.server_port}/v1"
     model = str(pc.get("model") or "")
@@ -2493,7 +2621,7 @@ def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
         '[model_providers.lazydev]',
         'name = "LazyDev"',
         f'base_url = {toml_quote(base)}',
-        'wire_api = "responses"',
+        'wire_api = "chat"',
         'env_key = "LAZYDEV_CODEX_API_KEY"',
         'requires_openai_auth = false',
         'supports_websockets = false',
@@ -2551,7 +2679,19 @@ class _ResponsesProxy:
                 if not self._auth(): return self._send(401, {"error":{"message":"Unauthorized"}})
                 path = self.path.split("?",1)[0]
                 if path == "/v1/models":
-                    return self._send(200, {"object":"list","data":[{"id":outer.model,"object":"model","owned_by":"lazydev"}]})
+                    info = outer.pc.get("modelInfo") if isinstance(outer.pc.get("modelInfo"), dict) else {}
+                    context = model_context_size(outer.provider, outer.pc)
+                    output = model_output_size(outer.provider, outer.pc)
+                    return self._send(200, {"object":"list","data":[{
+                        "id":outer.model,
+                        "object":"model",
+                        "owned_by":"lazydev",
+                        "display_name":str(info.get("name") or outer.model),
+                        "context_window":int(context),
+                        "max_context_window":int(context),
+                        "effective_context_window_percent":95,
+                        "supported_in_api":True,
+                    }]})
                 return self._send(404, {"error":{"message":"Not found"}})
 
             def _input_text(self, content: Any) -> str:
@@ -2697,19 +2837,15 @@ def _clean_ui_env() -> dict[str, str]:
 
 def _launch_codex(codex: str, proxy: _ProviderProxy, pc: dict[str, Any], workspace: Path) -> int:
     _ensure_cross_ui_skills()
-    responses = _ResponsesProxy(proxy, str(pc.get("model") or ""))
-    pc_for_config = dict(pc)
-    pc_for_config["provider"] = proxy.provider
-    home = _write_codex_runtime(responses, pc_for_config)
+    home = _write_codex_runtime(proxy, pc)
     env = _clean_ui_env()
     env['CODEX_HOME']=str(home); env['LAZYDEV_VERSION']=VERSION
     env['LAZYDEV_ARTIFACT_DIR']=str(ARTIFACT_DIR); env['LAZYDEV_MODEL']=str(pc.get('model') or '')
-    env['LAZYDEV_CODEX_API_KEY']=str(responses.token)
+    env['LAZYDEV_CODEX_API_KEY']=str(proxy.token)
     env['LAZYDEV_CONTEXT_DIR']=str(HOME / ".lazydev")
     args=["--config", f"model={toml_quote(str(pc.get('model')))}", "--config", "model_provider=lazydev"]
-    try: return subprocess.call([codex,*args],cwd=str(workspace),env=env)
+    try: return subprocess.call([codex,*args],cwd=str(ARTIFACT_DIR),env=env)
     except KeyboardInterrupt: return 130
-    finally: responses.close()
 
 
 def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
@@ -2723,7 +2859,7 @@ def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
     settings["modelProvider"]="gemini"
     settings_file.write_text(json.dumps(settings, indent=2)+"\n", encoding="utf-8")
 
-    config_root = HOME / ".gemini" / "config"
+    config_root = ARTIFACT_DIR / ".gemini-config"
     config_root.mkdir(parents=True, exist_ok=True)
     mcp_file=config_root / "mcp_config.json"
     try:
@@ -2739,6 +2875,37 @@ def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
     }
     data["mcpServers"]=servers
     mcp_file.write_text(json.dumps(data, indent=2)+"\n", encoding="utf-8")
+    # Antigravity currently reads this native HOME-level path; migrate/merge
+    # existing user servers into the canonical LazyDev file, then shim the
+    # native path back to that same file.
+    native_root = HOME / ".gemini" / "config"
+    native_root.mkdir(parents=True, exist_ok=True)
+    native_mcp = native_root / "mcp_config.json"
+    try:
+        if native_mcp.is_symlink():
+            try:
+                if native_mcp.resolve() != mcp_file.resolve():
+                    native_mcp.unlink()
+            except OSError:
+                pass
+        elif native_mcp.exists():
+            native_data = json.loads(native_mcp.read_text(encoding="utf-8"))
+            if isinstance(native_data, dict):
+                merged = native_data.get("mcpServers") if isinstance(native_data.get("mcpServers"), dict) else {}
+                # Existing user servers win unless LazyDev owns the same name.
+                merged.update(servers)
+                data["mcpServers"] = merged
+                mcp_file.write_text(json.dumps(data, indent=2)+"\n", encoding="utf-8")
+            native_backup = ARTIFACT_DIR / ".backups" / "gemini-mcp_config.json"
+            if not native_backup.exists():
+                native_backup.parent.mkdir(parents=True, exist_ok=True)
+                native_mcp.rename(native_backup)
+            else:
+                native_mcp.unlink()
+        if not native_mcp.exists():
+            native_mcp.symlink_to(mcp_file)
+    except OSError:
+        pass
     return settings_file, mcp_file
 
 
@@ -2748,7 +2915,7 @@ def _launch_antigravity(agy: str, provider: dict[str,Any], pc: dict[str,Any], wo
     env=_clean_ui_env()
     env['LAZYDEV_VERSION']=VERSION; env['LAZYDEV_ARTIFACT_DIR']=str(ARTIFACT_DIR)
     env['LAZYDEV_MODEL']=str(pc.get('model') or '')
-    env['LAZYDEV_SKILLS_DIR']=str(ROOT/'skills')
+    env['LAZYDEV_SKILLS_DIR']=str(ARTIFACT_DIR/'skills')
     env['GEMINI_API_KEY']=str(proxy.token)
     env['GOOGLE_GEMINI_BASE_URL']=f'http://127.0.0.1:{proxy.port}'
     # The official Antigravity UI owns the interactive model picker. The proxy
@@ -2756,7 +2923,7 @@ def _launch_antigravity(agy: str, provider: dict[str,Any], pc: dict[str,Any], wo
     # of which native Gemini model name the UI sends on the wire.
     env['LAZYDEV_ANTIGRAVITY_UPSTREAM_MODEL']=str(pc.get('model') or '')
     args=[]
-    try: return subprocess.call([agy,*args],cwd=str(workspace),env=env)
+    try: return subprocess.call([agy,*args],cwd=str(ARTIFACT_DIR),env=env)
     except KeyboardInterrupt: return 130
 
 
@@ -2797,7 +2964,8 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
         proxy and proxy.close()
         raise
     ensure_artifact_directory()
-    workspace = _workspace_for_chat()
+    _ensure_cross_ui_skills()
+    workspace = ARTIFACT_DIR
     if ui == "codex":
         try: return _launch_codex(find_codex() or "codex", proxy, pc, workspace)
         finally:
