@@ -220,29 +220,31 @@ Existing Kimi sessions are left alone during updates.
 exit 0
 }
 
-Ensure-PythonRunner
-
 $KimiExe = Find-Kimi
 $KimiCurrentVersion = Get-KimiVersion $KimiExe
-$KimiLatestVersion = Get-KimiLatestVersion
+$KimiLatestVersion = ''
 $KimiNeedsUpdate = $true
 $KimiUpdateAvailable = $false
 if ($KimiExe) {
-    if ($KimiCurrentVersion -and $KimiLatestVersion) {
-        if (Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion) {
-            $KimiNeedsUpdate = $false
-            if ($KimiCurrentVersion -eq $KimiLatestVersion) {
-                Write-Host "Kimi Code $KimiCurrentVersion is already current — skipped."
+    if ($KimiCurrentVersion) {
+        # Release checks are only needed for installed components.
+        $KimiLatestVersion = Get-KimiLatestVersion
+        if ($KimiLatestVersion) {
+            if (Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion) {
+                $KimiNeedsUpdate = $false
+                if ($KimiCurrentVersion -eq $KimiLatestVersion) {
+                    Write-Host "Kimi Code $KimiCurrentVersion is already current — skipped."
+                } else {
+                    Write-Host "Kimi Code $KimiCurrentVersion is newer than the latest published $KimiLatestVersion — skipped."
+                }
             } else {
-                Write-Host "Kimi Code $KimiCurrentVersion is newer than the latest published $KimiLatestVersion — skipped."
+                $KimiUpdateAvailable = $true
+                Write-Host "Kimi Code $KimiCurrentVersion → $KimiLatestVersion — update available."
             }
         } else {
-            $KimiUpdateAvailable = $true
-            Write-Host "Kimi Code $KimiCurrentVersion → $KimiLatestVersion — update available."
+            $KimiNeedsUpdate = $false
+            Write-Host "Kimi Code $KimiCurrentVersion is installed; latest release could not be checked — skipped."
         }
-    } elseif ($KimiCurrentVersion) {
-        $KimiNeedsUpdate = $false
-        Write-Host "Kimi Code $KimiCurrentVersion is installed; latest release could not be checked — skipped."
     } else {
         $KimiUpdateAvailable = $true
         Write-Host 'Kimi Code is installed but its version could not be detected — update check is inconclusive.'
@@ -254,25 +256,28 @@ if ($KimiExe) {
 
 $CodexExe = Find-Codex
 $CodexCurrentVersion = if ($CodexExe) { Get-VersionFromText ((& $CodexExe --version 2>$null) -join "`n") } else { '' }
-$CodexLatestVersion = Get-CodexLatestVersion
+$CodexLatestVersion = ''
 $CodexNeedsUpdate = $true
 $CodexUpdateAvailable = $false
 if ($CodexExe) {
-    if ($CodexCurrentVersion -and $CodexLatestVersion) {
-        if (Test-VersionAtLeast $CodexCurrentVersion $CodexLatestVersion) {
-            $CodexNeedsUpdate = $false
-            if ($CodexCurrentVersion -eq $CodexLatestVersion) {
-                Write-Host "Codex $CodexCurrentVersion is already current — skipped."
+    if ($CodexCurrentVersion) {
+        $CodexLatestVersion = Get-CodexLatestVersion
+        if ($CodexLatestVersion) {
+            if (Test-VersionAtLeast $CodexCurrentVersion $CodexLatestVersion) {
+                $CodexNeedsUpdate = $false
+                if ($CodexCurrentVersion -eq $CodexLatestVersion) {
+                    Write-Host "Codex $CodexCurrentVersion is already current — skipped."
+                } else {
+                    Write-Host "Codex $CodexCurrentVersion is newer than the latest published $CodexLatestVersion — skipped."
+                }
             } else {
-                Write-Host "Codex $CodexCurrentVersion is newer than the latest published $CodexLatestVersion — skipped."
+                $CodexUpdateAvailable = $true
+                Write-Host "Codex $CodexCurrentVersion → $CodexLatestVersion — update available."
             }
         } else {
-            $CodexUpdateAvailable = $true
-            Write-Host "Codex $CodexCurrentVersion → $CodexLatestVersion — update available."
+            $CodexNeedsUpdate = $false
+            Write-Host "Codex $CodexCurrentVersion is installed; latest release could not be checked — skipped."
         }
-    } elseif ($CodexCurrentVersion) {
-        $CodexNeedsUpdate = $false
-        Write-Host "Codex $CodexCurrentVersion is installed; latest release could not be checked — skipped."
     } else {
         $CodexUpdateAvailable = $true
         Write-Host 'Codex is installed but its version could not be detected — update check is inconclusive.'
@@ -284,25 +289,28 @@ if ($CodexExe) {
 
 $AgyExe = Find-Antigravity
 $AgyCurrentVersion = if ($AgyExe) { Get-VersionFromText ((& $AgyExe --version 2>$null) -join "`n") } else { '' }
-$AgyLatestVersion = Get-AntigravityLatestVersion
+$AgyLatestVersion = ''
 $AgyNeedsUpdate = $true
 $AgyUpdateAvailable = $false
 if ($AgyExe) {
-    if ($AgyCurrentVersion -and $AgyLatestVersion) {
-        if (Test-VersionAtLeast $AgyCurrentVersion $AgyLatestVersion) {
-            $AgyNeedsUpdate = $false
-            if ($AgyCurrentVersion -eq $AgyLatestVersion) {
-                Write-Host "Antigravity CLI $AgyCurrentVersion is already current — skipped."
+    if ($AgyCurrentVersion) {
+        $AgyLatestVersion = Get-AntigravityLatestVersion
+        if ($AgyLatestVersion) {
+            if (Test-VersionAtLeast $AgyCurrentVersion $AgyLatestVersion) {
+                $AgyNeedsUpdate = $false
+                if ($AgyCurrentVersion -eq $AgyLatestVersion) {
+                    Write-Host "Antigravity CLI $AgyCurrentVersion is already current — skipped."
+                } else {
+                    Write-Host "Antigravity CLI $AgyCurrentVersion is newer than the latest published $AgyLatestVersion — skipped."
+                }
             } else {
-                Write-Host "Antigravity CLI $AgyCurrentVersion is newer than the latest published $AgyLatestVersion — skipped."
+                $AgyUpdateAvailable = $true
+                Write-Host "Antigravity CLI $AgyCurrentVersion → $AgyLatestVersion — update available."
             }
         } else {
-            $AgyUpdateAvailable = $true
-            Write-Host "Antigravity CLI $AgyCurrentVersion → $AgyLatestVersion — update available."
+            $AgyNeedsUpdate = $false
+            Write-Host "Antigravity CLI $AgyCurrentVersion is installed; latest release could not be checked — skipped."
         }
-    } elseif ($AgyCurrentVersion) {
-        $AgyNeedsUpdate = $false
-        Write-Host "Antigravity CLI $AgyCurrentVersion is installed; latest release could not be checked — skipped."
     } else {
         $AgyUpdateAvailable = $true
         Write-Host 'Antigravity CLI is installed but its version could not be detected — update check is inconclusive.'
@@ -314,27 +322,32 @@ if ($AgyExe) {
 
 $RtkExe = Find-Rtk
 $RtkCurrentVersion = Get-RtkVersion $RtkExe
-$RtkLatestVersion = Get-RtkLatestVersion
+$RtkLatestVersion = ''
 $RtkNeedsUpdate = $true
 $RtkUpdateAvailable = $false
-if ($RtkExe -and $RtkCurrentVersion -and $RtkLatestVersion) {
-    if (Test-VersionAtLeast $RtkCurrentVersion $RtkLatestVersion) {
-        $RtkNeedsUpdate = $false
-        if ($RtkCurrentVersion -eq $RtkLatestVersion) {
-            Write-Host "RTK $RtkCurrentVersion is already current — skipped."
+if ($RtkExe) {
+    if ($RtkCurrentVersion) {
+        $RtkLatestVersion = Get-RtkLatestVersion
+        if ($RtkLatestVersion) {
+            if (Test-VersionAtLeast $RtkCurrentVersion $RtkLatestVersion) {
+                $RtkNeedsUpdate = $false
+                if ($RtkCurrentVersion -eq $RtkLatestVersion) {
+                    Write-Host "RTK $RtkCurrentVersion is already current — skipped."
+                } else {
+                    Write-Host "RTK $RtkCurrentVersion is newer than the latest published $RtkLatestVersion — skipped."
+                }
+            } else {
+                $RtkUpdateAvailable = $true
+                Write-Host "RTK $RtkCurrentVersion → $RtkLatestVersion — update available."
+            }
         } else {
-            Write-Host "RTK $RtkCurrentVersion is newer than the latest published $RtkLatestVersion — skipped."
+            $RtkNeedsUpdate = $false
+            Write-Host "RTK $RtkCurrentVersion is installed; latest release could not be checked — skipped."
         }
     } else {
         $RtkUpdateAvailable = $true
-        Write-Host "RTK $RtkCurrentVersion → $RtkLatestVersion — update available."
+        Write-Host 'RTK is installed but its version could not be detected — update check is inconclusive.'
     }
-} elseif ($RtkExe -and $RtkCurrentVersion) {
-    $RtkNeedsUpdate = $false
-    Write-Host "RTK $RtkCurrentVersion is installed; latest release could not be checked — skipped."
-} elseif ($RtkExe) {
-    $RtkUpdateAvailable = $true
-    Write-Host 'RTK is installed but its version could not be detected — update check is inconclusive.'
 } else {
     $RtkUpdateAvailable = $true
     Write-Host 'RTK not found — installation available.'
@@ -363,6 +376,10 @@ if ($RtkUpdateAvailable) {
 
 # Clear the question screen before the actual install/update work.
 Clear-Host
+
+# Python is only needed for the LazyDev runtime. Defer this potentially slow
+# bootstrap until after the quick component detection and user choices.
+Ensure-PythonRunner
 
 $RemoteRevision = Get-GitHubRevision
 if (-not $RemoteRevision) { Fail 'Could not read the current Lazy Developer revision from GitHub.' }
@@ -408,7 +425,7 @@ if ($InstallCodex -and $CodexNeedsUpdate) {
         Remove-Item -LiteralPath $codexInstallerPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $codexInstallerLog -Force -ErrorAction SilentlyContinue
     }
-    $env:Path = "$BinRoot;$(Join-Path $HOME '.localin');$env:Path"
+    $env:Path = "$BinRoot;$(Join-Path $HOME '.local\bin');$env:Path"
     $CodexExe = Find-Codex
     if (-not $CodexExe) { Fail 'Codex did not install a usable launcher.' }
     $CodexCurrentVersion = Get-VersionFromText ((& $CodexExe --version 2>$null) -join "`n")
@@ -430,7 +447,7 @@ if ($InstallAntigravity -and $AgyNeedsUpdate) {
         Remove-Item -LiteralPath $agyInstallerPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $agyInstallerLog -Force -ErrorAction SilentlyContinue
     }
-    $env:Path = "$BinRoot;$(Join-Path $HOME '.localin');$env:Path"
+    $env:Path = "$BinRoot;$(Join-Path $HOME '.local\bin');$env:Path"
     $AgyExe = Find-Antigravity
     if (-not $AgyExe) { Fail 'Antigravity did not install a usable launcher.' }
     $AgyCurrentVersion = Get-VersionFromText ((& $AgyExe --version 2>$null) -join "`n")

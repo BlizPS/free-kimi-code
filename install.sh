@@ -72,7 +72,6 @@ ensure_python_runner() {
   fi
   command -v uv >/dev/null 2>&1 || fatal "Could not install uv for the native Python LazyDev CLI."
 }
-ensure_python_runner
 
 version_at_least() {
   current="$1"; required="$2"
@@ -122,6 +121,18 @@ get_codex_latest_version() {
 
 get_antigravity_latest_version() {
   get_github_release_version "$ANTIGRAVITY_RELEASE_API_URL" "$TMP_DIR/antigravity-release.json"
+}
+
+get_remote_revision() {
+  response_file="$TMP_DIR/lazydev-commit.json"
+  if curl -fsSL \
+    -H 'Accept: application/vnd.github+json' \
+    -H 'X-GitHub-Api-Version: 2022-11-28' \
+    -H 'User-Agent: lazy-developer-installer/1.0.2' \
+    "$GITHUB_API_URL" -o "$response_file" 2>/dev/null; then
+    grep -m1 -o '"sha"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]\{40\}"' "$response_file" 2>/dev/null | \
+      sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F]\{40\}\)".*/\1/p' | head -n 1
+  fi
 }
 
 TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t lazydev)"
@@ -328,26 +339,15 @@ refresh_shell_path() {
 }
 KIMI_COMMAND="$(find_kimi 2>/dev/null || true)"
 KIMI_CURRENT_VERSION=""
-KIMI_LATEST_VERSION="$(get_kimi_latest_version || true)"
+KIMI_LATEST_VERSION=""
 KIMI_NEEDS_UPDATE=1
 KIMI_UPDATE_AVAILABLE=0
 if [ -n "$KIMI_COMMAND" ]; then
   KIMI_CURRENT_VERSION="$(extract_semver "$($KIMI_COMMAND --version 2>/dev/null || true)")"
-  if [ -n "$KIMI_CURRENT_VERSION" ] && [ -n "$KIMI_LATEST_VERSION" ]; then
-    if version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_LATEST_VERSION"; then
-      KIMI_NEEDS_UPDATE=0
-      if [ "$KIMI_CURRENT_VERSION" = "$KIMI_LATEST_VERSION" ]; then
-        say "Kimi Code $KIMI_CURRENT_VERSION is already current — skipped."
-      else
-        say "Kimi Code $KIMI_CURRENT_VERSION is newer than the latest published $KIMI_LATEST_VERSION — skipped."
-      fi
-    else
-      KIMI_UPDATE_AVAILABLE=1
-      say "Kimi Code $KIMI_CURRENT_VERSION → $KIMI_LATEST_VERSION — update available."
-    fi
-  elif [ -n "$KIMI_CURRENT_VERSION" ]; then
-    KIMI_NEEDS_UPDATE=0
-    say "Kimi Code $KIMI_CURRENT_VERSION is installed; latest release could not be checked — skipped."
+  if [ -n "$KIMI_CURRENT_VERSION" ]; then
+    KIMI_LATEST_FILE="$TMP_DIR/kimi-latest.version"
+    (get_kimi_latest_version >"$KIMI_LATEST_FILE" 2>/dev/null || true) &
+    KIMI_LATEST_PID=$!
   else
     KIMI_UPDATE_AVAILABLE=1
     say "Kimi Code launcher found but its version could not be detected — update available check is inconclusive."
@@ -359,26 +359,15 @@ fi
 
 CODEX_COMMAND="$(find_codex 2>/dev/null || true)"
 CODEX_CURRENT_VERSION=""
-CODEX_LATEST_VERSION="$(get_codex_latest_version || true)"
+CODEX_LATEST_VERSION=""
 CODEX_NEEDS_UPDATE=1
 CODEX_UPDATE_AVAILABLE=0
 if [ -n "$CODEX_COMMAND" ]; then
   CODEX_CURRENT_VERSION="$(extract_semver "$($CODEX_COMMAND --version 2>/dev/null || true)")"
-  if [ -n "$CODEX_CURRENT_VERSION" ] && [ -n "$CODEX_LATEST_VERSION" ]; then
-    if version_at_least "$CODEX_CURRENT_VERSION" "$CODEX_LATEST_VERSION"; then
-      CODEX_NEEDS_UPDATE=0
-      if [ "$CODEX_CURRENT_VERSION" = "$CODEX_LATEST_VERSION" ]; then
-        say "Codex $CODEX_CURRENT_VERSION is already current — skipped."
-      else
-        say "Codex $CODEX_CURRENT_VERSION is newer than the latest published $CODEX_LATEST_VERSION — skipped."
-      fi
-    else
-      CODEX_UPDATE_AVAILABLE=1
-      say "Codex $CODEX_CURRENT_VERSION → $CODEX_LATEST_VERSION — update available."
-    fi
-  elif [ -n "$CODEX_CURRENT_VERSION" ]; then
-    CODEX_NEEDS_UPDATE=0
-    say "Codex $CODEX_CURRENT_VERSION is installed; latest release could not be checked — skipped."
+  if [ -n "$CODEX_CURRENT_VERSION" ]; then
+    CODEX_LATEST_FILE="$TMP_DIR/codex-latest.version"
+    (get_codex_latest_version >"$CODEX_LATEST_FILE" 2>/dev/null || true) &
+    CODEX_LATEST_PID=$!
   else
     CODEX_UPDATE_AVAILABLE=1
     say "Codex launcher found but its version could not be detected — update available check is inconclusive."
@@ -390,12 +379,93 @@ fi
 
 AGY_COMMAND="$(find_antigravity 2>/dev/null || true)"
 AGY_CURRENT_VERSION=""
-AGY_LATEST_VERSION="$(get_antigravity_latest_version || true)"
+AGY_LATEST_VERSION=""
 AGY_NEEDS_UPDATE=1
 AGY_UPDATE_AVAILABLE=0
 if [ -n "$AGY_COMMAND" ]; then
   AGY_CURRENT_VERSION="$(extract_semver "$($AGY_COMMAND --version 2>/dev/null || true)")"
-  if [ -n "$AGY_CURRENT_VERSION" ] && [ -n "$AGY_LATEST_VERSION" ]; then
+  if [ -n "$AGY_CURRENT_VERSION" ]; then
+    AGY_LATEST_FILE="$TMP_DIR/antigravity-latest.version"
+    (get_antigravity_latest_version >"$AGY_LATEST_FILE" 2>/dev/null || true) &
+    AGY_LATEST_PID=$!
+  else
+    AGY_UPDATE_AVAILABLE=1
+    say "Antigravity CLI launcher found but its version could not be detected — update available check is inconclusive."
+  fi
+else
+  AGY_UPDATE_AVAILABLE=1
+  say "Antigravity CLI not found — installation available."
+fi
+
+RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
+RTK_CURRENT_VERSION=""
+RTK_LATEST_VERSION=""
+RTK_NEEDS_UPDATE=1
+RTK_UPDATE_AVAILABLE=0
+if [ -n "$RTK_COMMAND" ]; then
+  RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
+  if [ -n "$RTK_CURRENT_VERSION" ]; then
+    RTK_LATEST_FILE="$TMP_DIR/rtk-latest.version"
+    (get_rtk_latest_version >"$RTK_LATEST_FILE" 2>/dev/null || true) &
+    RTK_LATEST_PID=$!
+  else
+    RTK_UPDATE_AVAILABLE=1
+    say "RTK launcher found but its version could not be detected — update available check is inconclusive."
+  fi
+else
+  RTK_UPDATE_AVAILABLE=1
+  say "RTK not found — installation available."
+fi
+
+# Wait for all release checks together, instead of making users wait through
+# several serial GitHub requests. Missing components never trigger a release check.
+for pid in ${KIMI_LATEST_PID:-} ${CODEX_LATEST_PID:-} ${AGY_LATEST_PID:-} ${RTK_LATEST_PID:-}; do
+  wait "$pid" 2>/dev/null || true
+done
+
+if [ -n "$KIMI_COMMAND" ] && [ -n "$KIMI_CURRENT_VERSION" ]; then
+  KIMI_LATEST_VERSION="$(cat "${KIMI_LATEST_FILE:-/dev/null}" 2>/dev/null || true)"
+  if [ -n "$KIMI_LATEST_VERSION" ]; then
+    if version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_LATEST_VERSION"; then
+      KIMI_NEEDS_UPDATE=0
+      if [ "$KIMI_CURRENT_VERSION" = "$KIMI_LATEST_VERSION" ]; then
+        say "Kimi Code $KIMI_CURRENT_VERSION is already current — skipped."
+      else
+        say "Kimi Code $KIMI_CURRENT_VERSION is newer than the latest published $KIMI_LATEST_VERSION — skipped."
+      fi
+    else
+      KIMI_UPDATE_AVAILABLE=1
+      say "Kimi Code $KIMI_CURRENT_VERSION → $KIMI_LATEST_VERSION — update available."
+    fi
+  else
+    KIMI_NEEDS_UPDATE=0
+    say "Kimi Code $KIMI_CURRENT_VERSION is installed; latest release could not be checked — skipped."
+  fi
+fi
+
+if [ -n "$CODEX_COMMAND" ] && [ -n "$CODEX_CURRENT_VERSION" ]; then
+  CODEX_LATEST_VERSION="$(cat "${CODEX_LATEST_FILE:-/dev/null}" 2>/dev/null || true)"
+  if [ -n "$CODEX_LATEST_VERSION" ]; then
+    if version_at_least "$CODEX_CURRENT_VERSION" "$CODEX_LATEST_VERSION"; then
+      CODEX_NEEDS_UPDATE=0
+      if [ "$CODEX_CURRENT_VERSION" = "$CODEX_LATEST_VERSION" ]; then
+        say "Codex $CODEX_CURRENT_VERSION is already current — skipped."
+      else
+        say "Codex $CODEX_CURRENT_VERSION is newer than the latest published $CODEX_LATEST_VERSION — skipped."
+      fi
+    else
+      CODEX_UPDATE_AVAILABLE=1
+      say "Codex $CODEX_CURRENT_VERSION → $CODEX_LATEST_VERSION — update available."
+    fi
+  else
+    CODEX_NEEDS_UPDATE=0
+    say "Codex $CODEX_CURRENT_VERSION is installed; latest release could not be checked — skipped."
+  fi
+fi
+
+if [ -n "$AGY_COMMAND" ] && [ -n "$AGY_CURRENT_VERSION" ]; then
+  AGY_LATEST_VERSION="$(cat "${AGY_LATEST_FILE:-/dev/null}" 2>/dev/null || true)"
+  if [ -n "$AGY_LATEST_VERSION" ]; then
     if version_at_least "$AGY_CURRENT_VERSION" "$AGY_LATEST_VERSION"; then
       AGY_NEEDS_UPDATE=0
       if [ "$AGY_CURRENT_VERSION" = "$AGY_LATEST_VERSION" ]; then
@@ -407,16 +477,30 @@ if [ -n "$AGY_COMMAND" ]; then
       AGY_UPDATE_AVAILABLE=1
       say "Antigravity CLI $AGY_CURRENT_VERSION → $AGY_LATEST_VERSION — update available."
     fi
-  elif [ -n "$AGY_CURRENT_VERSION" ]; then
+  else
     AGY_NEEDS_UPDATE=0
     say "Antigravity CLI $AGY_CURRENT_VERSION is installed; latest release could not be checked — skipped."
-  else
-    AGY_UPDATE_AVAILABLE=1
-    say "Antigravity CLI launcher found but its version could not be detected — update available check is inconclusive."
   fi
-else
-  AGY_UPDATE_AVAILABLE=1
-  say "Antigravity CLI not found — installation available."
+fi
+
+if [ -n "$RTK_COMMAND" ] && [ -n "$RTK_CURRENT_VERSION" ]; then
+  RTK_LATEST_VERSION="$(cat "${RTK_LATEST_FILE:-/dev/null}" 2>/dev/null || true)"
+  if [ -n "$RTK_LATEST_VERSION" ]; then
+    if version_at_least "$RTK_CURRENT_VERSION" "$RTK_LATEST_VERSION"; then
+      RTK_NEEDS_UPDATE=0
+      if [ "$RTK_CURRENT_VERSION" = "$RTK_LATEST_VERSION" ]; then
+        say "RTK $RTK_CURRENT_VERSION is already current — skipped."
+      else
+        say "RTK $RTK_CURRENT_VERSION is newer than the latest published $RTK_LATEST_VERSION — skipped."
+      fi
+    else
+      RTK_UPDATE_AVAILABLE=1
+      say "RTK $RTK_CURRENT_VERSION → $RTK_LATEST_VERSION — update available."
+    fi
+  else
+    RTK_NEEDS_UPDATE=0
+    say "RTK $RTK_CURRENT_VERSION is installed; latest release could not be checked — skipped."
+  fi
 fi
 
 INSTALL_KIMI=0
@@ -479,6 +563,10 @@ fi
 
 # Clear the question screen before doing the actual installs.
 clear 2>/dev/null || true
+
+# Python is only needed for the LazyDev runtime. Defer this potentially slow
+# bootstrap until after the quick component detection and user choices.
+ensure_python_runner
 
 REMOTE_REVISION="$(get_remote_revision || true)"
 [ -n "$REMOTE_REVISION" ] || fatal "Could not read the current Lazy Developer revision from GitHub."
