@@ -1,0 +1,21 @@
+{
+  "name": "lazy-developer-marketplace",
+  "owner": {
+    "name": "BlizPS"
+  },
+  "plugins": [
+    {
+      "name": "lazy-developer",
+      "source": "./",
+      "description": "Portable engineering skills and commands for coding, debugging, review, testing, and verification.",
+      "version": "1.0.1",
+      "author": {
+        "name": "BlizPS"
+      },
+      "license": "MIT",
+      "skills": "skills/",
+      "commands": "commands/"
+    }
+  ],
+  "version": null
+}
