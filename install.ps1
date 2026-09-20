@@ -12,7 +12,6 @@ $Branch = if ($env:LAZYDEV_BRANCH) { $env:LAZYDEV_BRANCH } else { 'main' }
 $LocalSourceDir = if ($env:LAZYDEV_SOURCE_DIR) { $env:LAZYDEV_SOURCE_DIR } elseif ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'package.json')) -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'cli\lazydev.py'))) { $PSScriptRoot } else { '' }
 $LazyDevVersion = '1.0.2'
 $KimiInstallUrl = 'https://code.kimi.com/kimi-code/install.ps1'
-$CodexInstallUrl = 'https://chatgpt.com/codex/install.ps1'
 $AntigravityInstallUrl = 'https://antigravity.google/cli/install.ps1'
 $KimiReleasesApiUrl = 'https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest'
 $CodexReleasesApiUrl = 'https://api.github.com/repos/openai/codex/releases/latest'
@@ -158,6 +157,70 @@ function Get-GitHubReleaseVersion([string]$ApiUrl) {
     return ''
 }
 function Get-CodexLatestVersion { return Get-GitHubReleaseVersion $CodexReleasesApiUrl }
+
+function Get-CodexReleaseTarget {
+    if ($IsWindows) {
+        $arch = $env:PROCESSOR_ARCHITECTURE
+        if ($env:PROCESSOR_ARCHITEW6432) { $arch = $env:PROCESSOR_ARCHITEW6432 }
+        switch ($arch.ToUpperInvariant()) {
+            'ARM64' { return 'aarch64-pc-windows-msvc' }
+            'AMD64' { return 'x86_64-pc-windows-msvc' }
+            default { throw "Unsupported Codex Windows architecture: $arch" }
+        }
+    }
+    throw 'This PowerShell installer path is intended for Windows.'
+}
+
+function Invoke-ResilientDownload([string]$Url, [string]$Path) {
+    $dir = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if (-not $curl) { throw 'curl.exe is required for resilient Codex downloads on Windows.' }
+    $args = @('--fail','--location','--http1.1','--connect-timeout','20','--max-time','1800','--retry','8','--retry-delay','2','--retry-max-time','1800','--speed-time','90','--speed-limit','1024','--output',$Path)
+    if (Test-Path -LiteralPath $Path) {
+        & $curl.Source @('--fail','--location','--http1.1','--connect-timeout','20','--max-time','1800','--retry','8','--retry-delay','2','--retry-max-time','1800','--speed-time','90','--speed-limit','1024','--continue-at','-','--output',$Path,$Url)
+        if ($LASTEXITCODE -eq 0) { return }
+        Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    }
+    & $curl.Source @args $Url
+    if ($LASTEXITCODE -ne 0) { throw "Download failed: $Url" }
+}
+
+function Install-CodexOfficial([string]$Version) {
+    $target = Get-CodexReleaseTarget
+    $asset = "codex-package-$target.tar.gz"
+    $base = "https://github.com/openai/codex/releases/download/rust-v$Version"
+    $cacheRoot = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'LazyDev\CodexCache' } else { Join-Path $HOME '.lazydev\codex-cache' }
+    $versionRoot = Join-Path $cacheRoot $Version
+    $archive = Join-Path $versionRoot $asset
+    $sums = Join-Path $versionRoot 'codex-package_SHA256SUMS'
+    $extract = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-codex-$([guid]::NewGuid().ToString('N'))")
+    New-Item -ItemType Directory -Force -Path $extract | Out-Null
+    try {
+        Write-Host "Codex $Version · official release asset · $target"
+        Write-Host 'Downloading with resumable retries (HTTP/1.1) …'
+        Invoke-ResilientDownload "$base/$asset" $archive
+        Invoke-ResilientDownload "$base/codex-package_SHA256SUMS" $sums
+        $line = Select-String -LiteralPath $sums -Pattern ([regex]::Escape($asset)) | Select-Object -First 1
+        if (-not $line) { throw "Codex checksum for $asset was not found in the official manifest." }
+        $expected = ($line.Line -split '\s+')[0].ToLowerInvariant()
+        $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $expected) { throw 'Codex package checksum mismatch; refusing to install a corrupted download.' }
+        $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+        if (-not $tar) { throw 'tar.exe is required to unpack the official Codex archive.' }
+        & $tar.Source -xzf $archive -C $extract
+        if ($LASTEXITCODE -ne 0) { throw 'Could not unpack the official Codex archive.' }
+        $binary = Get-ChildItem -LiteralPath $extract -File -Recurse | Where-Object { $_.Name -like 'codex-*' } | Select-Object -First 1
+        if (-not $binary) { throw 'Official Codex archive did not contain the expected binary.' }
+        New-Item -ItemType Directory -Force -Path $BinRoot | Out-Null
+        Copy-Item -LiteralPath $binary.FullName -Destination (Join-Path $BinRoot 'codex.exe') -Force
+        Remove-Item -LiteralPath $archive,$sums -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $versionRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "✓ Codex $Version installed from the official release archive"
+    } finally {
+        Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 function Get-AntigravityLatestVersion { return Get-GitHubReleaseVersion $AntigravityReleasesApiUrl }
 function Get-InstalledLazyVersion {
     $file = Join-Path $InstallRoot 'package.json'
@@ -445,20 +508,9 @@ if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Con
 
 if ($InstallCodex -and $CodexNeedsUpdate) {
     Step 'Installing/updating official Codex CLI'
-    $codexInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-codex-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
-    $codexInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-codex-install-" + [guid]::NewGuid().ToString('N') + '.log')
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri $CodexInstallUrl -OutFile $codexInstallerPath
-        $env:CODEX_NON_INTERACTIVE = '1'
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $codexInstallerPath *> $codexInstallerLog
-        $codexExitCode = $LASTEXITCODE
-        if (Test-Path -LiteralPath $codexInstallerLog) { Get-Content -LiteralPath $codexInstallerLog | Write-Host }
-        if ($codexExitCode -ne 0) { Fail "Codex installer exited with code $codexExitCode." }
-    } finally {
-        Remove-Item Env:CODEX_NON_INTERACTIVE -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $codexInstallerPath -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $codexInstallerLog -Force -ErrorAction SilentlyContinue
-    }
+    $CodexTargetVersion = if ($CodexLatestVersion) { $CodexLatestVersion } else { Get-CodexLatestVersion }
+    if (-not $CodexTargetVersion) { Fail 'Could not resolve the latest official Codex release version.' }
+    Install-CodexOfficial $CodexTargetVersion
     $env:Path = "$BinRoot;$(Join-Path $HOME '.local\bin');$env:Path"
     $CodexExe = Find-Codex
     if (-not $CodexExe) { Fail 'Codex did not install a usable launcher.' }

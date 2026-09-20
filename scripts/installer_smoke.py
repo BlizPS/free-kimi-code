@@ -79,6 +79,19 @@ for name, text in [('install.sh', sh), ('install.ps1', ps)]:
         errors.append(f'{name}: hardcoded Kimi version remains')
 if 'ensure_legacy_launcher_targets' not in sh or 'canonical="$LAZYDEV_BIN_DIR/lazydev"' not in sh:
     errors.append('install.sh: compatibility launcher reconciliation missing canonical launcher copy')
+if 'install_codex_official()' not in sh or 'codex-package-${target}.tar.gz' not in sh:
+    errors.append('install.sh: official Codex release installer missing')
+if 'resilient_download()' not in sh or '--http1.1' not in sh or '--retry 8' not in sh or ' -C - ' not in sh:
+    errors.append('install.sh: Codex resilient resumable download policy missing')
+if 'Install-CodexOfficial' not in ps or 'codex-package-$target.tar.gz' not in ps:
+    errors.append('install.ps1: official Codex release installer missing')
+if 'Invoke-ResilientDownload' not in ps or '--http1.1' not in ps or '--retry' not in ps or '--continue-at' not in ps:
+    errors.append('install.ps1: Codex resilient resumable download policy missing')
+legacy_env = 'CODEX' + '_INSTALL_URL'
+legacy_vars = ['Codex' + 'InstallUrl']
+legacy_scripts = ['codex' + '-install.sh', 'codex' + '-install.ps1']
+if legacy_env in sh or any(v in ps for v in legacy_vars) or any(v in sh or v in ps for v in legacy_scripts):
+    errors.append('installers: Codex must not delegate the large binary download to a nested remote installer')
 if 'for dir in "$HOME/.local/bin" "${PREFIX:-}/bin"' in sh:
     errors.append('install.sh: must not target /bin accidentally when PREFIX is unset')
 

@@ -153,6 +153,7 @@ Large outputs are handled without blindly filling the active context.
 ### macOS / Linux
 
 During installation, LazyDev asks separately whether to install/update **Kimi Code**, **Codex**, and **Antigravity**. The official CLIs are used; LazyDev keeps the setup, model, proxy/routing, context optimization, and skills layer shared.
+Codex downloads use the official release archive directly with resumable retries and checksum verification, so a transient CDN reset does not force a full restart. Partial downloads are cached outside the workspace and can be resumed by rerunning the installer.
 
 ```sh
 curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install.sh" | sh

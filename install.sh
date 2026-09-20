@@ -16,7 +16,6 @@ if [ -z "$LAZYDEV_LOCAL_SOURCE_DIR" ] && [ -n "${0:-}" ] && [ -f "${0:-}" ]; the
 fi
 LAZYDEV_VERSION="1.0.2"
 KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"
-CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
 ANTIGRAVITY_INSTALL_URL="https://antigravity.google/cli/install.sh"
 KIMI_RELEASE_API_URL="https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest"
 CODEX_RELEASE_API_URL="https://api.github.com/repos/openai/codex/releases/latest"
@@ -116,7 +115,7 @@ get_kimi_latest_version() {
 get_github_release_version() {
   api_url="$1"
   response_file="$2"
-  if curl -fsSL \
+  if curl -fsSL --http1.1 --connect-timeout 10 --max-time 30 --retry 4 --retry-delay 1 \
     -H 'Accept: application/vnd.github+json' \
     -H 'X-GitHub-Api-Version: 2022-11-28' \
     -H 'User-Agent: lazy-developer-installer/1.0.2' \
@@ -128,6 +127,122 @@ get_github_release_version() {
 
 get_codex_latest_version() {
   get_github_release_version "$CODEX_RELEASE_API_URL" "$TMP_DIR/codex-release.json"
+}
+
+codex_release_target() {
+  os="$(uname -s)"
+  arch="$(uname -m)"
+  case "$os:$arch" in
+    Linux:aarch64|Linux:arm64) printf '%s\n' 'aarch64-unknown-linux-musl' ;;
+    Linux:x86_64|Linux:amd64) printf '%s\n' 'x86_64-unknown-linux-musl' ;;
+    Darwin:arm64|Darwin:aarch64) printf '%s\n' 'aarch64-apple-darwin' ;;
+    Darwin:x86_64|Darwin:amd64) printf '%s\n' 'x86_64-apple-darwin' ;;
+    *) return 1 ;;
+  esac
+}
+
+sha256_file() {
+  file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+    return 0
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$file" | sed -n 's/.*= \([0-9A-Fa-f]*\)$/\1/p'
+    return 0
+  fi
+  return 1
+}
+
+resilient_download() {
+  url="$1"
+  output="$2"
+  mkdir -p "$(dirname "$output")"
+  common_args='-fL --connect-timeout 20 --max-time 1800 --retry 8 --retry-delay 2 --retry-max-time 1800 --speed-time 90 --speed-limit 1024 --http1.1'
+  if curl --help all 2>/dev/null | grep -q -- '--retry-all-errors'; then
+    common_args="$common_args --retry-all-errors"
+  fi
+
+  # Keep a partial archive. The next attempt resumes from the existing byte
+  # offset instead of throwing away a nearly-complete 100+ MB download.
+  if [ -f "$output" ] && [ -s "$output" ]; then
+    if curl $common_args -C - "$url" -o "$output"; then
+      return 0
+    fi
+  else
+    if curl $common_args "$url" -o "$output"; then
+      return 0
+    fi
+  fi
+
+  # The first CDN connection can be flaky even when the network itself is
+  # healthy. Retry the same partial file over IPv4, still resumable.
+  if [ -f "$output" ] && [ -s "$output" ]; then
+    if curl $common_args -4 -C - "$url" -o "$output"; then
+      return 0
+    fi
+  else
+    if curl $common_args -4 "$url" -o "$output"; then
+      return 0
+    fi
+  fi
+
+  # Last fallback for environments where curl/CDN negotiation is the issue.
+  if command -v wget >/dev/null 2>&1; then
+    if [ -f "$output" ] && [ -s "$output" ]; then
+      if wget -q --tries=8 --timeout=90 --continue -O "$output" "$url"; then
+        return 0
+      fi
+    else
+      if wget -q --tries=8 --timeout=90 -O "$output" "$url"; then
+        return 0
+      fi
+    fi
+  fi
+  return 1
+}
+
+install_codex_official() {
+  version="$1"
+  target="$(codex_release_target 2>/dev/null || true)"
+  [ -n "$target" ] || fatal "Unsupported Codex platform: $(uname -s)/$(uname -m)"
+  asset="codex-package-${target}.tar.gz"
+  base_url="https://github.com/openai/codex/releases/download/rust-v${version}"
+  cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/lazydev/codex/${version}"
+  archive="$cache_root/$asset"
+  sums="$cache_root/codex-package_SHA256SUMS"
+  extract_dir="$TMP_DIR/codex-extract"
+
+  mkdir -p "$cache_root" "$extract_dir" "$LAZYDEV_BIN_DIR"
+  say "Codex $version · official release asset · $target"
+  say "Downloading with resumable retries (HTTP/1.1) …"
+
+  resilient_download "$base_url/$asset" "$archive" || fatal "Could not download the official Codex package after resilient retries. A partial download is kept at $archive; rerun the installer to resume it."
+  resilient_download "$base_url/codex-package_SHA256SUMS" "$sums" || fatal "Could not download the official Codex checksum manifest. Rerun the installer to retry."
+
+  expected="$(awk -v f="$asset" '$2 == f || $2 == "*" f {print $1; exit}' "$sums" 2>/dev/null || true)"
+  [ -n "$expected" ] || fatal "Codex checksum for $asset was not found in the official manifest."
+  actual="$(sha256_file "$archive" 2>/dev/null || true)"
+  [ -n "$actual" ] || fatal "No SHA-256 verifier is available on this system."
+  [ "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')" ] || fatal "Codex package checksum mismatch; refusing to install a corrupted download."
+
+  rm -rf "$extract_dir"
+  mkdir -p "$extract_dir"
+  tar -xzf "$archive" -C "$extract_dir"
+  codex_binary="$(find "$extract_dir" -type f -name 'codex-*' -print | head -n 1)"
+  [ -n "$codex_binary" ] || fatal "Official Codex archive did not contain the expected binary."
+  chmod 0755 "$codex_binary"
+  temp_binary="$LAZYDEV_BIN_DIR/.codex.new.$$"
+  cp "$codex_binary" "$temp_binary"
+  chmod 0755 "$temp_binary"
+  mv -f "$temp_binary" "$LAZYDEV_BIN_DIR/codex"
+  rm -f "$archive" "$sums"
+  rmdir "$cache_root" 2>/dev/null || true
+  say "✓ Codex $version installed from the official release archive"
 }
 
 get_antigravity_latest_version() {
@@ -644,20 +759,19 @@ fi
 
 if [ "$INSTALL_CODEX" -eq 1 ] && [ "$CODEX_NEEDS_UPDATE" -eq 1 ]; then
   step "Installing/updating official Codex CLI"
-  CODEX_INSTALL_SCRIPT="$TMP_DIR/codex-install.sh"
-  CODEX_LOG="$TMP_DIR/codex-install.log"
-  if ! curl -fsSL "$CODEX_INSTALL_URL" -o "$CODEX_INSTALL_SCRIPT"; then
-    fatal "Could not download the official Codex installer."
+  CODEX_TARGET_VERSION="${CODEX_LATEST_VERSION:-}"
+  if [ -z "$CODEX_TARGET_VERSION" ]; then
+    CODEX_TARGET_VERSION="$(get_codex_latest_version 2>/dev/null || true)"
   fi
-  if ! sh "$CODEX_INSTALL_SCRIPT" >"$CODEX_LOG" 2>&1; then
-    cat "$CODEX_LOG" >&2 || true
-    fatal "Codex installer failed."
-  fi
-  cat "$CODEX_LOG"
+  [ -n "$CODEX_TARGET_VERSION" ] || fatal "Could not resolve the latest official Codex release version."
+  install_codex_official "$CODEX_TARGET_VERSION"
   PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
+  hash -r 2>/dev/null || true
   CODEX_COMMAND="$(find_codex 2>/dev/null || true)"
   [ -n "$CODEX_COMMAND" ] || fatal "Codex did not install a usable launcher."
-  say "✓ Codex ready: $CODEX_COMMAND"
+  CODEX_CURRENT_VERSION="$(extract_semver "$($CODEX_COMMAND --version 2>/dev/null || true)")"
+  [ -n "$CODEX_CURRENT_VERSION" ] || fatal "Could not verify the installed Codex version."
+  say "✓ Codex $CODEX_CURRENT_VERSION ready: $CODEX_COMMAND"
 fi
 
 if [ "$INSTALL_ANTIGRAVITY" -eq 1 ] && [ "$AGY_NEEDS_UPDATE" -eq 1 ]; then
