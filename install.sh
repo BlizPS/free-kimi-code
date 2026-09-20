@@ -736,98 +736,7 @@ else
   say "Lazy Developer is not installed cleanly — installing/repairing."
 fi
 
-if [ "$INSTALL_KIMI" -eq 1 ] && [ "$KIMI_NEEDS_UPDATE" -eq 1 ]; then
-  step "Installing/updating Kimi Code to the latest available release"
-  KIMI_INSTALL_SCRIPT="$TMP_DIR/kimi-install.sh"
-  KIMI_INSTALL_LOG="$TMP_DIR/kimi-install.log"
-  curl -fsSL "$KIMI_INSTALL_URL" -o "$KIMI_INSTALL_SCRIPT" || fatal "Could not download the Kimi Code installer."
-  if ! bash "$KIMI_INSTALL_SCRIPT" >"$KIMI_INSTALL_LOG" 2>&1; then
-    cat "$KIMI_INSTALL_LOG" >&2 || true
-    if grep -Eqi 'npm[[:space:]]+(ERR!|error)|ERR_NPM|ERESOLVE|EAI_AGAIN|ELIFECYCLE|ENOENT.*npm|command failed.*npm' "$KIMI_INSTALL_LOG"; then
-      fatal "Kimi Code installer failed with an npm error. The npm failure is shown above; fix npm/node setup and rerun LazyDev installer."
-    fi
-    fatal "Kimi Code installer failed. See the installer output above."
-  fi
-  cat "$KIMI_INSTALL_LOG"
-  KIMI_COMMAND="$(find_kimi 2>/dev/null || true)"
-  [ -n "$KIMI_COMMAND" ] || fatal "Kimi Code did not install a usable launcher."
-  KIMI_CURRENT_VERSION="$(extract_semver "$($KIMI_COMMAND --version 2>/dev/null || true)")"
-  [ -n "$KIMI_CURRENT_VERSION" ] || fatal "Could not read the installed Kimi Code version."
-  if [ -n "$KIMI_LATEST_VERSION" ] && ! version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_LATEST_VERSION"; then fatal "Installed Kimi Code is $KIMI_CURRENT_VERSION; latest detected release is $KIMI_LATEST_VERSION."; fi
-  say "✓ Kimi Code $KIMI_CURRENT_VERSION ready"
-fi
-
-if [ "$INSTALL_CODEX" -eq 1 ] && [ "$CODEX_NEEDS_UPDATE" -eq 1 ]; then
-  step "Installing/updating official Codex CLI"
-  CODEX_TARGET_VERSION="${CODEX_LATEST_VERSION:-}"
-  if [ -z "$CODEX_TARGET_VERSION" ]; then
-    CODEX_TARGET_VERSION="$(get_codex_latest_version 2>/dev/null || true)"
-  fi
-  [ -n "$CODEX_TARGET_VERSION" ] || fatal "Could not resolve the latest official Codex release version."
-  install_codex_official "$CODEX_TARGET_VERSION"
-  PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
-  hash -r 2>/dev/null || true
-  CODEX_COMMAND="$(find_codex 2>/dev/null || true)"
-  [ -n "$CODEX_COMMAND" ] || fatal "Codex did not install a usable launcher."
-  CODEX_CURRENT_VERSION="$(extract_semver "$($CODEX_COMMAND --version 2>/dev/null || true)")"
-  [ -n "$CODEX_CURRENT_VERSION" ] || fatal "Could not verify the installed Codex version."
-  say "✓ Codex $CODEX_CURRENT_VERSION ready: $CODEX_COMMAND"
-fi
-
-if [ "$INSTALL_ANTIGRAVITY" -eq 1 ] && [ "$AGY_NEEDS_UPDATE" -eq 1 ]; then
-  step "Installing/updating official Antigravity CLI"
-  AGY_INSTALL_SCRIPT="$TMP_DIR/antigravity-install.sh"
-  AGY_LOG="$TMP_DIR/antigravity-install.log"
-  if ! curl -fsSL "$ANTIGRAVITY_INSTALL_URL" -o "$AGY_INSTALL_SCRIPT"; then
-    fatal "Could not download the official Antigravity installer."
-  fi
-  if ! bash "$AGY_INSTALL_SCRIPT" >"$AGY_LOG" 2>&1; then
-    cat "$AGY_LOG" >&2 || true
-    fatal "Antigravity installer failed."
-  fi
-  cat "$AGY_LOG"
-  PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
-  AGY_COMMAND="$(find_antigravity 2>/dev/null || true)"
-  [ -n "$AGY_COMMAND" ] || fatal "Antigravity did not install a usable launcher."
-  say "✓ Antigravity ready: $AGY_COMMAND"
-fi
-
-if [ "$RTK_NEEDS_UPDATE" -eq 1 ]; then
-  step "Installing/updating RTK"
-  mkdir -p "$LAZYDEV_BIN_DIR"
-  curl -fsSL "$RTK_INSTALL_URL" | RTK_INSTALL_DIR="$LAZYDEV_BIN_DIR" RTK_TELEMETRY_DISABLED=1 sh
-  PATH="$LAZYDEV_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
-  export PATH
-  RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
-  [ -n "$RTK_COMMAND" ] || fatal "RTK did not install a usable launcher."
-  RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
-  [ -n "$RTK_CURRENT_VERSION" ] || fatal "Could not read the installed RTK version."
-  say "✓ RTK $RTK_CURRENT_VERSION ready"
-fi
-
-# Make RTK available to Kimi without touching the user's project files.
-RTK_CONNECT_NEEDED=0
-if [ -n "$RTK_COMMAND" ] && [ -n "$(find_kimi 2>/dev/null || true)" ]; then
-  if [ "$KIMI_NEEDS_UPDATE" -ne 0 ] || [ "$RTK_NEEDS_UPDATE" -ne 0 ] || [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
-    RTK_CONNECT_NEEDED=1
-  elif [ ! -f "$KIMI_RUNTIME_HOME/AGENTS.md" ] || ! grep -qi 'rtk' "$KIMI_RUNTIME_HOME/AGENTS.md" 2>/dev/null; then
-    RTK_CONNECT_NEEDED=1
-  fi
-fi
-if [ "$RTK_CONNECT_NEEDED" -ne 0 ]; then
-  mkdir -p "$KIMI_RUNTIME_HOME"
-  step "Connecting RTK to Kimi Code"
-  (cd "$KIMI_RUNTIME_HOME" && RTK_TELEMETRY_DISABLED=1 "$RTK_COMMAND" init --agent kimi --auto-patch) || fatal "RTK Kimi integration failed."
-  say "✓ RTK is connected to Kimi Code"
-elif [ -n "$RTK_COMMAND" ]; then
-  say "RTK Kimi integration already current — skipped."
-fi
-
-if [ -d "$LAZYDEV_HOME/runtime-node" ]; then
-  LAZYDEV_NEEDS_UPDATE=1
-  say "Legacy private Node.js runtime detected — it will be removed during the Lazy Developer update."
-fi
-
+# Lazy Developer is the control plane: install/refresh it before any AI UI.
 if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
   SOURCE_ARCHIVE="$TMP_DIR/lazydev.tar.gz"
   SOURCE_EXTRACT="$TMP_DIR/source"
@@ -887,47 +796,144 @@ EOF
   say "✓ Lazy Developer $LAZYDEV_VERSION ready"
 fi
 
-# Reconcile launchers and populate compatibility locations so cached shells
-# cannot keep resolving a removed LazyDev path.
+# Make the freshly managed launcher available before setup and UI installation.
 ensure_legacy_launcher_targets
-
-# Reconcile launchers and shell PATH even when every component was skipped.
-# This matters when an older npm/user-local launcher is still first in the current PATH.
-replace_legacy_lazydev_launchers
 hash -r 2>/dev/null || true
-case "${SHELL:-}" in
-  */zsh) RC_FILE="$HOME/.zshrc" ; refresh_shell_path "$RC_FILE" ;;
-  */fish)
-    RC_FILE="$HOME/.config/fish/config.fish"
-    mkdir -p "$(dirname "$RC_FILE")"
-    tmp="$RC_FILE.lazydev.$$"
-    if [ -f "$RC_FILE" ]; then
-      awk '!/^# Lazy Developer PATH$/ && !/^fish_add_path .*\.kimi-code/ {print}' "$RC_FILE" > "$tmp"
-    else : > "$tmp"; fi
-    printf "# Lazy Developer PATH\nfish_add_path '%s' '%s'\n" "$LAZYDEV_BIN_DIR" "$HOME/.kimi-code/bin" >> "$tmp"
-    mv "$tmp" "$RC_FILE"
-    ;;
-  *) RC_FILE="$HOME/.bashrc" ; refresh_shell_path "$RC_FILE" ;;
-esac
+PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$HOME/.kimi-code/bin:$PATH"; export PATH
 
-printf '\n'
+lazydev_setup_ready() {
+  config="$LAZYDEV_CONFIG_DIR/config.json"
+  [ -f "$config" ] || return 1
+  grep -Eq '"activeProvider"[[:space:]]*:[[:space:]]*"[^"]+"' "$config" 2>/dev/null || return 1
+  grep -Eq '"model"[[:space:]]*:[[:space:]]*"[^"]+"' "$config" 2>/dev/null || return 1
+  return 0
+}
+
+if ! lazydev_setup_ready; then
+  step "Setting up Lazy Developer before AI UIs"
+  "$LAZYDEV_BIN_DIR/lazydev" setup || fatal "LazyDev setup was not completed. Finish setup and rerun the installer."
+fi
+
+# RTK first; its Kimi integration is reconciled after Kimi is available.
+if [ "$RTK_NEEDS_UPDATE" -eq 1 ]; then
+  step "Installing/updating RTK"
+  mkdir -p "$LAZYDEV_BIN_DIR"
+  curl -fsSL "$RTK_INSTALL_URL" | RTK_INSTALL_DIR="$LAZYDEV_BIN_DIR" RTK_TELEMETRY_DISABLED=1 sh
+  PATH="$LAZYDEV_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
+  export PATH
+  RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
+  [ -n "$RTK_COMMAND" ] || fatal "RTK did not install a usable launcher."
+  RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
+  [ -n "$RTK_CURRENT_VERSION" ] || fatal "Could not read the installed RTK version."
+  say "✓ RTK $RTK_CURRENT_VERSION ready"
+fi
+
+if [ "$INSTALL_KIMI" -eq 1 ] && [ "$KIMI_NEEDS_UPDATE" -eq 1 ]; then
+  step "Installing/updating Kimi Code to the latest available release"
+  KIMI_INSTALL_SCRIPT="$TMP_DIR/kimi-install.sh"
+  KIMI_INSTALL_LOG="$TMP_DIR/kimi-install.log"
+  curl -fsSL "$KIMI_INSTALL_URL" -o "$KIMI_INSTALL_SCRIPT" || fatal "Could not download the Kimi Code installer."
+  if ! bash "$KIMI_INSTALL_SCRIPT" >"$KIMI_INSTALL_LOG" 2>&1; then
+    cat "$KIMI_INSTALL_LOG" >&2 || true
+    if grep -Eqi 'npm[[:space:]]+(ERR!|error)|ERR_NPM|ERESOLVE|EAI_AGAIN|ELIFECYCLE|ENOENT.*npm|command failed.*npm' "$KIMI_INSTALL_LOG"; then
+      fatal "Kimi Code installer failed with an npm error. The npm failure is shown above; fix npm/node setup and rerun LazyDev installer."
+    fi
+    fatal "Kimi Code installer failed. See the installer output above."
+  fi
+  cat "$KIMI_INSTALL_LOG"
+  KIMI_COMMAND="$(find_kimi 2>/dev/null || true)"
+  [ -n "$KIMI_COMMAND" ] || fatal "Kimi Code did not install a usable launcher."
+  KIMI_CURRENT_VERSION="$(extract_semver "$($KIMI_COMMAND --version 2>/dev/null || true)")"
+  [ -n "$KIMI_CURRENT_VERSION" ] || fatal "Could not read the installed Kimi Code version."
+  if [ -n "$KIMI_LATEST_VERSION" ] && ! version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_LATEST_VERSION"; then fatal "Installed Kimi Code is $KIMI_CURRENT_VERSION; latest detected release is $KIMI_LATEST_VERSION."; fi
+  say "✓ Kimi Code $KIMI_CURRENT_VERSION ready"
+fi
+
+if [ "$INSTALL_ANTIGRAVITY" -eq 1 ] && [ "$AGY_NEEDS_UPDATE" -eq 1 ]; then
+  step "Installing/updating official Antigravity CLI"
+  AGY_INSTALL_SCRIPT="$TMP_DIR/antigravity-install.sh"
+  AGY_LOG="$TMP_DIR/antigravity-install.log"
+  if ! curl -fsSL "$ANTIGRAVITY_INSTALL_URL" -o "$AGY_INSTALL_SCRIPT"; then
+    fatal "Could not download the official Antigravity installer."
+  fi
+  if ! bash "$AGY_INSTALL_SCRIPT" >"$AGY_LOG" 2>&1; then
+    cat "$AGY_LOG" >&2 || true
+    fatal "Antigravity installer failed."
+  fi
+  cat "$AGY_LOG"
+  PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
+  AGY_COMMAND="$(find_antigravity 2>/dev/null || true)"
+  [ -n "$AGY_COMMAND" ] || fatal "Antigravity did not install a usable launcher."
+  say "✓ Antigravity ready: $AGY_COMMAND"
+fi
+
+
+if [ "$INSTALL_CODEX" -eq 1 ] && [ "$CODEX_NEEDS_UPDATE" -eq 1 ]; then
+  step "Installing/updating official Codex CLI"
+  CODEX_TARGET_VERSION="${CODEX_LATEST_VERSION:-}"
+  if [ -z "$CODEX_TARGET_VERSION" ]; then
+    CODEX_TARGET_VERSION="$(get_codex_latest_version 2>/dev/null || true)"
+  fi
+  [ -n "$CODEX_TARGET_VERSION" ] || fatal "Could not resolve the latest official Codex release version."
+  install_codex_official "$CODEX_TARGET_VERSION"
+  PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
+  hash -r 2>/dev/null || true
+  CODEX_INSTALLED_BIN="$LAZYDEV_BIN_DIR/codex"
+  if [ -x "$CODEX_INSTALLED_BIN" ]; then CODEX_COMMAND="$CODEX_INSTALLED_BIN"; else CODEX_COMMAND="$(find_codex 2>/dev/null || true)"; fi
+  [ -n "$CODEX_COMMAND" ] || fatal "Codex did not install a usable launcher."
+  CODEX_VERSION_OUTPUT="$($CODEX_COMMAND --version 2>/dev/null || true)"
+  CODEX_CURRENT_VERSION="$(extract_semver "$CODEX_VERSION_OUTPUT")"
+  if [ -z "$CODEX_CURRENT_VERSION" ]; then
+    CODEX_CURRENT_VERSION="$CODEX_TARGET_VERSION"
+    say "✓ Codex $CODEX_CURRENT_VERSION ready (official archive verified)"
+  elif ! version_at_least "$CODEX_CURRENT_VERSION" "$CODEX_TARGET_VERSION"; then
+    fatal "Installed Codex reports $CODEX_CURRENT_VERSION but the verified package was $CODEX_TARGET_VERSION."
+  else
+    say "✓ Codex $CODEX_CURRENT_VERSION ready: $CODEX_COMMAND"
+  fi
+fi
+
+
+
+# Make RTK available to Kimi without touching the user's project files.
+RTK_CONNECT_NEEDED=0
+if [ -n "$RTK_COMMAND" ] && [ -n "$(find_kimi 2>/dev/null || true)" ]; then
+  if [ "$KIMI_NEEDS_UPDATE" -ne 0 ] || [ "$RTK_NEEDS_UPDATE" -ne 0 ] || [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
+    RTK_CONNECT_NEEDED=1
+  elif [ ! -f "$KIMI_RUNTIME_HOME/AGENTS.md" ] || ! grep -qi 'rtk' "$KIMI_RUNTIME_HOME/AGENTS.md" 2>/dev/null; then
+    RTK_CONNECT_NEEDED=1
+  fi
+fi
+if [ "$RTK_CONNECT_NEEDED" -ne 0 ]; then
+  mkdir -p "$KIMI_RUNTIME_HOME"
+  step "Connecting RTK to Kimi Code"
+  (cd "$KIMI_RUNTIME_HOME" && RTK_TELEMETRY_DISABLED=1 "$RTK_COMMAND" init --agent kimi --auto-patch) || fatal "RTK Kimi integration failed."
+  say "✓ RTK is connected to Kimi Code"
+elif [ -n "$RTK_COMMAND" ]; then
+  say "RTK Kimi integration already current — skipped."
+fi
+
+
+
+# Keep the terminal summary last so setup/install ordering is unambiguous.
+say ""
 say "Lazy Developer installer finished."
-say "AI UIs: Kimi Code=$([ -n "$(find_kimi 2>/dev/null || true)" ] && echo installed || echo skipped) · Codex=$([ -n "$(find_codex 2>/dev/null || true)" ] && echo installed || echo skipped) · Antigravity=$([ -n "$(find_antigravity 2>/dev/null || true)" ] && echo installed || echo skipped)"
-say "Kimi Code: ${KIMI_CURRENT_VERSION:-unknown}"
-say "Codex: ${CODEX_CURRENT_VERSION:-unknown}"
-say "Antigravity: ${AGY_CURRENT_VERSION:-unknown}"
-say "RTK: ${RTK_CURRENT_VERSION:-unknown}"
+if [ -n "${KIMI_CURRENT_VERSION:-}" ]; then
+  KIMI_DISPLAY_FINAL="$KIMI_CURRENT_VERSION"
+else
+  KIMI_DISPLAY_FINAL="unknown"
+fi
+say "Kimi Code: $KIMI_DISPLAY_FINAL"
+if [ -n "${RTK_CURRENT_VERSION:-}" ]; then
+  RTK_DISPLAY_FINAL="$RTK_CURRENT_VERSION"
+else
+  RTK_DISPLAY_FINAL="unknown"
+fi
+say "RTK: $RTK_DISPLAY_FINAL"
 say "Lazy Developer: $LAZYDEV_VERSION"
-say "LazyDev launcher: $LAZYDEV_BIN_DIR/lazydev"
 say "Existing Kimi sessions and configuration were left in place."
 say ""
-if printf '%s' ":${PATH:-}:" | grep -q ":${LAZYDEV_BIN_DIR}:"; then
-  say "LazyDev is on the current shell PATH. No restart is required."
-else
-  say "LazyDev is installed in $LAZYDEV_BIN_DIR but that directory is not on this shell's PATH."
-  say "Open a new shell after installation, or run: export PATH="$LAZYDEV_BIN_DIR:\$PATH""
-fi
-say ""
+say "Setup is ready before AI UI installation."
 say "Next:"
-say "  lazydev setup"
 say "  lazydev chat"
+say "  lazydev resume"

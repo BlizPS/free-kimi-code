@@ -506,114 +506,7 @@ if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Con
     Write-Host 'Legacy private Node.js runtime detected — it will be removed during the Lazy Developer update.'
 }
 
-if ($InstallCodex -and $CodexNeedsUpdate) {
-    Step 'Installing/updating official Codex CLI'
-    $CodexTargetVersion = if ($CodexLatestVersion) { $CodexLatestVersion } else { Get-CodexLatestVersion }
-    if (-not $CodexTargetVersion) { Fail 'Could not resolve the latest official Codex release version.' }
-    Install-CodexOfficial $CodexTargetVersion
-    $env:Path = "$BinRoot;$(Join-Path $HOME '.local\bin');$env:Path"
-    $CodexExe = Find-Codex
-    if (-not $CodexExe) { Fail 'Codex did not install a usable launcher.' }
-    $CodexCurrentVersion = Get-VersionFromText ((& $CodexExe --version 2>$null) -join "`n")
-    if (-not $CodexCurrentVersion) { Fail 'Installed Codex version could not be detected.' }
-    if ($CodexLatestVersion -and -not (Test-VersionAtLeast $CodexCurrentVersion $CodexLatestVersion)) { Fail "Installed Codex is $CodexCurrentVersion; latest detected release is $CodexLatestVersion." }
-    Write-Host "✓ Codex $CodexCurrentVersion ready"
-}
-if ($InstallAntigravity -and $AgyNeedsUpdate) {
-    Step 'Installing/updating official Antigravity CLI'
-    $agyInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-antigravity-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
-    $agyInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-antigravity-install-" + [guid]::NewGuid().ToString('N') + '.log')
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri $AntigravityInstallUrl -OutFile $agyInstallerPath
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agyInstallerPath *> $agyInstallerLog
-        $agyExitCode = $LASTEXITCODE
-        if (Test-Path -LiteralPath $agyInstallerLog) { Get-Content -LiteralPath $agyInstallerLog | Write-Host }
-        if ($agyExitCode -ne 0) { Fail "Antigravity installer exited with code $agyExitCode." }
-    } finally {
-        Remove-Item -LiteralPath $agyInstallerPath -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $agyInstallerLog -Force -ErrorAction SilentlyContinue
-    }
-    $env:Path = "$BinRoot;$(Join-Path $HOME '.local\bin');$env:Path"
-    $AgyExe = Find-Antigravity
-    if (-not $AgyExe) { Fail 'Antigravity did not install a usable launcher.' }
-    $AgyCurrentVersion = Get-VersionFromText ((& $AgyExe --version 2>$null) -join "`n")
-    if (-not $AgyCurrentVersion) { Fail 'Installed Antigravity version could not be detected.' }
-    if ($AgyLatestVersion -and -not (Test-VersionAtLeast $AgyCurrentVersion $AgyLatestVersion)) { Fail "Installed Antigravity is $AgyCurrentVersion; latest detected release is $AgyLatestVersion." }
-    Write-Host "✓ Antigravity CLI $AgyCurrentVersion ready"
-}
-
-if ($InstallKimi -and $KimiNeedsUpdate) {
-    Step "Installing/updating Kimi Code to the latest available release"
-    $kimiInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
-    $kimiInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.log')
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri $KimiInstallUrl -OutFile $kimiInstallerPath
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $kimiInstallerPath *> $kimiInstallerLog
-        $kimiExitCode = $LASTEXITCODE
-        if (Test-Path -LiteralPath $kimiInstallerLog) { Get-Content -LiteralPath $kimiInstallerLog | Write-Host }
-        if ($kimiExitCode -ne 0) {
-            $npmError = $false
-            if (Test-Path -LiteralPath $kimiInstallerLog) {
-                $npmError = Select-String -Path $kimiInstallerLog -Pattern 'npm\s+(ERR!|error)|ERR_NPM|ERESOLVE|EAI_AGAIN|ELIFECYCLE|ENOENT.*npm|command failed.*npm' -Quiet -CaseSensitive:$false
-            }
-            if ($npmError) { Fail "Kimi Code installer failed with an npm error. The npm failure is shown above; fix npm/node setup and rerun LazyDev installer." }
-            Fail "Kimi Code installer exited with code $kimiExitCode."
-        }
-    } finally {
-        Remove-Item -LiteralPath $kimiInstallerPath -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $kimiInstallerLog -Force -ErrorAction SilentlyContinue
-    }
-    $KimiExe = Find-Kimi
-    if (-not $KimiExe) { Fail "Kimi Code did not install a usable launcher." }
-    $KimiCurrentVersion = Get-KimiVersion $KimiExe
-    if (-not $KimiCurrentVersion) { Fail 'Installed Kimi Code version could not be detected.' }
-    if ($KimiLatestVersion -and -not (Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion)) { Fail "Installed Kimi Code is $KimiCurrentVersion; latest detected release is $KimiLatestVersion." }
-    Write-Host "✓ Kimi Code $KimiCurrentVersion ready"
-}
-
-if ($InstallRtk -and $RtkNeedsUpdate) {
-    Step 'Installing/updating RTK'
-    Install-Rtk
-    $env:Path = "$BinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
-    $RtkExe = Find-Rtk
-    if (-not $RtkExe) { Fail 'RTK did not install a usable launcher.' }
-    $RtkCurrentVersion = Get-RtkVersion $RtkExe
-    Write-Host "✓ RTK $RtkCurrentVersion ready"
-}
-
-if ($RtkExe) { Connect-RtkToKimi $RtkExe }
-
-function Ensure-CompatibilityLazyDevLauncher {
-    $canonical = Join-Path $BinRoot 'lazydev.cmd'
-    if (-not (Test-Path -LiteralPath $canonical -PathType Leaf)) { return }
-    $dirs = @($BinRoot, (Join-Path $HOME '.local\bin')) | Select-Object -Unique
-    foreach ($dir in $dirs) {
-        try {
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
-            $target = Join-Path $dir 'lazydev.cmd'
-            if ($target -ne $canonical) { Copy-Item -LiteralPath $canonical -Destination $target -Force }
-        } catch {}
-    }
-}
-
-function Refresh-ExistingLazyDevLaunchers {
-    $canonical = Join-Path $BinRoot 'lazydev.cmd'
-    if (-not (Test-Path -LiteralPath $canonical -PathType Leaf)) { return }
-    $commands = @(Get-Command lazydev -All -ErrorAction SilentlyContinue)
-    foreach ($cmd in $commands) {
-        $path = $cmd.Source
-        if (-not $path) { continue }
-        if ($path -eq $canonical) { continue }
-        try {
-            $text = Get-Content -Raw -LiteralPath $path -ErrorAction Stop
-            if ($text -match 'Lazy Developer managed launcher|lazydev\.mjs|@blizps/lazy-developer|free-kimi-code') {
-                Copy-Item -LiteralPath $canonical -Destination $path -Force
-                Write-Host "✓ Refreshed existing LazyDev launcher: $path"
-            }
-        } catch {}
-    }
-}
-
+# Lazy Developer is the control plane: install/refresh it before any AI UI.
 if ($LazyDevNeedsUpdate) {
     Step "Installing/updating Lazy Developer $LazyDevVersion"
     $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-" + [guid]::NewGuid().ToString('N'))
@@ -699,6 +592,140 @@ $entries = @($BinRoot, (Join-Path $HOME '.kimi-code\bin')) + $entries
 [Environment]::SetEnvironmentVariable('Path', ($entries | Select-Object -Unique) -join ';', 'User')
 $env:Path = (($entries | Select-Object -Unique) -join ';')
 
+function Test-LazyDevSetupReady {
+    $configFile = Join-Path $ConfigRoot 'config.json'
+    if (-not (Test-Path -LiteralPath $configFile -PathType Leaf)) { return $false }
+    try {
+        $cfg = Get-Content -Raw -LiteralPath $configFile | ConvertFrom-Json
+        $providerId = [string]$cfg.activeProvider
+        $provider = if ($cfg.providers) { $cfg.providers.$providerId } else { $null }
+        return (-not [string]::IsNullOrWhiteSpace($providerId)) -and $provider -and (-not [string]::IsNullOrWhiteSpace([string]$provider.model))
+    } catch { return $false }
+}
+
+$env:Path = "$BinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
+if (-not (Test-LazyDevSetupReady)) {
+    Step 'Setting up Lazy Developer before AI UIs'
+    & $Launcher setup
+    if ($LASTEXITCODE -ne 0) { Fail 'LazyDev setup was not completed. Finish setup and rerun the installer.' }
+}
+
+# RTK first; its Kimi integration is reconciled after Kimi is available.
+if ($InstallRtk -and $RtkNeedsUpdate) {
+    Step 'Installing/updating RTK'
+    Install-Rtk
+    $env:Path = "$BinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
+    $RtkExe = Find-Rtk
+    if (-not $RtkExe) { Fail 'RTK did not install a usable launcher.' }
+    $RtkCurrentVersion = Get-RtkVersion $RtkExe
+    Write-Host "✓ RTK $RtkCurrentVersion ready"
+}
+if ($InstallKimi -and $KimiNeedsUpdate) {
+    Step "Installing/updating Kimi Code to the latest available release"
+    $kimiInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
+    $kimiInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.log')
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $KimiInstallUrl -OutFile $kimiInstallerPath
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $kimiInstallerPath *> $kimiInstallerLog
+        $kimiExitCode = $LASTEXITCODE
+        if (Test-Path -LiteralPath $kimiInstallerLog) { Get-Content -LiteralPath $kimiInstallerLog | Write-Host }
+        if ($kimiExitCode -ne 0) {
+            $npmError = $false
+            if (Test-Path -LiteralPath $kimiInstallerLog) {
+                $npmError = Select-String -Path $kimiInstallerLog -Pattern 'npm\s+(ERR!|error)|ERR_NPM|ERESOLVE|EAI_AGAIN|ELIFECYCLE|ENOENT.*npm|command failed.*npm' -Quiet -CaseSensitive:$false
+            }
+            if ($npmError) { Fail "Kimi Code installer failed with an npm error. The npm failure is shown above; fix npm/node setup and rerun LazyDev installer." }
+            Fail "Kimi Code installer exited with code $kimiExitCode."
+        }
+    } finally {
+        Remove-Item -LiteralPath $kimiInstallerPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $kimiInstallerLog -Force -ErrorAction SilentlyContinue
+    }
+    $KimiExe = Find-Kimi
+    if (-not $KimiExe) { Fail "Kimi Code did not install a usable launcher." }
+    $KimiCurrentVersion = Get-KimiVersion $KimiExe
+    if (-not $KimiCurrentVersion) { Fail 'Installed Kimi Code version could not be detected.' }
+    if ($KimiLatestVersion -and -not (Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion)) { Fail "Installed Kimi Code is $KimiCurrentVersion; latest detected release is $KimiLatestVersion." }
+    Write-Host "✓ Kimi Code $KimiCurrentVersion ready"
+}
+
+if ($InstallAntigravity -and $AgyNeedsUpdate) {
+    Step 'Installing/updating official Antigravity CLI'
+    $agyInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-antigravity-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
+    $agyInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-antigravity-install-" + [guid]::NewGuid().ToString('N') + '.log')
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $AntigravityInstallUrl -OutFile $agyInstallerPath
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agyInstallerPath *> $agyInstallerLog
+        $agyExitCode = $LASTEXITCODE
+        if (Test-Path -LiteralPath $agyInstallerLog) { Get-Content -LiteralPath $agyInstallerLog | Write-Host }
+        if ($agyExitCode -ne 0) { Fail "Antigravity installer exited with code $agyExitCode." }
+    } finally {
+        Remove-Item -LiteralPath $agyInstallerPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $agyInstallerLog -Force -ErrorAction SilentlyContinue
+    }
+    $env:Path = "$BinRoot;$(Join-Path $HOME '.local\bin');$env:Path"
+    $AgyExe = Find-Antigravity
+    if (-not $AgyExe) { Fail 'Antigravity did not install a usable launcher.' }
+    $AgyCurrentVersion = Get-VersionFromText ((& $AgyExe --version 2>$null) -join "`n")
+    if (-not $AgyCurrentVersion) { Fail 'Installed Antigravity version could not be detected.' }
+    if ($AgyLatestVersion -and -not (Test-VersionAtLeast $AgyCurrentVersion $AgyLatestVersion)) { Fail "Installed Antigravity is $AgyCurrentVersion; latest detected release is $AgyLatestVersion." }
+    Write-Host "✓ Antigravity CLI $AgyCurrentVersion ready"
+}
+
+
+if ($InstallCodex -and $CodexNeedsUpdate) {
+    Step 'Installing/updating official Codex CLI'
+    $CodexTargetVersion = if ($CodexLatestVersion) { $CodexLatestVersion } else { Get-CodexLatestVersion }
+    if (-not $CodexTargetVersion) { Fail 'Could not resolve the latest official Codex release version.' }
+    Install-CodexOfficial $CodexTargetVersion
+    $env:Path = "$BinRoot;$(Join-Path $HOME '.local\bin');$env:Path"
+    $CodexInstalledPath = Join-Path $BinRoot 'codex.exe'
+    $CodexExe = if (Test-Path -LiteralPath $CodexInstalledPath -PathType Leaf) { $CodexInstalledPath } else { Find-Codex }
+    if (-not $CodexExe) { Fail 'Codex did not install a usable launcher.' }
+    $CodexCurrentVersion = Get-VersionFromText ((& $CodexExe --version 2>$null) -join "`n")
+    if (-not $CodexCurrentVersion) {
+        $CodexCurrentVersion = $CodexTargetVersion
+        Write-Host "✓ Codex $CodexCurrentVersion ready (official archive verified)"
+    } else {
+        if ($CodexTargetVersion -and -not (Test-VersionAtLeast $CodexCurrentVersion $CodexTargetVersion)) { Fail "Installed Codex is $CodexCurrentVersion; verified package is $CodexTargetVersion." }
+        Write-Host "✓ Codex $CodexCurrentVersion ready"
+    }
+}
+
+
+if ($RtkExe) { Connect-RtkToKimi $RtkExe }
+
+function Ensure-CompatibilityLazyDevLauncher {
+    $canonical = Join-Path $BinRoot 'lazydev.cmd'
+    if (-not (Test-Path -LiteralPath $canonical -PathType Leaf)) { return }
+    $dirs = @($BinRoot, (Join-Path $HOME '.local\bin')) | Select-Object -Unique
+    foreach ($dir in $dirs) {
+        try {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $target = Join-Path $dir 'lazydev.cmd'
+            if ($target -ne $canonical) { Copy-Item -LiteralPath $canonical -Destination $target -Force }
+        } catch {}
+    }
+}
+
+function Refresh-ExistingLazyDevLaunchers {
+    $canonical = Join-Path $BinRoot 'lazydev.cmd'
+    if (-not (Test-Path -LiteralPath $canonical -PathType Leaf)) { return }
+    $commands = @(Get-Command lazydev -All -ErrorAction SilentlyContinue)
+    foreach ($cmd in $commands) {
+        $path = $cmd.Source
+        if (-not $path) { continue }
+        if ($path -eq $canonical) { continue }
+        try {
+            $text = Get-Content -Raw -LiteralPath $path -ErrorAction Stop
+            if ($text -match 'Lazy Developer managed launcher|lazydev\.mjs|@blizps/lazy-developer|free-kimi-code') {
+                Copy-Item -LiteralPath $canonical -Destination $path -Force
+                Write-Host "✓ Refreshed existing LazyDev launcher: $path"
+            }
+        } catch {}
+    }
+}
+
 Write-Host ''
 Write-Host 'Lazy Developer installer finished.'
 if ($KimiCurrentVersion) {
@@ -711,6 +738,7 @@ Write-Host "RTK: $($(if ($RtkCurrentVersion) { $RtkCurrentVersion } else { 'unkn
 Write-Host "Lazy Developer: $LazyDevVersion"
 Write-Host 'Existing Kimi sessions and configuration were left in place.'
 Write-Host ''
+Write-Host 'Setup is ready before AI UI installation.'
 Write-Host 'Next:'
-Write-Host '  lazydev setup'
 Write-Host '  lazydev chat'
+Write-Host '  lazydev resume'

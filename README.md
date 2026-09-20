@@ -152,7 +152,7 @@ Large outputs are handled without blindly filling the active context.
 
 ### macOS / Linux
 
-During installation, LazyDev asks separately whether to install/update **Kimi Code**, **Codex**, and **Antigravity**. The official CLIs are used; LazyDev keeps the setup, model, proxy/routing, context optimization, and skills layer shared.
+During installation, LazyDev installs or refreshes its own control plane **first**. When no provider/model is configured yet, the installer opens `lazydev setup` before installing any AI UI. RTK is prepared next, then the selected official **Kimi Code**, **Antigravity**, and **Codex** CLIs are installed/updated. Existing configurations are reused, so setup is not reopened on every update. LazyDev keeps the provider/model, proxy/routing, context optimization, and shared skills layer common across the UIs.
 Codex downloads use the official release archive directly with resumable retries and checksum verification, so a transient CDN reset does not force a full restart. Partial downloads are cached outside the workspace and can be resumed by rerunning the installer.
 
 ```sh
@@ -184,7 +184,7 @@ npx skills add BlizPS/free-kimi-code --all
 
 ## 🚀 Quick Start
 
-After installation, follow these steps.
+The installer prepares LazyDev first and uses `lazydev setup` before AI UIs on a fresh configuration. After installation, follow these steps.
 
 **1. Set up** and inspect the available providers and models:
 
