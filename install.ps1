@@ -12,6 +12,8 @@ $KimiInstallUrl = 'https://code.kimi.com/kimi-code/install.ps1'
 $CodexInstallUrl = 'https://chatgpt.com/codex/install.ps1'
 $AntigravityInstallUrl = 'https://antigravity.google/cli/install.ps1'
 $KimiReleasesApiUrl = 'https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest'
+$CodexReleasesApiUrl = 'https://api.github.com/repos/openai/codex/releases/latest'
+$AntigravityReleasesApiUrl = 'https://api.github.com/repos/google-antigravity/antigravity-cli/releases/latest'
 $ArchiveUrl = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
 $GitHubApiUrl = "https://api.github.com/repos/$Repo/commits/$Branch"
 $RtkApiUrl = 'https://api.github.com/repos/rtk-ai/rtk/releases/latest'
@@ -140,6 +142,18 @@ function Get-KimiLatestVersion {
     } catch {}
     return ''
 }
+function Get-GitHubReleaseVersion([string]$ApiUrl) {
+    try {
+        $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.2' }
+        $data = Invoke-RestMethod -Headers $headers -Uri $ApiUrl
+        $tag = [string]$data.tag_name
+        $m = [regex]::Match($tag, '(\d+\.\d+\.\d+)$')
+        if ($m.Success) { return $m.Groups[1].Value }
+    } catch {}
+    return ''
+}
+function Get-CodexLatestVersion { return Get-GitHubReleaseVersion $CodexReleasesApiUrl }
+function Get-AntigravityLatestVersion { return Get-GitHubReleaseVersion $AntigravityReleasesApiUrl }
 function Get-InstalledLazyVersion {
     $file = Join-Path $InstallRoot 'package.json'
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return '' }
@@ -212,8 +226,9 @@ $KimiExe = Find-Kimi
 $KimiCurrentVersion = Get-KimiVersion $KimiExe
 $KimiLatestVersion = Get-KimiLatestVersion
 $KimiNeedsUpdate = $true
-if ($KimiCurrentVersion) {
-    if ($KimiLatestVersion) {
+$KimiUpdateAvailable = $false
+if ($KimiExe) {
+    if ($KimiCurrentVersion -and $KimiLatestVersion) {
         if (Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion) {
             $KimiNeedsUpdate = $false
             if ($KimiCurrentVersion -eq $KimiLatestVersion) {
@@ -222,19 +237,132 @@ if ($KimiCurrentVersion) {
                 Write-Host "Kimi Code $KimiCurrentVersion is newer than the latest published $KimiLatestVersion — skipped."
             }
         } else {
-            Write-Host "Kimi Code $KimiCurrentVersion → $KimiLatestVersion — update required."
+            $KimiUpdateAvailable = $true
+            Write-Host "Kimi Code $KimiCurrentVersion → $KimiLatestVersion — update available."
         }
-    } else {
+    } elseif ($KimiCurrentVersion) {
         $KimiNeedsUpdate = $false
         Write-Host "Kimi Code $KimiCurrentVersion is installed; latest release could not be checked — skipped."
+    } else {
+        $KimiUpdateAvailable = $true
+        Write-Host 'Kimi Code is installed but its version could not be detected — update check is inconclusive.'
     }
 } else {
-    Write-Host 'Kimi Code not found — installing the latest available release.'
+    $KimiUpdateAvailable = $true
+    Write-Host 'Kimi Code not found — installation available.'
 }
 
-$InstallKimi = Ask-InstallUi 'Install/update Kimi Code?'
-$InstallCodex = Ask-InstallUi 'Install/update Codex?'
-$InstallAntigravity = Ask-InstallUi 'Install/update Antigravity?'
+$CodexExe = Find-Codex
+$CodexCurrentVersion = if ($CodexExe) { Get-VersionFromText ((& $CodexExe --version 2>$null) -join "`n") } else { '' }
+$CodexLatestVersion = Get-CodexLatestVersion
+$CodexNeedsUpdate = $true
+$CodexUpdateAvailable = $false
+if ($CodexExe) {
+    if ($CodexCurrentVersion -and $CodexLatestVersion) {
+        if (Test-VersionAtLeast $CodexCurrentVersion $CodexLatestVersion) {
+            $CodexNeedsUpdate = $false
+            if ($CodexCurrentVersion -eq $CodexLatestVersion) {
+                Write-Host "Codex $CodexCurrentVersion is already current — skipped."
+            } else {
+                Write-Host "Codex $CodexCurrentVersion is newer than the latest published $CodexLatestVersion — skipped."
+            }
+        } else {
+            $CodexUpdateAvailable = $true
+            Write-Host "Codex $CodexCurrentVersion → $CodexLatestVersion — update available."
+        }
+    } elseif ($CodexCurrentVersion) {
+        $CodexNeedsUpdate = $false
+        Write-Host "Codex $CodexCurrentVersion is installed; latest release could not be checked — skipped."
+    } else {
+        $CodexUpdateAvailable = $true
+        Write-Host 'Codex is installed but its version could not be detected — update check is inconclusive.'
+    }
+} else {
+    $CodexUpdateAvailable = $true
+    Write-Host 'Codex not found — installation available.'
+}
+
+$AgyExe = Find-Antigravity
+$AgyCurrentVersion = if ($AgyExe) { Get-VersionFromText ((& $AgyExe --version 2>$null) -join "`n") } else { '' }
+$AgyLatestVersion = Get-AntigravityLatestVersion
+$AgyNeedsUpdate = $true
+$AgyUpdateAvailable = $false
+if ($AgyExe) {
+    if ($AgyCurrentVersion -and $AgyLatestVersion) {
+        if (Test-VersionAtLeast $AgyCurrentVersion $AgyLatestVersion) {
+            $AgyNeedsUpdate = $false
+            if ($AgyCurrentVersion -eq $AgyLatestVersion) {
+                Write-Host "Antigravity CLI $AgyCurrentVersion is already current — skipped."
+            } else {
+                Write-Host "Antigravity CLI $AgyCurrentVersion is newer than the latest published $AgyLatestVersion — skipped."
+            }
+        } else {
+            $AgyUpdateAvailable = $true
+            Write-Host "Antigravity CLI $AgyCurrentVersion → $AgyLatestVersion — update available."
+        }
+    } elseif ($AgyCurrentVersion) {
+        $AgyNeedsUpdate = $false
+        Write-Host "Antigravity CLI $AgyCurrentVersion is installed; latest release could not be checked — skipped."
+    } else {
+        $AgyUpdateAvailable = $true
+        Write-Host 'Antigravity CLI is installed but its version could not be detected — update check is inconclusive.'
+    }
+} else {
+    $AgyUpdateAvailable = $true
+    Write-Host 'Antigravity CLI not found — installation available.'
+}
+
+$RtkExe = Find-Rtk
+$RtkCurrentVersion = Get-RtkVersion $RtkExe
+$RtkLatestVersion = Get-RtkLatestVersion
+$RtkNeedsUpdate = $true
+$RtkUpdateAvailable = $false
+if ($RtkExe -and $RtkCurrentVersion -and $RtkLatestVersion) {
+    if (Test-VersionAtLeast $RtkCurrentVersion $RtkLatestVersion) {
+        $RtkNeedsUpdate = $false
+        if ($RtkCurrentVersion -eq $RtkLatestVersion) {
+            Write-Host "RTK $RtkCurrentVersion is already current — skipped."
+        } else {
+            Write-Host "RTK $RtkCurrentVersion is newer than the latest published $RtkLatestVersion — skipped."
+        }
+    } else {
+        $RtkUpdateAvailable = $true
+        Write-Host "RTK $RtkCurrentVersion → $RtkLatestVersion — update available."
+    }
+} elseif ($RtkExe -and $RtkCurrentVersion) {
+    $RtkNeedsUpdate = $false
+    Write-Host "RTK $RtkCurrentVersion is installed; latest release could not be checked — skipped."
+} elseif ($RtkExe) {
+    $RtkUpdateAvailable = $true
+    Write-Host 'RTK is installed but its version could not be detected — update check is inconclusive.'
+} else {
+    $RtkUpdateAvailable = $true
+    Write-Host 'RTK not found — installation available.'
+}
+
+$InstallKimi = $false
+$InstallCodex = $false
+$InstallAntigravity = $false
+$InstallRtk = $false
+if ($KimiUpdateAvailable) {
+    $InstallKimi = Ask-InstallUi 'Install/update Kimi Code?'
+    if (-not $InstallKimi) { $KimiNeedsUpdate = $false; Write-Host 'Kimi Code update/install declined — skipped.' }
+}
+if ($CodexUpdateAvailable) {
+    $InstallCodex = Ask-InstallUi 'Install/update Codex?'
+    if (-not $InstallCodex) { $CodexNeedsUpdate = $false; Write-Host 'Codex update/install declined — skipped.' }
+}
+if ($AgyUpdateAvailable) {
+    $InstallAntigravity = Ask-InstallUi 'Install/update Antigravity?'
+    if (-not $InstallAntigravity) { $AgyNeedsUpdate = $false; Write-Host 'Antigravity update/install declined — skipped.' }
+}
+if ($RtkUpdateAvailable) {
+    $InstallRtk = Ask-InstallUi 'Install/update RTK?'
+    if (-not $InstallRtk) { $RtkNeedsUpdate = $false; Write-Host 'RTK update/install declined — skipped.' }
+}
+
+# Clear the question screen before the actual install/update work.
+Clear-Host
 
 $RemoteRevision = Get-GitHubRevision
 if (-not $RemoteRevision) { Fail 'Could not read the current Lazy Developer revision from GitHub.' }
@@ -264,44 +392,54 @@ if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Con
     Write-Host 'Legacy private Node.js runtime detected — it will be removed during the Lazy Developer update.'
 }
 
-if ($InstallCodex) {
+if ($InstallCodex -and $CodexNeedsUpdate) {
     Step 'Installing/updating official Codex CLI'
-    $env:CODEX_NON_INTERACTIVE = '1'
+    $codexInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-codex-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
+    $codexInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-codex-install-" + [guid]::NewGuid().ToString('N') + '.log')
     try {
-        Invoke-RestMethod -Uri $CodexInstallUrl | Invoke-Expression
-        if ($LASTEXITCODE -ne 0) { Fail "Codex installer exited with code $LASTEXITCODE." }
-    } finally { Remove-Item Env:CODEX_NON_INTERACTIVE -ErrorAction SilentlyContinue }
+        Invoke-WebRequest -UseBasicParsing -Uri $CodexInstallUrl -OutFile $codexInstallerPath
+        $env:CODEX_NON_INTERACTIVE = '1'
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $codexInstallerPath *> $codexInstallerLog
+        $codexExitCode = $LASTEXITCODE
+        if (Test-Path -LiteralPath $codexInstallerLog) { Get-Content -LiteralPath $codexInstallerLog | Write-Host }
+        if ($codexExitCode -ne 0) { Fail "Codex installer exited with code $codexExitCode." }
+    } finally {
+        Remove-Item Env:CODEX_NON_INTERACTIVE -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $codexInstallerPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $codexInstallerLog -Force -ErrorAction SilentlyContinue
+    }
+    $env:Path = "$BinRoot;$(Join-Path $HOME '.localin');$env:Path"
     $CodexExe = Find-Codex
     if (-not $CodexExe) { Fail 'Codex did not install a usable launcher.' }
-    Write-Host "✓ Codex ready: $CodexExe"
+    $CodexCurrentVersion = Get-VersionFromText ((& $CodexExe --version 2>$null) -join "`n")
+    if (-not $CodexCurrentVersion) { Fail 'Installed Codex version could not be detected.' }
+    if ($CodexLatestVersion -and -not (Test-VersionAtLeast $CodexCurrentVersion $CodexLatestVersion)) { Fail "Installed Codex is $CodexCurrentVersion; latest detected release is $CodexLatestVersion." }
+    Write-Host "✓ Codex $CodexCurrentVersion ready"
 }
-if ($InstallAntigravity) {
+if ($InstallAntigravity -and $AgyNeedsUpdate) {
     Step 'Installing/updating official Antigravity CLI'
-    Invoke-RestMethod -Uri $AntigravityInstallUrl | Invoke-Expression
+    $agyInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-antigravity-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
+    $agyInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-antigravity-install-" + [guid]::NewGuid().ToString('N') + '.log')
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $AntigravityInstallUrl -OutFile $agyInstallerPath
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agyInstallerPath --skip-aliases *> $agyInstallerLog
+        $agyExitCode = $LASTEXITCODE
+        if (Test-Path -LiteralPath $agyInstallerLog) { Get-Content -LiteralPath $agyInstallerLog | Write-Host }
+        if ($agyExitCode -ne 0) { Fail "Antigravity installer exited with code $agyExitCode." }
+    } finally {
+        Remove-Item -LiteralPath $agyInstallerPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $agyInstallerLog -Force -ErrorAction SilentlyContinue
+    }
+    $env:Path = "$BinRoot;$(Join-Path $HOME '.localin');$env:Path"
     $AgyExe = Find-Antigravity
     if (-not $AgyExe) { Fail 'Antigravity did not install a usable launcher.' }
-    Write-Host "✓ Antigravity ready: $AgyExe"
+    $AgyCurrentVersion = Get-VersionFromText ((& $AgyExe --version 2>$null) -join "`n")
+    if (-not $AgyCurrentVersion) { Fail 'Installed Antigravity version could not be detected.' }
+    if ($AgyLatestVersion -and -not (Test-VersionAtLeast $AgyCurrentVersion $AgyLatestVersion)) { Fail "Installed Antigravity is $AgyCurrentVersion; latest detected release is $AgyLatestVersion." }
+    Write-Host "✓ Antigravity CLI $AgyCurrentVersion ready"
 }
 
-$RtkExe = Find-Rtk
-$RtkCurrentVersion = Get-RtkVersion $RtkExe
-$RtkLatestVersion = Get-RtkLatestVersion
-$RtkNeedsUpdate = $true
-if ($RtkExe -and $RtkCurrentVersion -and $RtkLatestVersion -and (Test-VersionAtLeast $RtkCurrentVersion $RtkLatestVersion)) {
-    $RtkNeedsUpdate = $false
-    Write-Host "RTK $RtkCurrentVersion is already current — skipped."
-} elseif ($RtkExe -and -not $RtkLatestVersion) {
-    $RtkNeedsUpdate = $false
-    Write-Host "RTK $RtkCurrentVersion is installed; latest release could not be checked — skipped."
-} elseif ($RtkExe) {
-    $RtkCurrentDisplay = if ($RtkCurrentVersion) { $RtkCurrentVersion } else { 'unknown' }
-    $RtkLatestDisplay = if ($RtkLatestVersion) { $RtkLatestVersion } else { 'latest' }
-    Write-Host "RTK $RtkCurrentDisplay → $RtkLatestDisplay — update required."
-} else {
-    Write-Host 'RTK not found — installing.'
-}
-
-if ($KimiNeedsUpdate) {
+if ($InstallKimi -and $KimiNeedsUpdate) {
     Step "Installing/updating Kimi Code to the latest available release"
     $kimiInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
     $kimiInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.log')
@@ -330,7 +468,7 @@ if ($KimiNeedsUpdate) {
     Write-Host "✓ Kimi Code $KimiCurrentVersion ready"
 }
 
-if ($RtkNeedsUpdate) {
+if ($InstallRtk -and $RtkNeedsUpdate) {
     Step 'Installing/updating RTK'
     Install-Rtk
     $env:Path = "$BinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
