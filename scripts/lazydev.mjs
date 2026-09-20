@@ -24,6 +24,7 @@ import { buildLanguageFrame, getLanguageReport } from '../systems/languages/inde
 import { buildGeminiRetryRequest, chunkFinishReason, chunkHasVisibleOutput, geminiOpenAIEndpoint, parseSseEvent, prepareGeminiRequest, responseHasUsableOutput, streamNeedsGeminiRetry } from '../runtime/gemini-resilience.mjs';
 import { compressAgenticMessages, FOVEANCE_DEFAULTS } from '../systems/token/foveance.mjs';
 import { VirtualContextStore, extractContextPaths } from '../systems/context/virtual-store.mjs';
+import { pruneLazyDevSystemMessages } from '../systems/context/prompt-prune.mjs';
 
 const version = '1.0.0';
 const TOKEN_SAVINGS_FLOOR = 0.75;
@@ -1125,7 +1126,11 @@ async function createProxy(provider, pc) {
             requestBody = stripToolRequestFields(requestBody);
             requestBody.stream = false;
           }
+          const prePruneMessages = requestBody.messages;
+          const pruned = pruneLazyDevSystemMessages(prePruneMessages, buildVirtualContextQuery(prePruneMessages));
+          requestBody.messages = pruned.messages;
           const fit = fitMessagesToContext(requestBody.messages, Number(effectiveModelInfo(provider, pc).contextLimit) || 16384, Number(effectiveModelInfo(provider, pc).outputLimit) || 8192, virtualContextStore);
+          writeContextMeter({ provider, pc, context: Number(effectiveModelInfo(provider, pc).contextLimit) || 16384, beforeMessages: prePruneMessages, afterMessages: fit.messages, fit });
           requestBody.messages = fit.messages;
           const outboundBody = normalizeOpenAICompatibleRequest(requestBody, provider, pc, removedFields);
           const result = await new Promise((resolve, reject) => {
@@ -1437,6 +1442,38 @@ function assertHttpUrl(value, label = 'URL') {
 function estimateMessageTokens(messages) {
   try { return Math.max(1, Math.ceil(JSON.stringify(messages || []).length / 4)); } catch { return 0; }
 }
+function writeContextMeter({ provider, pc, context, beforeMessages, afterMessages, fit }) {
+  try {
+    const home = process.env.KIMI_CODE_HOME || path.join(process.env.HOME || process.env.USERPROFILE || process.cwd(), '.kimi-code');
+    fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+    const before = estimateMessageTokens(beforeMessages);
+    const after = estimateMessageTokens(afterMessages);
+    const system = (Array.isArray(afterMessages) ? afterMessages : [])
+      .filter((m) => m && typeof m === 'object' && m.role === 'system')
+      .reduce((n, m) => n + estimateMessageTokens([m]), 0);
+    const active = Math.max(0, after - system);
+    const lastUser = [...(Array.isArray(afterMessages) ? afterMessages : [])].reverse().find((m) => m && m.role === 'user');
+    const turn = lastUser ? estimateMessageTokens([lastUser]) : 0;
+    const saved = Math.max(0, before - after);
+    const savings = before > 0 ? saved / before : 0;
+    fs.writeFileSync(path.join(home, 'lazydev-context-meter.json'), JSON.stringify({
+      version: 2,
+      at: Date.now(),
+      provider: provider?.id || null,
+      model: pc?.model || null,
+      nativeContext: Math.max(0, Number(context) || 0),
+      activeTokens: active,
+      turnTokens: turn,
+      systemTokens: system,
+      requestTokensBefore: before,
+      requestTokensAfter: after,
+      savedTokens: saved,
+      savingsRatio: savings,
+      virtualRetrievedTokens: Number(fit?.virtualUsed) || 0,
+      virtualHits: Number(fit?.virtualHits) || 0,
+    }, null, 2), { mode: 0o600 });
+  } catch {}
+}
 function shouldUseTemplateCodec(body, pc) {
   if (TOKEN_CODEC_TEMPLATE_MODE === 'on') return true;
   if (TOKEN_CODEC_TEMPLATE_MODE !== 'auto') return false;
@@ -1640,6 +1677,7 @@ function writeLazyDevMcpConfig() {
   const servers = data.mcpServers && typeof data.mcpServers === 'object' ? { ...data.mcpServers } : {};
   const pythonCommand = process.env.LAZYDEV_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
   servers['lazydev-search'] = {
+    deferred: true,
     command: pythonCommand,
     args: [path.join(root, 'runtime', 'browser-mcp.py')],
     env: { LAZYDEV_BROWSER_USER_AGENT: `LazyDev-Browser/${version}` },
@@ -1672,15 +1710,17 @@ function writeKimiAgentGuidance() {
   mergeManagedMarkdown(agents, '<!-- lazydev-runtime:start -->', '<!-- lazydev-runtime:end -->', block);
 
   const system = path.join(dir, 'SYSTEM.md');
-  const source = runtimePolicyPath('SYSTEM.md');
-  const bodyText = fs.readFileSync(source, 'utf8').trimEnd();
-  const aliasSystem = buildIntelligenceAliasSystem();
-  const uiSystem = buildUiSystemPrompt();
-  const nativeSystems = buildNativeSystemsPrompt();
-  const domainSystems = buildDomainSystemsPrompt();
-  const languageSystem = buildLanguageFrame({ cwd: process.cwd() });
-  fs.writeFileSync(system, `${bodyText}\n\n${nativeSystems}\n\n${domainSystems}\n\n${uiSystem}\n\n${languageSystem}\n\n${aliasSystem}\n`, { mode: 0o600 });
+  const compact = [
+    '# LazyDev Runtime',
+    'Keep the active task focused. Inspect before editing, preserve relevant existing behavior, and verify concrete results.',
+    'Use progressive disclosure: load only task-relevant Skills, domain guidance, files, and tool output. Do not replay unrelated or stale context.',
+    '3D/WebGL/Three.js and SEO tasks require targeted current research before the first write.',
+    'Preserve exact code, paths, URLs, identifiers, errors, negation, and acceptance criteria. Never invent files or verification results.',
+    `Artifact root: ${outputDirectory()}`
+  ].join('\n');
+  fs.writeFileSync(system, `${compact}\n`, { mode: 0o600 });
 }
+
 function basePromptPlaceholder() { return '${base_prompt}'; }
 function shellQuoteCommand(executable, args = []) {
   const quote = (value) => {
@@ -1719,7 +1759,7 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
   const intelligence = modelIntelligenceProfile(pc.model);
   const nativeTools = nativeToolCapability(provider, pc);
   const toolUse = proxy ? true : nativeTools !== false;
-  const modelCapabilities = toolUse ? (provider.id === 'gemini' ? ['tool_use','thinking'] : ['tool_use']) : [];
+  const modelCapabilities = toolUse ? (provider.id === 'gemini' ? ['tool_use','thinking','dynamically_loaded_tools'] : ['tool_use','dynamically_loaded_tools']) : [];
   const disabledToolsLines = toolUse ? [] : [
     '',
     '[tools]',
@@ -1799,6 +1839,9 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     `[read]`,
     `default_max_chars = 100000`,
     `max_chars = 500000`,
+    ``,
+    `[experimental]`,
+    `tool-select = true`,
     ``,
     `[mcp.client]`,
     `tool_call_timeout_ms = 60000`,

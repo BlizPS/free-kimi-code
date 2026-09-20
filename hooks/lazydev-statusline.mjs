@@ -41,11 +41,29 @@ try {
     ? JSON.parse(fs.readFileSync(snapshot, 'utf8'))
     : null;
 } catch {}
+let meter = null;
+try {
+  const home = process.env.KIMI_CODE_HOME || path.join(process.env.HOME || process.cwd(), '.kimi-code');
+  const meterPath = path.join(home, 'lazydev-context-meter.json');
+  meter = fs.existsSync(meterPath) ? JSON.parse(fs.readFileSync(meterPath, 'utf8')) : null;
+} catch {}
+const active = Math.max(0, Number(meter?.activeTokens) || 0);
+const turn = Math.max(0, Number(meter?.turnTokens) || 0);
+const savings = Math.max(0, Math.min(1, Number(meter?.savingsRatio) || 0));
+const fmtPct = (n) => {
+  const pct = size > 0 ? Math.max(0, Math.min(100, (n / size) * 100)) : 0;
+  return pct < 1 ? pct.toFixed(1) : pct.toFixed(pct >= 10 ? 0 : 1);
+};
 const virtualText = virtualStats?.capacityTokens
   ? `virtual: ${fmt(virtualStats.storedTokens || 0)}/${fmt(virtualStats.capacityTokens)} stored · ${virtualStats.lastHits || 0} hits`
   : (size > 0 ? `virtual: ${virtualPct.toFixed(virtualPct >= 10 ? 0 : 1)}% archive ${fmt(virtualSize)}` : '');
-const suffix = virtualText ? ` · ${virtualText}` : '';
+const activeText = size > 0
+  ? `active: ${fmtPct(active)}% (${fmt(active)}/${fmt(size)})`
+  : `active: ${fmt(active)}`;
+const turnText = turn > 0 ? `turn: ${fmt(turn)}` : 'turn: 0';
+const savingsText = savings > 0.005 ? `saved: ${(savings * 100).toFixed(0)}%` : '';
+const suffix = [activeText, turnText, savingsText, virtualText].filter(Boolean).join(' · ');
 const contextText = size > 0
-  ? `context: ${nativePct.toFixed(nativePct >= 10 ? 0 : 1)}% (${fmt(Math.min(used, size))}/${fmt(size)} native)${suffix}`
-  : `context: ${fmt(used)}${suffix}`;
-process.stdout.write(model ? `${contextText} · ${model}` : contextText);
+  ? `context: ${nativePct.toFixed(nativePct >= 10 ? 0 : 1)}% (${fmt(Math.min(used, size))}/${fmt(size)}) total`
+  : `context: ${fmt(used)} total`;
+process.stdout.write(model ? `${contextText} · ${suffix} · ${model}` : `${contextText} · ${suffix}`);

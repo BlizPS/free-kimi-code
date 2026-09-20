@@ -11,3 +11,5 @@ assert.match(s, /virtual:/);
 assert.match(s, /storedTokens|capacityTokens|archive/);
 assert.match(s, /Math\.max\(size, Math\.round\(size \* virtualMultiplier\)\)/);
 console.log('PASS: statusline exposes native context separately from a virtual archive/display window');
+
+assert.ok(!s.includes('borrow a path from the entire transcript'), 'path guard remains focused');
