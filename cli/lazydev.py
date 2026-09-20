@@ -57,6 +57,7 @@ PROVIDERS: list[dict[str, Any]] = [
     {"id": "codebuddy", "label": "CodeBuddy", "kind": "openai", "models": ["https://copilot.tencent.com/v3/config", "https://api.codebuddy.ai/v1/models"], "base": "https://api.codebuddy.ai/v1", "env": "CODEBUDDY_API_KEY"},
     {"id": "anthropic", "label": "Anthropic", "kind": "anthropic", "models": "https://api.anthropic.com/v1/models", "base": "https://api.anthropic.com", "env": "ANTHROPIC_API_KEY"},
     {"id": "huggingface", "label": "Hugging Face", "kind": "openai", "models": "https://router.huggingface.co/v1/models", "base": "https://router.huggingface.co/v1", "chat": "https://router.huggingface.co/v1/chat/completions", "env": "HF_TOKEN"},
+    {"id": "ninerouter", "label": "9Router", "kind": "openai", "models": "http://127.0.0.1:20128/v1/models", "base": "http://127.0.0.1:20128/v1", "chat": "http://127.0.0.1:20128/v1/chat/completions", "env": "NINEROUTER_API_KEY"},
 ]
 
 SKILLS = [
@@ -397,6 +398,14 @@ def fetch_models(provider: dict[str, Any], api_key: str = "", base_url: str = ""
     elif pid == "anthropic":
         data = request_json(provider["models"], headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "User-Agent": f"lazydev/{VERSION}"})
         raw = data.get("data", []) if isinstance(data, dict) else []
+    elif pid == "ninerouter":
+        base = normalize_url(base_url or provider["base"]).rstrip("/")
+        if not base.lower().endswith("/v1"):
+            base += "/v1"
+        data = request_json(f"{base}/models", headers={"Authorization": f"Bearer {api_key}", "User-Agent": f"lazydev/{VERSION}"})
+        # 9Router's registered /v1/models response is authoritative. Keep an
+        # empty catalog empty; do not inject fallback/hardcoded model IDs.
+        raw = data.get("data", []) if isinstance(data, dict) else []
     elif pid == "codebuddy":
         urls = provider["models"] if isinstance(provider.get("models"), list) else [provider.get("models")]
         last_error = None
@@ -481,6 +490,16 @@ def setup() -> int:
     if provider["id"] == "ollama":
         base = prompt("Ollama API URL [http://127.0.0.1:11434]: ", saved.get("baseUrl") or provider["base"])
         key = "ollama"
+    elif provider["id"] == "ninerouter":
+        base = prompt("9Router API URL [http://127.0.0.1:20128/v1]: ", saved.get("baseUrl") or provider["base"])
+        key = str(saved.get("apiKey", ""))
+        if key and prompt("9Router key saved. Keep it? [Y/n]: ", "y").lower() not in {"y", "yes"}:
+            key = ""
+        if not key:
+            key = prompt("9Router API key: ")
+        if not key:
+            print(ansi("33", "Skipped: no API key entered."))
+            return 0
     elif not provider_requires_api_key(provider):
         base = provider.get("base", "")
         key = ""
@@ -502,7 +521,7 @@ def setup() -> int:
     except Exception as exc:
         print(ansi("31", str(exc)))
         return 1
-    config["providers"][provider["id"]] = {"apiKey": key, "model": chosen["id"], "modelInfo": chosen, **({"baseUrl": normalize_url(base)} if provider["id"] == "ollama" else {})}
+    config["providers"][provider["id"]] = {"apiKey": key, "model": chosen["id"], "modelInfo": chosen, **({"baseUrl": normalize_url(base)} if provider["id"] in {"ollama", "ninerouter"} else {})}
     config["activeProvider"] = provider["id"]
     write_config(config)
     print(ansi("32", f"✓ {provider['label']} · {chosen['id']} saved"))

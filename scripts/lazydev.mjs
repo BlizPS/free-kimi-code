@@ -89,6 +89,7 @@ const providers = [
   { id: 'codebuddy', label: 'CodeBuddy', kind: 'codebuddy', modelsUrls: ['https://copilot.tencent.com/v3/config', 'https://api.codebuddy.ai/v1/models'], chatUrls: ['https://copilot.tencent.com/v2/chat/completions', 'https://api.codebuddy.ai/v1/chat/completions'], env: 'CODEBUDDY_API_KEY' },
   { id: 'anthropic', label: 'Anthropic', kind: 'anthropic', modelsUrl: 'https://api.anthropic.com/v1/models', chatUrl: 'https://api.anthropic.com/v1/messages', env: 'ANTHROPIC_API_KEY' },
   { id: 'huggingface', label: 'Hugging Face', kind: 'openai', modelsUrl: 'https://router.huggingface.co/v1/models', chatUrl: 'https://router.huggingface.co/v1/chat/completions', baseUrl: 'https://router.huggingface.co/v1', env: 'HF_TOKEN' },
+  { id: 'ninerouter', label: '9Router', kind: 'openai', modelsUrl: 'http://127.0.0.1:20128/v1/models', chatUrl: 'http://127.0.0.1:20128/v1/chat/completions', baseUrl: 'http://127.0.0.1:20128/v1', env: 'NINEROUTER_API_KEY' },
 ];
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EFFICIENCY_POLICY_FILE = path.join(root, 'runtime', 'lazy-efficiency.md');
@@ -309,7 +310,7 @@ async function fetchOpenRouterEndpointLimits(modelId, apiKey) {
 async function verifyLiveModel(provider, pc) {
   if (!pc?.model || (providerRequiresApiKey(provider) && !pc?.apiKey)) return { status: 'not-configured' };
   try {
-    const models = await fetchModels(provider, pc.apiKey);
+    const models = await fetchModels(provider, pc.apiKey, { baseUrl: pc.baseUrl });
     const found = models.find((m) => m.id === pc.model);
     if (!found) return { status: 'missing', models };
     if (provider.id === 'openrouter') {
@@ -821,6 +822,18 @@ function sortOpenRouterModels(models) {
     return String(a.name).localeCompare(String(b.name));
   });
 }
+function normalizeNineRouterBaseUrl(value) {
+  const fallback = 'http://127.0.0.1:20128/v1';
+  let raw = String(value || '').trim() || fallback;
+  if (!/^https?:\/\//i.test(raw)) raw = `http://${raw}`;
+  raw = raw.replace(/\/(?:models|chat\/completions)\/?$/i, '');
+  raw = raw.replace(/\/+$/, '');
+  if (!/\/v1$/i.test(raw)) raw += '/v1';
+  return raw;
+}
+function nineRouterModelsUrl(value) { return `${normalizeNineRouterBaseUrl(value)}/models`; }
+function nineRouterChatUrl(value) { return `${normalizeNineRouterBaseUrl(value)}/chat/completions`; }
+
 async function fetchModels(provider, apiKey, options = {}) {
   const timeout = Number(options.timeout) || 12000;
   if (provider.kind === 'ollama') {
@@ -843,6 +856,18 @@ async function fetchModels(provider, apiKey, options = {}) {
   if (provider.kind === 'anthropic') {
     const data = await requestJson(provider.modelsUrl, { timeout, headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'user-agent': `lazydev/${version}` } });
     return (Array.isArray(data.data) ? data.data : []).map((x) => normalizeModel(x, provider)).filter((x) => x.id);
+  }
+  if (provider.id === 'ninerouter') {
+    const baseUrl = normalizeNineRouterBaseUrl(options.baseUrl || provider.baseUrl);
+    const data = await requestJson(nineRouterModelsUrl(baseUrl), {
+      timeout,
+      headers: { Authorization: `Bearer ${apiKey}`, 'user-agent': `lazydev/${version}` },
+    });
+    // 9Router's registered /v1/models response is authoritative. An empty
+    // catalog stays empty; never synthesize or hardcode a model here.
+    const raw = Array.isArray(data?.data) ? data.data : [];
+    return raw.map((x) => normalizeModel(x, provider)).filter((x) => x.id)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
   }
   if (provider.kind === 'codebuddy') {
     const urls = Array.isArray(provider.modelsUrls) ? provider.modelsUrls : [];
@@ -1066,7 +1091,7 @@ async function createProxy(provider, pc) {
       // reject the request outright with 400 Validation errors. Strip anything
       // not part of the standard chat completions schema before forwarding.
       for (const field of UNSUPPORTED_PASSTHROUGH_FIELDS) delete body[field];
-      const chatUrl = provider.id === 'ollama' ? ollamaChatUrl(pc.baseUrl) : provider.id === 'gemini' ? geminiOpenAIEndpoint(pc.model) : provider.id === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : (provider.chatUrl || provider.chatUrls?.[0]);
+      const chatUrl = provider.id === 'ollama' ? ollamaChatUrl(pc.baseUrl) : provider.id === 'ninerouter' ? nineRouterChatUrl(pc.baseUrl) : provider.id === 'gemini' ? geminiOpenAIEndpoint(pc.model) : provider.id === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : (provider.chatUrl || provider.chatUrls?.[0]);
       if (!chatUrl) {
         res.writeHead(500, {'content-type':'application/json'});
         res.end(JSON.stringify({error:{message:'Provider chat endpoint is not configured.'}}));
@@ -1951,6 +1976,16 @@ async function setup() {
     baseUrl = (await prompt(`Ollama API URL [${baseUrl || 'http://127.0.0.1:11434'}]: `)).trim() || baseUrl || 'http://127.0.0.1:11434';
     baseUrl = normalizeOllamaBaseUrl(baseUrl);
     process.stdout.write(`${provider.label} · checking local API + live models ... `);
+  } else if (provider.id === 'ninerouter') {
+    baseUrl = (await prompt(`9Router API URL [${baseUrl || 'http://127.0.0.1:20128/v1'}]: `)).trim() || baseUrl || 'http://127.0.0.1:20128/v1';
+    baseUrl = normalizeNineRouterBaseUrl(baseUrl);
+    if (apiKey) {
+      const keep = (await prompt(`${provider.label} key saved. Keep it? [Y/n]: `)).trim().toLowerCase();
+      if (keep && !['y', 'yes'].includes(keep)) apiKey = '';
+    }
+    if (!apiKey) apiKey = (await prompt(`${provider.label} API key: `)).trim();
+    if (!apiKey) { line(yellow('Skipped: no API key entered.')); return; }
+    process.stdout.write(`${provider.label} · loading registered live models (15s timeout) ... `);
   } else if (!providerRequiresApiKey(provider)) {
     apiKey = '';
     process.stdout.write(`${provider.label} · loading live models (no API key) ... `);
@@ -1974,8 +2009,8 @@ async function setup() {
     const current = String(saved.model || '');
     let index = Math.max(0, models.findIndex((m) => m.id === current));
     const chosen = await selectModel(models, index);
-    cfg.providers[provider.id] = provider.id === 'ollama'
-      ? { baseUrl, apiKey: 'ollama', model: chosen.id, modelInfo: chosen }
+    cfg.providers[provider.id] = (provider.id === 'ollama' || provider.id === 'ninerouter')
+      ? { baseUrl, apiKey: provider.id === 'ollama' ? 'ollama' : apiKey, model: chosen.id, modelInfo: chosen }
       : { apiKey, model: chosen.id, modelInfo: chosen };
     cfg.activeProvider = provider.id;
     writeConfig(cfg);

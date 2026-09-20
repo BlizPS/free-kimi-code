@@ -16,6 +16,7 @@ const providers = {
   codebuddy: { catalog: 'https://api.codebuddy.ai/v1/models', chat: 'https://api.codebuddy.ai/v1/chat/completions' },
   anthropic: { catalog: 'https://api.anthropic.com/v1/models', chat: 'https://api.anthropic.com/v1/messages' },
   huggingface: { catalog: 'https://router.huggingface.co/v1/models', chat: 'https://router.huggingface.co/v1/chat/completions' },
+  ninerouter: { catalog: 'http://127.0.0.1:20128/v1/models', chat: 'http://127.0.0.1:20128/v1/chat/completions' },
 };
 for (const [id, spec] of Object.entries(providers)) {
   assert.ok(src.includes(`id: '${id}'`), `${id} provider missing`);
@@ -29,4 +30,4 @@ assert.ok(src.includes("'authorization': `Bearer ${pc.apiKey}`"), 'bearer auth m
 assert.ok(src.includes("'x-api-key': pc.apiKey"), 'Anthropic auth missing');
 assert.ok(src.includes("function providerRequiresApiKey(provider)"), 'generic provider auth capability helper missing');
 assert.ok(src.includes("integrate.api.nvidia.com/v1/chat/completions"), 'NVIDIA chat route missing');
-console.log('PASS: provider matrix routes/protocols/auth are statically wired for 10 providers with Hugging Face at #10');
+console.log('PASS: provider matrix routes/protocols/auth are statically wired for 11 providers with 9Router at #11');
