@@ -1,5 +1,6 @@
-<div align="center">
-  <img src="assets/free-kimi-code-logo.svg" alt="Free Kimi Code" width="720">
+<p align="center">
+  <img src="assets/free-kimi-code-logo.svg" alt="Free Kimi Code" width="100%">
+</p>
 
   <br>
   <br>
@@ -53,9 +54,6 @@ Lazy Developer keeps the native **Kimi Code, Codex, and Antigravity** CLI UIs an
 <p align="center">
   <sub>Example Kimi Code workflow from the official <a href="https://github.com/MoonshotAI/kimi-code">MoonshotAI/kimi-code</a> repository</sub>
 </p>
-
-Learn more about Kimi Code:  
-https://github.com/MoonshotAI/kimi-code
 
 ## ✨ What You Get
 
@@ -117,7 +115,7 @@ Lazy Developer separates active request context from archived history and tool o
 
 ### 📁 Safe Artifacts
 
-Standalone artifacts use the canonical `lazydevfile` directory and do not overwrite existing files.
+Standalone artifacts use the canonical `lazydevfile` directory and do not overwrite existing files. Official CLI application data stays in each CLI's normal user-home location; `lazydevfile` is the visible shared workspace/artifact root. Termux/PRoot is the only storage exception for visible artifacts.
 
 Collisions receive the lowest available numeric suffix:
 

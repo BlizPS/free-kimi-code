@@ -1,6 +1,6 @@
 # Architecture
 
-Lazy Developer is a developer layer built around the Kimi Code workflow. The CLI coordinates configuration, model selection, provider routing, capability-aware tool handling, skills, context protection, sessions, browser/search support, and standalone artifacts while keeping Kimi Code as the agent shell.
+Lazy Developer is a developer layer built around the Kimi Code workflow. The CLI coordinates configuration, model selection, provider routing, capability-aware tool handling, skills, context protection, sessions, browser/search support, and standalone artifacts while using the official Kimi Code, Codex, and Antigravity CLIs as the interactive shells.
 
 ## How Lazy Developer Works
 
@@ -40,7 +40,7 @@ Lazy Developer is a developer layer built around the Kimi Code workflow. The CLI
                Artifacts     Sessions     Browser
 ```
 
-The key boundary is simple: **Lazy Developer owns the developer layer and routing; Kimi Code remains the interactive agent shell.**
+The key boundary is simple: **Lazy Developer owns the developer layer and routing; the official Kimi Code, Codex, or Antigravity CLI remains the interactive agent shell.**
 
 ## Runtime Flow
 
@@ -360,3 +360,12 @@ cd free-kimi-code
 ```
 
 The repository source is the ultimate reference for implementation details. This document describes the architecture without treating provider counts, model rosters, or external service inventories as permanent.
+
+## 6. Cross-UI Data and Path Policy
+
+LazyDev keeps two concepts separate:
+
+- **Workspace/artifacts:** the predictable user-home `lazydevfile` directory on Windows, Linux, and macOS; `/storage/emulated/0/lazydevfile` only for native Termux and Debian/Ubuntu running through PRoot.
+- **Native CLI data:** each official CLI keeps its application data in its normal user-home location. Kimi uses its Kimi home, Codex uses `CODEX_HOME` (defaulting to `~/.codex`), and Antigravity uses `~/.gemini/antigravity-cli`. On Termux/PRoot, only Codex `CODEX_HOME` gets a native-Linux compatibility location when required by filesystem limitations.
+
+Generic cross-tool Skills live at `~/.agents/skills`, which Kimi and Codex can share directly and Antigravity can consume through its native global Skills path.

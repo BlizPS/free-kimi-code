@@ -14,4 +14,4 @@ assert str(win_path).replace('\\', '/') == 'C:/Users/alice/lazydevfile'
 assert platform_paths('linux', {'TERMUX_VERSION': '1'}, Path('/root'), lambda _: False)['artifactDirectory'] == Path('/storage/emulated/0/lazydevfile')
 assert platform_paths('linux', {}, Path('/root'), lambda x: x in {'/storage/emulated/0', '/data/data/com.termux/files/usr'})['artifactDirectory'] == Path('/storage/emulated/0/lazydevfile')
 assert platform_paths('linux', {}, Path('/home/alice'), lambda x: x == '/storage/emulated/0')['artifactDirectory'] == Path('/home/alice/lazydevfile')
-print('PASS: Python canonical paths for Windows, macOS, Linux, Termux, and proot-distro')
+print('PASS: Python artifact paths keep desktop OS-home defaults and Termux/PRoot shared-storage exception')

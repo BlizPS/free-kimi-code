@@ -52,3 +52,9 @@ Lazy Developer supports runtime environments including:
 The one-line desktop installer targets Windows, Linux, and macOS.
 
 Kimi Code's current native installation flow does not provide a dedicated Android/Termux installation path, so Termux users should use the supported runtime and setup flow provided by Lazy Developer.
+
+## Native CLI Data
+
+LazyDev does not relocate official CLI application data into `lazydevfile` on desktop operating systems. Windows, Linux, and macOS keep Kimi, Codex, and Antigravity data in their normal user-home locations. The `lazydevfile` directory is for the shared visible workspace/artifacts.
+
+The only special storage exception is native Termux and Debian/Ubuntu through PRoot: visible artifacts use `/storage/emulated/0/lazydevfile`, while Codex keeps `CODEX_HOME` on the native Linux filesystem when needed for app-server locks, sockets, and related OS primitives.

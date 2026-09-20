@@ -39,4 +39,4 @@ const regularLinuxWithAndroidPathOnly = platformPaths({ platform: 'linux', home:
 assert.equal(regularLinuxWithAndroidPathOnly.termux, false);
 assert.equal(regularLinuxWithAndroidPathOnly.artifactDirectory, '/home/alice/lazydevfile');
 
-console.log('PASS: Linux/macOS/Windows/Termux/proot path matrix');
+console.log('PASS: Linux/macOS/Windows/Termux/proot artifact path matrix');

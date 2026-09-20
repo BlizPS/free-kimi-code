@@ -2565,8 +2565,8 @@ def choose_chat_ui(items: list[tuple[str, str, str]]) -> str | None:
 
 
 def _ensure_shared_skill_root() -> Path:
-    """Keep one canonical LazyDev skill tree under the visible lazydevfile root."""
-    shared = ARTIFACT_DIR / "skills"
+    """Keep generic user Skills in the real OS home so all three CLIs can share them."""
+    shared = HOME / ".agents" / "skills"
     shared.parent.mkdir(parents=True, exist_ok=True)
     shared.mkdir(parents=True, exist_ok=True)
     for name, _description in SKILLS:
@@ -2623,43 +2623,41 @@ def _ensure_codex_skills(shared: Path | None = None) -> None:
 
 
 def _ensure_antigravity_home(shared: Path | None = None) -> Path:
-    """Put Antigravity's managed app-data under lazydevfile and shim its native path."""
-    shared = shared or _ensure_shared_skill_root()
-    canonical = ARTIFACT_DIR / ".antigravity-cli"
-    canonical.mkdir(parents=True, exist_ok=True)
+    """Keep Antigravity app-data in its native user-home directory.
+
+    Older LazyDev releases placed this directory under lazydevfile. Migrate that
+    legacy tree once when the native directory does not already exist.
+    """
     native = HOME / ".gemini" / "antigravity-cli"
+    legacy = ARTIFACT_DIR / ".antigravity-cli"
     native.parent.mkdir(parents=True, exist_ok=True)
+
     if native.is_symlink():
         try:
-            if native.resolve() == canonical.resolve():
-                return canonical
-        except OSError:
-            pass
-        try:
-            native.unlink()
-        except OSError:
-            return native
-    elif native.exists():
-        # Migrate the existing native tree into the canonical LazyDev root so
-        # previous Antigravity settings/plugins/logs are preserved. Only after
-        # a successful copy do we replace the old path with a compatibility shim.
-        try:
-            shutil.copytree(native, canonical, dirs_exist_ok=True, symlinks=True)
-            backup = ARTIFACT_DIR / ".backups" / "antigravity-cli-native"
-            if not backup.exists():
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                native.rename(backup)
+            if native.resolve() == legacy.resolve():
+                native.unlink()
             else:
-                shutil.rmtree(native)
+                return native
         except OSError:
-            # Fall back to the existing native root if the filesystem forbids
-            # migration/symlinks; the shared skills/artifacts still remain canonical.
             return native
-    try:
-        native.symlink_to(canonical, target_is_directory=True)
-        return canonical
-    except OSError:
-        return native
+
+    if not native.exists() and legacy.exists():
+        migrated = False
+        try:
+            native.rename(legacy)
+            migrated = True
+        except OSError:
+            try:
+                shutil.copytree(legacy, native, dirs_exist_ok=True, symlinks=True)
+                shutil.rmtree(legacy)
+                migrated = True
+            except OSError:
+                migrated = False
+        if migrated:
+            return native
+
+    native.mkdir(parents=True, exist_ok=True)
+    return native
 
 
 def _ensure_cross_ui_skills() -> None:
@@ -2695,11 +2693,26 @@ def _ensure_cross_ui_skills() -> None:
         except OSError:
             shutil.copytree(source, target, dirs_exist_ok=True)
 
-def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
-    # Keep Codex configuration and its process working directory under the
-    # same canonical lazydevfile root used by Kimi artifacts.
-    home = ARTIFACT_DIR
+def _codex_runtime_home() -> Path:
+    """Return Codex's native user-home data directory.
+
+    The workspace remains ARTIFACT_DIR. Only Termux/PRoot gets a special
+    native-Linux CODEX_HOME because Android shared storage can lack the file
+    locking / socket primitives required by Codex app-server.
+    """
+    if IS_TERMUX:
+        home = CONFIG_DIR / "codex-home"
+    else:
+        home = HOME / ".codex"
     home.mkdir(parents=True, exist_ok=True)
+    return home
+
+
+def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
+    # Codex workspace remains the same canonical lazydevfile directory shown
+    # in its TUI. Only CODEX_HOME is relocated on Android/Termux so app-server
+    # sockets, locks, and arg0 helpers use a native filesystem.
+    home = _codex_runtime_home()
     base = f"http://127.0.0.1:{proxy.server.server_port}/v1"
     model = str(pc.get("model") or "")
     context = model_context_size(pc.get("provider") if isinstance(pc.get("provider"), dict) else {}, pc)
@@ -2997,7 +3010,7 @@ def _launch_codex(codex: str, proxy: _ProviderProxy, pc: dict[str, Any], workspa
 
 
 def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
-    home = HOME / ".gemini" / "antigravity-cli"
+    home = _ensure_antigravity_home()
     settings_file = home / "settings.json"
     home.mkdir(parents=True, exist_ok=True)
     try:
@@ -3007,9 +3020,11 @@ def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
     settings["modelProvider"]="gemini"
     settings_file.write_text(json.dumps(settings, indent=2)+"\n", encoding="utf-8")
 
-    config_root = ARTIFACT_DIR / ".gemini-config"
-    config_root.mkdir(parents=True, exist_ok=True)
-    mcp_file=config_root / "mcp_config.json"
+    # Antigravity's official global MCP location is native HOME-level config.
+    # Keep unrelated user servers intact and only add/update LazyDev's server.
+    native_root = HOME / ".gemini" / "config"
+    native_root.mkdir(parents=True, exist_ok=True)
+    mcp_file = native_root / "mcp_config.json"
     try:
         data=json.loads(mcp_file.read_text(encoding="utf-8"))
         if not isinstance(data,dict): data={}
@@ -3023,37 +3038,6 @@ def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
     }
     data["mcpServers"]=servers
     mcp_file.write_text(json.dumps(data, indent=2)+"\n", encoding="utf-8")
-    # Antigravity currently reads this native HOME-level path; migrate/merge
-    # existing user servers into the canonical LazyDev file, then shim the
-    # native path back to that same file.
-    native_root = HOME / ".gemini" / "config"
-    native_root.mkdir(parents=True, exist_ok=True)
-    native_mcp = native_root / "mcp_config.json"
-    try:
-        if native_mcp.is_symlink():
-            try:
-                if native_mcp.resolve() != mcp_file.resolve():
-                    native_mcp.unlink()
-            except OSError:
-                pass
-        elif native_mcp.exists():
-            native_data = json.loads(native_mcp.read_text(encoding="utf-8"))
-            if isinstance(native_data, dict):
-                merged = native_data.get("mcpServers") if isinstance(native_data.get("mcpServers"), dict) else {}
-                # Existing user servers win unless LazyDev owns the same name.
-                merged.update(servers)
-                data["mcpServers"] = merged
-                mcp_file.write_text(json.dumps(data, indent=2)+"\n", encoding="utf-8")
-            native_backup = ARTIFACT_DIR / ".backups" / "gemini-mcp_config.json"
-            if not native_backup.exists():
-                native_backup.parent.mkdir(parents=True, exist_ok=True)
-                native_mcp.rename(native_backup)
-            else:
-                native_mcp.unlink()
-        if not native_mcp.exists():
-            native_mcp.symlink_to(mcp_file)
-    except OSError:
-        pass
     return settings_file, mcp_file
 
 
@@ -3063,7 +3047,7 @@ def _launch_antigravity(agy: str, provider: dict[str,Any], pc: dict[str,Any], wo
     env=_clean_ui_env()
     env['LAZYDEV_VERSION']=VERSION; env['LAZYDEV_ARTIFACT_DIR']=str(ARTIFACT_DIR)
     env['LAZYDEV_MODEL']=str(pc.get('model') or '')
-    env['LAZYDEV_SKILLS_DIR']=str(ARTIFACT_DIR/'skills')
+    env['LAZYDEV_SKILLS_DIR']=str(HOME/'.agents'/'skills')
     env['GEMINI_API_KEY']=str(proxy.token)
     env['GOOGLE_GEMINI_BASE_URL']=f'http://127.0.0.1:{proxy.port}'
     # The official Antigravity UI owns the interactive model picker. The proxy
