@@ -1769,6 +1769,96 @@ class _ProviderProxy:
                 if "stopSequences" in gen: out["stop"]=gen["stopSequences"]
                 return out
 
+            @staticmethod
+            def _normalize_antigravity_tool_args(name: str, raw_args: Any, cwd: str) -> dict[str, Any]:
+                """Normalize model-emitted args to Antigravity's native tool schema.
+
+                Third-party/non-Gemini models often emit booleans/numbers as strings or
+                omit Antigravity's internal descriptive fields. The native CLI validates
+                tool calls strictly, so normalize the wire payload before returning the
+                Gemini functionCall envelope. This is intentionally scoped to the
+                Antigravity Gemini bridge and does not change Kimi/Codex tool handling.
+                """
+                args = dict(raw_args) if isinstance(raw_args, dict) else {}
+
+                def move_alias(target: str, *aliases: str) -> None:
+                    if target in args:
+                        return
+                    for alias in aliases:
+                        if alias in args:
+                            args[target] = args.pop(alias)
+                            return
+
+                def as_bool(value: Any, default: bool) -> bool:
+                    if isinstance(value, bool):
+                        return value
+                    if isinstance(value, (int, float)):
+                        return bool(value)
+                    if isinstance(value, str):
+                        text = value.strip().lower()
+                        if text in {"true", "1", "yes", "y", "on"}: return True
+                        if text in {"false", "0", "no", "n", "off", ""}: return False
+                    return default
+
+                def as_int(value: Any, default: int) -> int:
+                    if isinstance(value, bool):
+                        return int(value)
+                    try:
+                        return int(value)
+                    except (TypeError, ValueError):
+                        return default
+
+                if name == "write_to_file":
+                    move_alias("TargetFile", "targetFile", "target_file", "path", "file", "filePath")
+                    move_alias("CodeContent", "codeContent", "content", "text", "contents")
+                    move_alias("Overwrite", "overwrite")
+                    move_alias("Description", "description")
+                    move_alias("IsArtifact", "isArtifact", "is_artifact")
+                    if "Overwrite" not in args:
+                        args["Overwrite"] = False
+                    else:
+                        args["Overwrite"] = as_bool(args["Overwrite"], False)
+                    if not isinstance(args.get("Description"), str) or not args["Description"].strip():
+                        args["Description"] = "Write requested file"
+                    if "IsArtifact" in args:
+                        args["IsArtifact"] = as_bool(args["IsArtifact"], False)
+                    # Antigravity 1.2.x can expose these internal fields as required.
+                    if not isinstance(args.get("toolSummary"), str) or not args["toolSummary"].strip():
+                        args["toolSummary"] = "Write file"
+                    if not isinstance(args.get("toolAction"), str) or not args["toolAction"].strip():
+                        args["toolAction"] = "Writing file"
+
+                elif name == "run_command":
+                    move_alias("CommandLine", "commandLine", "command", "cmd")
+                    move_alias("Cwd", "cwd", "workingDirectory", "workdir")
+                    move_alias("WaitMsBeforeAsync", "waitMsBeforeAsync", "wait_ms_before_async", "waitMs")
+                    move_alias("RunPersistent", "runPersistent", "run_persistent")
+                    move_alias("RequestedTerminalID", "requestedTerminalId", "requestedTerminalID")
+                    if not isinstance(args.get("Cwd"), str) or not args["Cwd"].strip():
+                        args["Cwd"] = cwd
+                    if "WaitMsBeforeAsync" not in args:
+                        args["WaitMsBeforeAsync"] = 1000
+                    else:
+                        args["WaitMsBeforeAsync"] = as_int(args["WaitMsBeforeAsync"], 1000)
+                    args["Cwd"] = str(args["Cwd"])
+                    if "RunPersistent" in args:
+                        args["RunPersistent"] = as_bool(args["RunPersistent"], False)
+                    if not isinstance(args.get("toolSummary"), str) or not args["toolSummary"].strip():
+                        args["toolSummary"] = "Run command"
+                    if not isinstance(args.get("toolAction"), str) or not args["toolAction"].strip():
+                        args["toolAction"] = "Running command"
+
+                return args
+
+            def _antigravity_tool_guidance(self, model: str, cwd: str) -> str:
+                return (
+                    "\n\n[LazyDev Antigravity Tool Compatibility]\n"
+                    "The native Antigravity tools use strict JSON types. Always emit booleans as JSON booleans (true/false), not strings, and WaitMsBeforeAsync as a JSON number.\n"
+                    "write_to_file: TargetFile string, CodeContent string, Overwrite boolean, Description string; toolSummary/toolAction are also accepted when requested.\n"
+                    f"run_command: CommandLine string, Cwd string (default workspace: {cwd}), WaitMsBeforeAsync integer; toolSummary/toolAction are also accepted when requested.\n"
+                    "Do not quote booleans or integers as strings. Current LazyDev model: " + model + "."
+                )
+
             def _openai_to_gemini(self, completion: dict[str,Any], model: str) -> dict[str,Any]:
                 choice=(completion.get("choices") or [{}])[0] if isinstance(completion,dict) else {}
                 msg=choice.get("message") if isinstance(choice,dict) else {}
@@ -1780,7 +1870,9 @@ class _ProviderProxy:
                     if isinstance(fn,dict) and fn.get("name"):
                         try: args=json.loads(fn.get("arguments") or "{}")
                         except Exception: args={}
-                        parts.append({"functionCall":{"name":str(fn["name"]),"args":args}})
+                        tool_name = str(fn["name"])
+                        args = self._normalize_antigravity_tool_args(tool_name, args, str(outer.pc.get("workspace") or ARTIFACT_DIR))
+                        parts.append({"functionCall":{"name":tool_name,"args":args}})
                 finish=str(choice.get("finish_reason") or "STOP").upper()
                 if finish=="TOOL_CALLS": finish="STOP"
                 return {"candidates":[{"content":{"role":"model","parts":parts},"finishReason":finish}],"modelVersion":model,"usageMetadata":completion.get("usage") or {}}
@@ -1807,6 +1899,14 @@ class _ProviderProxy:
                     return self._send_json(400, {"error": {"message": "Request body must be an object"}})
                 if gemini_mode:
                     model=str(outer.pc.get("model") or "lazydev")
+                    guidance=self._antigravity_tool_guidance(model, str(ARTIFACT_DIR))
+                    system = body.get("systemInstruction") or body.get("system_instruction")
+                    if isinstance(system, dict):
+                        parts = system.get("parts") if isinstance(system.get("parts"), list) else []
+                        parts = [*parts, {"text": guidance}]
+                        body["systemInstruction"] = {**system, "parts": parts}
+                    else:
+                        body["systemInstruction"] = {"parts":[{"text":guidance}]}
                     openai_body=self._gemini_to_openai(body,model)
                     openai_body["model"]=model
                     try:
@@ -2598,7 +2698,7 @@ def _ensure_cross_ui_skills() -> None:
 def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
     # Keep Codex configuration and its process working directory under the
     # same canonical lazydevfile root used by Kimi artifacts.
-    home = ARTIFACT_DIR / ".codex"
+    home = ARTIFACT_DIR
     home.mkdir(parents=True, exist_ok=True)
     base = f"http://127.0.0.1:{proxy.server.server_port}/v1"
     model = str(pc.get("model") or "")
@@ -2608,6 +2708,39 @@ def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
         context = DEFAULT_MODEL_CONTEXT
     if not output:
         output = DEFAULT_MODEL_OUTPUT
+    info = pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}
+    input_modalities = info.get("inputModalities") if isinstance(info.get("inputModalities"), list) else ["text"]
+    input_modalities = [str(v) for v in input_modalities if str(v) in {"text", "image"}] or ["text"]
+    supports_tools = bool(info.get("toolUse") is True)
+    catalog_path = home / "codex-model-catalog.json"
+    catalog = {"models": [{
+        "slug": model,
+        "display_name": str(info.get("name") or model),
+        "description": str(info.get("description") or "LazyDev-routed model"),
+        "default_reasoning_level": "none",
+        "supported_reasoning_levels": [],
+        "shell_type": "shell_command",
+        "visibility": "list",
+        "supported_in_api": True,
+        "priority": 0,
+        "base_instructions": "You are Codex, a coding agent.",
+        "supports_reasoning_summaries": False,
+        "default_reasoning_summary": "none",
+        "support_verbosity": False,
+        "default_verbosity": "low",
+        "apply_patch_tool_type": "freeform",
+        "web_search_tool_type": "text",
+        "truncation_policy": {"mode": "tokens", "limit": 10000},
+        "supports_parallel_tool_calls": supports_tools,
+        "supports_image_detail_original": "image" in input_modalities,
+        "context_window": int(context),
+        "max_context_window": int(context),
+        "effective_context_window_percent": 95,
+        "experimental_supported_tools": [],
+        "input_modalities": input_modalities,
+        "supports_search_tool": False,
+    }]}
+    catalog_path.write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
     python_exe = str(Path(sys.executable).resolve())
     browser = str((ROOT / "runtime" / "browser-mcp.py").resolve())
     config = '\n'.join([
@@ -2615,13 +2748,14 @@ def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
         'model_provider = "lazydev"',
         f'model_context_window = {int(context)}',
         f'model_max_output_tokens = {int(min(output, CONTEXT_ABSOLUTE_OUTPUT_CAP))}',
+        f'model_catalog_json = {toml_quote(str(catalog_path))}',
         'approval_policy = "never"',
         'sandbox_mode = "danger-full-access"',
         '',
         '[model_providers.lazydev]',
         'name = "LazyDev"',
         f'base_url = {toml_quote(base)}',
-        'wire_api = "chat"',
+        'wire_api = "responses"',
         'env_key = "LAZYDEV_CODEX_API_KEY"',
         'requires_openai_auth = false',
         'supports_websockets = false',
@@ -2639,10 +2773,12 @@ def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
 
 
 class _ResponsesProxy:
-    """Thin Responses API adapter over the already-running LazyDev chat proxy."""
-    def __init__(self, proxy: _ProviderProxy, model: str):
+    """Responses API adapter over the already-running LazyDev chat proxy."""
+    def __init__(self, proxy: _ProviderProxy, provider: dict[str,Any], pc: dict[str,Any]):
         self.proxy = proxy
-        self.model = str(model or "")
+        self.provider = provider
+        self.pc = pc
+        self.model = str(pc.get("model") or "")
         self.token = secrets.token_hex(24)
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self.thread = threading.Thread(target=self.server.serve_forever, name="lazydev-codex-responses", daemon=True)
@@ -2757,7 +2893,15 @@ class _ResponsesProxy:
                     text=msg.get("content")
                     if text:
                         output.append({"type":"message","id":f"msg_{secrets.token_hex(6)}","role":"assistant","status":"completed","content":[{"type":"output_text","text":str(text),"annotations":[]}]})
-                usage=completion.get("usage") if isinstance(completion.get("usage"),dict) else {}
+                raw_usage=completion.get("usage") if isinstance(completion.get("usage"),dict) else {}
+                input_tokens=int(raw_usage.get("input_tokens") or raw_usage.get("prompt_tokens") or 0)
+                output_tokens=int(raw_usage.get("output_tokens") or raw_usage.get("completion_tokens") or 0)
+                total_tokens=int(raw_usage.get("total_tokens") or (input_tokens + output_tokens))
+                prompt_details=raw_usage.get("prompt_tokens_details") if isinstance(raw_usage.get("prompt_tokens_details"),dict) else {}
+                input_details={"cached_tokens":int(prompt_details.get("cached_tokens") or 0), "cache_write_tokens":int(prompt_details.get("cache_write_tokens") or 0)}
+                completion_details=raw_usage.get("completion_tokens_details") if isinstance(raw_usage.get("completion_tokens_details"),dict) else {}
+                output_details={"reasoning_tokens":int(completion_details.get("reasoning_tokens") or raw_usage.get("reasoning_tokens") or 0)}
+                usage={"input_tokens":input_tokens,"input_tokens_details":input_details,"output_tokens":output_tokens,"output_tokens_details":output_details,"total_tokens":total_tokens}
                 output_text="\n".join(
                     str(part.get("text") or "")
                     for item in output if item.get("type")=="message"
@@ -2835,17 +2979,21 @@ def _clean_ui_env() -> dict[str, str]:
     return env
 
 
-def _launch_codex(codex: str, proxy: _ProviderProxy, pc: dict[str, Any], workspace: Path) -> int:
+def _launch_codex(codex: str, proxy: _ProviderProxy, pc: dict[str, Any], workspace: Path, provider: dict[str,Any]) -> int:
     _ensure_cross_ui_skills()
-    home = _write_codex_runtime(proxy, pc)
-    env = _clean_ui_env()
-    env['CODEX_HOME']=str(home); env['LAZYDEV_VERSION']=VERSION
-    env['LAZYDEV_ARTIFACT_DIR']=str(ARTIFACT_DIR); env['LAZYDEV_MODEL']=str(pc.get('model') or '')
-    env['LAZYDEV_CODEX_API_KEY']=str(proxy.token)
-    env['LAZYDEV_CONTEXT_DIR']=str(HOME / ".lazydev")
-    args=["--config", f"model={toml_quote(str(pc.get('model')))}", "--config", "model_provider=lazydev"]
-    try: return subprocess.call([codex,*args],cwd=str(ARTIFACT_DIR),env=env)
-    except KeyboardInterrupt: return 130
+    responses = _ResponsesProxy(proxy, provider, pc)
+    try:
+        home = _write_codex_runtime(responses, pc)
+        env = _clean_ui_env()
+        env['CODEX_HOME']=str(home); env['LAZYDEV_VERSION']=VERSION
+        env['LAZYDEV_ARTIFACT_DIR']=str(ARTIFACT_DIR); env['LAZYDEV_MODEL']=str(pc.get('model') or '')
+        env['LAZYDEV_CODEX_API_KEY']=str(responses.token)
+        env['LAZYDEV_CONTEXT_DIR']=str(HOME / ".lazydev")
+        args=["--config", f"model={toml_quote(str(pc.get('model')))}", "--config", "model_provider=lazydev"]
+        try: return subprocess.call([codex,*args],cwd=str(ARTIFACT_DIR),env=env)
+        except KeyboardInterrupt: return 130
+    finally:
+        responses.close()
 
 
 def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
@@ -2967,7 +3115,7 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     _ensure_cross_ui_skills()
     workspace = ARTIFACT_DIR
     if ui == "codex":
-        try: return _launch_codex(find_codex() or "codex", proxy, pc, workspace)
+        try: return _launch_codex(find_codex() or "codex", proxy, pc, workspace, provider)
         finally:
             if proxy is not None: proxy.close()
     if ui == "antigravity":

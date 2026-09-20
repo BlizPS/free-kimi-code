@@ -36,7 +36,11 @@ assert.ok(py.includes('headers["x-api-key"] = key'), 'Python Anthropic API key h
 assert.ok(py.includes("env['GOOGLE_GEMINI_BASE_URL']=f'http://127.0.0.1:{proxy.port}'"), 'Antigravity must use proxy root URL, not duplicated /v1beta path');
 assert.ok(py.includes('config_root = ARTIFACT_DIR / ".gemini-config"'), 'Antigravity canonical MCP config root missing');
 assert.ok(py.includes('native_root = HOME / ".gemini" / "config"'), 'Antigravity native MCP compatibility path missing');
-assert.ok(py.includes('home = ARTIFACT_DIR / ".codex"'), 'Codex canonical home missing');
+assert.ok(py.includes('home = ARTIFACT_DIR'), 'Codex canonical home missing');
+assert.ok(py.includes('wire_api = \"responses\"'), 'Codex must use Responses wire API');
+assert.ok(py.includes('class _ResponsesProxy'), 'Codex Responses bridge missing');
+assert.ok(py.includes('input_tokens_details'), 'Codex Responses usage conversion missing');
+assert.ok(py.includes('codex-model-catalog.json'), 'Codex model catalog missing');
 assert.ok(py.includes('cwd=str(ARTIFACT_DIR)'), 'Shared lazydevfile workspace root missing');
 assert.ok(src.includes("function providerRequiresApiKey(provider)"), 'generic provider auth capability helper missing');
 assert.ok(src.includes("integrate.api.nvidia.com/v1/chat/completions"), 'NVIDIA chat route missing');

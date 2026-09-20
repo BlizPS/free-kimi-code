@@ -56,19 +56,21 @@ function Get-KimiVersion([string]$Exe) {
     try { return Get-VersionFromText ((& $Exe --version 2>$null) -join "`n") } catch { return '' }
 }
 function Find-Codex {
+    $cmd = Get-Command codex.exe,codex.cmd,codex -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { return $cmd.Source }
     foreach ($candidate in @((Join-Path $HOME '.local\bin\codex.exe'), (Join-Path $HOME '.local\bin\codex.cmd'))) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
     }
-    $cmd = Get-Command codex.exe,codex.cmd,codex -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($cmd) { return $cmd.Source }
     return $null
 }
 function Find-Antigravity {
+    # Prefer the exact `agy` command currently resolved by PowerShell so a
+    # stale local binary cannot trigger a false update prompt.
+    $cmd = Get-Command agy.exe,agy.cmd,agy -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { return $cmd.Source }
     foreach ($candidate in @((Join-Path $env:LOCALAPPDATA 'agy\bin\agy.exe'), (Join-Path $HOME '.local\bin\agy.exe'))) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
     }
-    $cmd = Get-Command agy.exe,agy.cmd,agy -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($cmd) { return $cmd.Source }
     return $null
 }
 function Ask-InstallUi([string]$Label) {
@@ -246,8 +248,9 @@ if ($KimiExe) {
             Write-Host "Kimi Code $KimiCurrentVersion is installed; latest release could not be checked — skipped."
         }
     } else {
-        $KimiUpdateAvailable = $true
-        Write-Host 'Kimi Code is installed but its version could not be detected — update check is inconclusive.'
+        $KimiNeedsUpdate = $false
+        $KimiUpdateAvailable = $false
+        Write-Host 'Kimi Code is installed but its version could not be detected — skipped.'
     }
 } else {
     $KimiUpdateAvailable = $true
@@ -279,8 +282,9 @@ if ($CodexExe) {
             Write-Host "Codex $CodexCurrentVersion is installed; latest release could not be checked — skipped."
         }
     } else {
-        $CodexUpdateAvailable = $true
-        Write-Host 'Codex is installed but its version could not be detected — update check is inconclusive.'
+        $CodexNeedsUpdate = $false
+        $CodexUpdateAvailable = $false
+        Write-Host 'Codex is installed but its version could not be detected — skipped.'
     }
 } else {
     $CodexUpdateAvailable = $true
@@ -312,8 +316,9 @@ if ($AgyExe) {
             Write-Host "Antigravity CLI $AgyCurrentVersion is installed; latest release could not be checked — skipped."
         }
     } else {
-        $AgyUpdateAvailable = $true
-        Write-Host 'Antigravity CLI is installed but its version could not be detected — update check is inconclusive.'
+        $AgyNeedsUpdate = $false
+        $AgyUpdateAvailable = $false
+        Write-Host 'Antigravity CLI is installed but its version could not be detected — skipped.'
     }
 } else {
     $AgyUpdateAvailable = $true
@@ -345,8 +350,9 @@ if ($RtkExe) {
             Write-Host "RTK $RtkCurrentVersion is installed; latest release could not be checked — skipped."
         }
     } else {
-        $RtkUpdateAvailable = $true
-        Write-Host 'RTK is installed but its version could not be detected — update check is inconclusive.'
+        $RtkNeedsUpdate = $false
+        $RtkUpdateAvailable = $false
+        Write-Host 'RTK is installed but its version could not be detected — skipped.'
     }
 } else {
     $RtkUpdateAvailable = $true

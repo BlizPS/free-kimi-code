@@ -159,17 +159,23 @@ find_kimi() {
 }
 
 find_codex() {
+  # Resolve the exact `codex` executable the current shell would run first.
+  # This prevents a stale local shim from causing a false update prompt.
+  command -v codex 2>/dev/null && return 0
   for candidate in "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.cmd"; do
     if [ -x "$candidate" ] || [ -f "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
   done
-  command -v codex 2>/dev/null || return 1
+  return 1
 }
 
 find_antigravity() {
+  # Prefer the exact `agy` executable the current shell would run.
+  # This avoids a stale ~/.local/bin/agy shadowing a newer package-managed copy.
+  command -v agy 2>/dev/null && return 0
   for candidate in "$HOME/.local/bin/agy"; do
     if [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
   done
-  command -v agy 2>/dev/null || return 1
+  return 1
 }
 
 ask_install_ui() {
@@ -357,8 +363,9 @@ if [ -n "$KIMI_COMMAND" ]; then
     (get_kimi_latest_version >"$KIMI_LATEST_FILE" 2>/dev/null || true) &
     KIMI_LATEST_PID=$!
   else
-    KIMI_UPDATE_AVAILABLE=1
-    say "Kimi Code launcher found but its version could not be detected — update available check is inconclusive."
+    KIMI_NEEDS_UPDATE=0
+    KIMI_UPDATE_AVAILABLE=0
+    say "Kimi Code is installed but its version could not be detected — skipped."
   fi
 else
   KIMI_UPDATE_AVAILABLE=1
@@ -377,8 +384,9 @@ if [ -n "$CODEX_COMMAND" ]; then
     (get_codex_latest_version >"$CODEX_LATEST_FILE" 2>/dev/null || true) &
     CODEX_LATEST_PID=$!
   else
-    CODEX_UPDATE_AVAILABLE=1
-    say "Codex launcher found but its version could not be detected — update available check is inconclusive."
+    CODEX_NEEDS_UPDATE=0
+    CODEX_UPDATE_AVAILABLE=0
+    say "Codex is installed but its version could not be detected — skipped."
   fi
 else
   CODEX_UPDATE_AVAILABLE=1
@@ -397,8 +405,9 @@ if [ -n "$AGY_COMMAND" ]; then
     (get_antigravity_latest_version >"$AGY_LATEST_FILE" 2>/dev/null || true) &
     AGY_LATEST_PID=$!
   else
-    AGY_UPDATE_AVAILABLE=1
-    say "Antigravity CLI launcher found but its version could not be detected — update available check is inconclusive."
+    AGY_NEEDS_UPDATE=0
+    AGY_UPDATE_AVAILABLE=0
+    say "Antigravity CLI is installed but its version could not be detected — skipped."
   fi
 else
   AGY_UPDATE_AVAILABLE=1
@@ -417,8 +426,9 @@ if [ -n "$RTK_COMMAND" ]; then
     (get_rtk_latest_version >"$RTK_LATEST_FILE" 2>/dev/null || true) &
     RTK_LATEST_PID=$!
   else
-    RTK_UPDATE_AVAILABLE=1
-    say "RTK launcher found but its version could not be detected — update available check is inconclusive."
+    RTK_NEEDS_UPDATE=0
+    RTK_UPDATE_AVAILABLE=0
+    say "RTK is installed but its version could not be detected — skipped."
   fi
 else
   RTK_UPDATE_AVAILABLE=1
@@ -529,33 +539,9 @@ if [ "$AGY_UPDATE_AVAILABLE" -eq 1 ]; then
   if ask_install_ui "Install/update Antigravity?"; then INSTALL_ANTIGRAVITY=1; else AGY_NEEDS_UPDATE=0; say "Antigravity update/install declined — skipped."; fi
 fi
 
-# RTK was already checked in parallel above; only its result is read here.
-RTK_LATEST_VERSION="$(cat "${RTK_LATEST_FILE:-/dev/null}" 2>/dev/null || true)"
-if [ -n "$RTK_COMMAND" ] && [ -n "$RTK_CURRENT_VERSION" ] && [ -n "$RTK_LATEST_VERSION" ]; then
-  if version_at_least "$RTK_CURRENT_VERSION" "$RTK_LATEST_VERSION"; then
-    RTK_NEEDS_UPDATE=0
-    if [ "$RTK_CURRENT_VERSION" = "$RTK_LATEST_VERSION" ]; then
-      say "RTK $RTK_CURRENT_VERSION is already current — skipped."
-    else
-      say "RTK $RTK_CURRENT_VERSION is newer than the latest published $RTK_LATEST_VERSION — skipped."
-    fi
-  else
-    RTK_UPDATE_AVAILABLE=1
-    say "RTK $RTK_CURRENT_VERSION → $RTK_LATEST_VERSION — update available."
-  fi
-elif [ -n "$RTK_COMMAND" ] && [ -n "$RTK_CURRENT_VERSION" ]; then
-  RTK_NEEDS_UPDATE=0
-  say "RTK $RTK_CURRENT_VERSION is installed; latest release could not be checked — skipped."
-elif [ -n "$RTK_COMMAND" ]; then
-  RTK_UPDATE_AVAILABLE=1
-  say "RTK is installed but its version could not be detected — update available check is inconclusive."
-else
-  RTK_UPDATE_AVAILABLE=1
-  say "RTK not found — installation available."
-fi
-if [ "$RTK_UPDATE_AVAILABLE" -eq 1 ]; then
-  if ask_install_ui "Install/update RTK?"; then RTK_NEEDS_UPDATE=1; else RTK_NEEDS_UPDATE=0; say "RTK update/install declined — skipped."; fi
-fi
+# RTK was already checked in parallel above. The state set by the
+# consolidated check is final: installed/current or inconclusive => skipped;
+# missing/outdated => optional prompt above.
 
 # Clear the question screen before doing the actual installs.
 clear 2>/dev/null || true

@@ -1,8 +1,5 @@
 <div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/free-kimi-code-dark.svg">
-    <img src="assets/free-kimi-code-light.svg" alt="Lazy Developer" width="720">
-  </picture>
+  <img src="assets/free-kimi-code-logo.svg" alt="Free Kimi Code" width="720">
 
   <br>
   <br>
