@@ -36,7 +36,7 @@ Lazy Developer is designed around the Kimi Code workflow rather than replacing i
 </p>
 
 <p align="center">
-  <sub>Example Kimi Code workflow from the official <a href="https://github.com/MoonshotAI/kimi-code">MoonshotAI/kimi-code</a> repository.</sub>
+  <sub>Example Kimi Code workflow from the official <a href="https://github.com/MoonshotAI/kimi-code">MoonshotAI/kimi-code</a> repository</sub>
 </p>
 
 ## ✨ Highlights
