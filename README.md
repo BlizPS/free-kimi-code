@@ -263,7 +263,7 @@ Use GitHub Issues and Discussions for project feedback, compatibility reports, i
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE)
 
 <div align="center">
   <sub>Built by <strong>BlizPS</strong> · Lazy Developer 1.0.1</sub>
