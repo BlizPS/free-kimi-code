@@ -7,10 +7,10 @@
   <br>
   <br>
 
-[![Version](https://img.shields.io/badge/version-1.0.1-7C3AED?style=for-the-badge)](https://github.com/BlizPS/lazy-developer-free-kimi-code)
-[![License: MIT](https://img.shields.io/badge/license-MIT-22C55E?style=for-the-badge)](LICENSE)
-[![Platforms](https://img.shields.io/badge/platform-macOS%20·%20Linux%20·%20Windows%20·%20Termux-0EA5E9?style=for-the-badge)](#-installation)
-[![Stars](https://img.shields.io/github/stars/BlizPS/lazy-developer-free-kimi-code?style=for-the-badge&color=F59E0B)](https://github.com/BlizPS/lazy-developer-free-kimi-code/stargazers)
+  [![Version](https://img.shields.io/badge/version-1.0.1-7C3AED?style=for-the-badge)](https://github.com/BlizPS/lazy-developer-free-kimi-code)
+  [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E?style=for-the-badge)](LICENSE)
+  [![Platforms](https://img.shields.io/badge/platform-macOS%20·%20Linux%20·%20Windows%20·%20Termux-0EA5E9?style=for-the-badge)](#-installation)
+  [![Stars](https://img.shields.io/github/stars/BlizPS/lazy-developer-free-kimi-code?style=for-the-badge&color=F59E0B)](https://github.com/BlizPS/lazy-developer-free-kimi-code/stargazers)
 
   <p>
     <a href="https://github.com/BlizPS/lazy-developer-free-kimi-code/issues">Issues</a> ·
@@ -18,18 +18,36 @@
   </p>
 
   <p>
-    <em>A calm, capable developer layer for Kimi Code.</em><br>
-    <em>Live models, portable skills, safe artifact handling, provider routing, and a quieter terminal.</em>
+    <strong>Supercharge Kimi Code with portable AI skills, live model routing, plugins, and powerful developer tools.</strong><br>
+    <em>Keep the familiar Kimi Code workflow while adding a stronger, cleaner developer experience.</em>
   </p>
 </div>
 
 ## What is Lazy Developer?
 
-Lazy Developer is a free, open-source developer layer for Kimi Code. It stays close to the familiar Kimi Code agent workflow while adding portable skills, live model/provider discovery, capability-aware tools, context protection, and a quieter terminal.
+Lazy Developer is a free, open-source toolkit built around Kimi Code. It adds reusable AI skills, live provider/model discovery, model-aware tool handling, context protection, safer artifacts, search/browser resilience, and a cleaner terminal workflow without replacing the core Kimi Code experience.
+
+## Why Lazy Developer?
+
+Kimi Code already provides the agent workflow. Lazy Developer focuses on the layer around it:
+
+```text
+Kimi Code
+   │
+   ├── Portable AI Skills
+   ├── Live Provider / Model Discovery
+   ├── Model-Aware Tools
+   ├── Context Protection
+   ├── Safer Artifacts
+   ├── Search / Browser Resilience
+   └── Cleaner Terminal Output
+```
+
+The goal is simple: keep the familiar agent experience while making longer, tool-heavy coding sessions easier to manage.
 
 ## Built on Kimi Code
 
-Lazy Developer is designed around the Kimi Code workflow rather than replacing it. The goal is simple: keep the agent experience familiar, then make long coding sessions more efficient with better routing, smarter tool handling, and tighter token/context usage.
+Lazy Developer is designed around the Kimi Code workflow rather than replacing it.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/MoonshotAI/kimi-code/main/docs/media/intro.gif" alt="Kimi Code demo" width="860">
@@ -39,43 +57,72 @@ Lazy Developer is designed around the Kimi Code workflow rather than replacing i
   <sub>Example Kimi Code workflow from the official <a href="https://github.com/MoonshotAI/kimi-code">MoonshotAI/kimi-code</a> repository</sub>
 </p>
 
-## ✨ Highlights
+Learn more about Kimi Code:  
+https://github.com/MoonshotAI/kimi-code
 
-### 🧠 Portable agent skills
+## ✨ What You Get
 
-Focused skills ship with the project for implementation, debugging, review, testing, and reusable engineering workflows. They are packaged so the same skill set can travel across compatible agent/plugin environments.
+### 🧠 Portable AI Skills
 
-### 🪶 Token-efficient by design
+Focused skills ship with the project for implementation, debugging, review, testing, and reusable engineering workflows.
 
-Lazy Developer reduces avoidable response overhead while preserving code, paths, commands, errors, URLs, decisions, and useful evidence.
+They are packaged so compatible agent/plugin environments can use the same skill collection independently.
 
-The runtime also protects the active context with token budgeting, rolling tool-output pruning, relevance-aware archive/retrieval, and a proactive context guard. The model's real context window is preserved; the runtime focuses on using it efficiently instead of pretending a smaller fixed limit exists.
+### ⚡ Live Provider & Model Discovery
 
-### ⚡ RTK-powered terminal output
+Run:
 
-Rust Token Killer (RTK) is integrated into the workflow for supported shell commands so noisy terminal output can be reduced before it reaches the model. This keeps terminal-heavy tasks lighter on tokens and context.
+```sh
+lazydev setup
+```
 
-### 🔌 Live providers & model catalogs
+Lazy Developer can discover provider and model information from live catalogs where supported instead of relying on one permanently hard-coded model roster.
 
-Provider and model setup is discovered from live catalogs where supported instead of relying on a fixed model roster. Run `lazydev setup` to inspect the providers, models, credentials, and capabilities available on the current installation.
+Use `lazydev setup` to inspect the providers, models, credentials, and capabilities available on the current installation.
 
-### 🧩 Native tools + synthetic tool bridge
+### 🔌 Model-Aware Tool Handling
 
-When a model supports native tool calling, Lazy Developer can use it directly. When the selected route does not, the runtime can detect that capability and use a synthetic tool protocol with the same model instead of silently switching models.
+When a selected model supports native tool calling, Lazy Developer can use it directly.
 
-Tool support is therefore capability-aware rather than tied to one model ID.
+When native tool calling is unavailable on the selected route, the runtime can use a compatible synthetic tool protocol with the same model instead of silently switching to another model.
 
-### 🧠 Thinking compatibility
+Tool behavior is therefore based on model capability rather than one fixed model ID.
 
-Provider metadata is respected for reasoning/thinking behavior. Model-specific capabilities can be preserved without overwriting them with a generic runtime setting.
+### 🪶 Context Optimization
 
-### 🛡️ Context & session safety
+Long coding sessions can accumulate large amounts of tool output and archived history.
 
-Lazy Developer separates active model context from archived history/tool output, keeps old sessions compatible across provider/model changes, and avoids dumping unrelated archived content back into every request.
+Lazy Developer helps keep the active context useful with:
 
-### 📁 Safe artifacts
+- token budgeting
+- rolling tool-output pruning
+- relevance-aware archive/retrieval
+- proactive context protection
+- preservation of useful code, paths, commands, errors, URLs, decisions, and evidence
 
-Standalone artifacts use the canonical `lazydevfile` directory and do not overwrite existing files. Collisions receive the lowest available numeric suffix:
+The runtime does not pretend that the model has a smaller fixed context window. It focuses on using the available context more efficiently.
+
+### ⚡ RTK-Powered Terminal Output
+
+Rust Token Killer (RTK) is integrated for supported shell commands so unnecessary terminal output can be reduced before it reaches the model.
+
+This keeps terminal-heavy sessions lighter on tokens and context.
+
+### 🧠 Thinking Compatibility
+
+Provider and model metadata are respected for reasoning/thinking behavior where supported.
+
+Model-specific capabilities can be preserved without forcing one generic runtime setting onto every route.
+
+### 🛡️ Context & Session Safety
+
+Lazy Developer separates active request context from archived history and tool output, keeps existing sessions usable across normal provider/model changes, and avoids blindly injecting unrelated archived content into every request.
+
+### 📁 Safe Artifacts
+
+Standalone artifacts use the canonical `lazydevfile` directory and do not overwrite existing files.
+
+Collisions receive the lowest available numeric suffix:
 
 ```text
 report.html
@@ -83,9 +130,11 @@ report1.html
 report2.html
 ```
 
-### 🌐 Search & browser resilience
+### 🌐 Search & Browser Resilience
 
-Search, browser, and file paths include validation and recovery checks for common malformed tool arguments, while large outputs can be handled without blindly filling the active context.
+Search, browser, and file operations include validation and recovery checks for common malformed tool arguments.
+
+Large outputs can also be handled without blindly filling the active context.
 
 ## 📦 Installation
 
@@ -108,7 +157,7 @@ lazydev setup
 lazydev chat
 ```
 
-### Universal skills
+### Universal Skills
 
 The bundled skills can also be installed independently for compatible agent CLIs:
 
@@ -116,15 +165,51 @@ The bundled skills can also be installed independently for compatible agent CLIs
 npx skills add BlizPS/lazy-developer-free-kimi-code --all
 ```
 
-## 🔄 Updating
+## 🚀 Quick Start
 
-Rerun the matching installer, then verify:
+After installation:
+
+```sh
+lazydev setup
+```
+
+Inspect the available providers and models.
+
+Start a coding session:
+
+```sh
+lazydev chat
+```
+
+Check the installation:
+
+```sh
+lazydev doctor
+```
+
+Show the installed version:
 
 ```sh
 lazydev version
 ```
 
-## 🧰 Useful commands
+## 🧩 Skills & Plugin Support
+
+Lazy Developer is designed so its skills can be used beyond the main CLI in compatible agent and plugin environments.
+
+The repository includes reusable skill assets and compatibility-oriented project integrations for agent workflows such as:
+
+- Kimi Code
+- Codex-compatible environments
+- Claude-compatible plugin environments
+- OpenCode
+- OpenClaw
+- Cursor
+- Other compatible skill/plugin runtimes
+
+Compatibility can vary by environment and feature.
+
+## 🧰 Useful Commands
 
 ```text
 lazydev help
@@ -138,29 +223,47 @@ lazydev doctor
 lazydev version
 ```
 
+## 🔄 Updating
+
+Re-run the matching installer, then verify:
+
+```sh
+lazydev version
+lazydev doctor
+```
+
 ## 🐢 Termux / Android
 
-Kimi Code's Linux binary needs a glibc-based Linux userland. On Termux, use a Debian or Ubuntu guest:
+Kimi Code's Linux binary requires a glibc-based Linux userland.
+
+On Termux, use a Debian or Ubuntu guest:
 
 ```sh
 pkg update
 pkg install proot-distro
+
 proot-distro install debian
 proot-distro login debian
 ```
 
 Then run the normal Lazy Developer installer inside the guest.
 
-## 🛡️ Safe by default
+## 🛡️ Safe by Default
 
 - Standalone artifacts never overwrite existing files.
 - Saved sessions stay in place during normal model switching.
 - Strict proxy routes can repair incomplete tool-call history.
 - Never commit API keys, OAuth tokens, or provider credentials.
 
+## 🤝 Contributing
+
+Bug reports, feature requests, documentation improvements, and compatible skill contributions are welcome.
+
+Use GitHub Issues and Discussions for project feedback, compatibility reports, ideas, and community support.
+
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE)
+MIT — see [LICENSE](LICENSE).
 
 <div align="center">
   <sub>Built by <strong>BlizPS</strong> · Lazy Developer 1.0.1</sub>
