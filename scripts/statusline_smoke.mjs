@@ -17,5 +17,8 @@ if (out.status !== 0) throw new Error(out.stderr || 'statusline hook failed');
 if (!/context:\s*37%/.test(out.stdout)) throw new Error(`expected live percentage, got: ${out.stdout}`);
 if (!/\/32\.8k/.test(out.stdout)) throw new Error(`expected live context size, got: ${out.stdout}`);
 const empty = spawnSync(process.execPath, [hook], { input: '{}', encoding: 'utf8' });
-if (empty.status !== 0 || !/^context: 0$/.test(empty.stdout.trim())) throw new Error(`empty payload mismatch: ${empty.stdout}`);
+if (empty.status !== 0 || !/^context: 0 active/.test(empty.stdout.trim())) throw new Error(`empty payload mismatch: ${empty.stdout}`);
+
+const malformed = spawnSync(process.execPath, [hook], { input: JSON.stringify({model:{name:'x'}, context_window:{used_percentage:19000, context_window_size:32768}}), encoding:'utf8' });
+if (malformed.status !== 0 || /19000%/.test(malformed.stdout)) throw new Error(`malformed percentage leaked: ${malformed.stdout}`);
 console.log('statusline_smoke: PASS');

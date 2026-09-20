@@ -86,7 +86,7 @@ CONTEXT_SAFETY_MARGIN = 1024
 CONTEXT_UNKNOWN_OUTPUT_FRACTION = 0.25
 CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768
 CONTEXT_EXTRA_MULTIPLIER = max(1.25, min(4.0, float(os.environ.get("LAZYDEV_CONTEXT_EXTRA_MULTIPLIER", "1.6") or 1.6)))
-CONTEXT_FIT_RATIO = 1.0
+CONTEXT_FIT_RATIO = max(0.65, min(0.85, float(os.environ.get("LAZYDEV_CONTEXT_FIT_RATIO", "0.75") or 0.75)))
 CONTEXT_RECENT_MESSAGES = max(4, min(20, int(os.environ.get("LAZYDEV_CONTEXT_RECENT_MESSAGES", "10") or 10)))
 CONTEXT_ARCHIVE_SNIPPET_CHARS = max(80, min(800, int(os.environ.get("LAZYDEV_CONTEXT_ARCHIVE_SNIPPET_CHARS", "240") or 240)))
 CONTEXT_TOOL_RESULT_CHARS = max(400, min(6000, int(os.environ.get("LAZYDEV_CONTEXT_TOOL_RESULT_CHARS", "1200") or 1200)))
@@ -494,6 +494,74 @@ def choose_model(models: list[dict[str, Any]], current: str = "") -> dict[str, A
     return shown[picked - 1]
 
 
+def _normalize_session_alias(value: str) -> str:
+    raw = str(value or '').strip()
+    if not raw or raw in {'primary', 'default'}:
+        return ''
+    if raw.startswith('lazydev/'):
+        return raw if re.fullmatch(r'lazydev/[A-Za-z0-9][A-Za-z0-9._:@+/?=-]{1,240}', raw) else ''
+    return f'lazydev/{raw}' if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:@+/?=-]{1,240}', raw) else ''
+
+def _session_aliases_from_text(text: str) -> list[str]:
+    aliases: list[str] = []
+    patterns = [
+        r'\blazydev/[A-Za-z0-9][A-Za-z0-9._:@+/?=-]{1,240}',
+        r'["\'](?:model|model_id|modelAlias|model_alias)["\']\s*[:=]\s*["\']([^"\'\r\n]+)["\']',
+        r'(?:^|[,\s])model\s*=\s*["\']?([A-Za-z0-9][A-Za-z0-9._:@+/?=-]{1,240})["\']?',
+    ]
+    for index, pattern in enumerate(patterns):
+        for match in re.finditer(pattern, text or '', re.I | re.M):
+            value = match.group(0) if index == 0 else match.group(1)
+            alias = _normalize_session_alias(value)
+            if alias and alias not in aliases:
+                aliases.append(alias)
+                if len(aliases) >= 256:
+                    return aliases
+    return aliases
+
+def discover_session_model_aliases(current_alias: str = '') -> list[str]:
+    current = str(current_alias or '').strip()
+    aliases: list[str] = []
+    for home in dict.fromkeys([KIMI_HOME, HOME / '.kimi-code']):
+        sources = [home / 'session_index.jsonl']
+        session_dir = home / 'sessions'
+        if session_dir.is_dir():
+            try:
+                count = 0
+                for base, _dirs, files in os.walk(session_dir):
+                    for filename in files:
+                        if filename in {'state.json', 'wire.jsonl', 'context.jsonl'}:
+                            sources.append(Path(base) / filename)
+                            count += 1
+                            if count >= 3000:
+                                break
+                    if count >= 3000:
+                        break
+            except OSError:
+                pass
+        for file in sources[:3000]:
+            try:
+                raw = file.read_text(encoding='utf-8', errors='ignore')
+            except OSError:
+                continue
+            if len(raw) > 196608:
+                raw = raw[:98304] + '\n' + raw[-98304:]
+            for alias in _session_aliases_from_text(raw):
+                if alias != current and alias not in aliases:
+                    aliases.append(alias)
+                    if len(aliases) >= 256:
+                        return aliases
+    return aliases
+
+def update_session_alias_history(config: dict[str, Any], aliases: list[str]) -> None:
+    current = config.get('sessionModelAliases') if isinstance(config.get('sessionModelAliases'), list) else []
+    normalized: list[str] = []
+    for value in current + aliases:
+        alias = _normalize_session_alias(value)
+        if alias and alias not in normalized:
+            normalized.append(alias)
+    config['sessionModelAliases'] = normalized[-256:]
+
 def setup() -> int:
     config = read_config()
     config.setdefault("providers", {})
@@ -547,6 +615,7 @@ def setup() -> int:
         return 1
     config["providers"][provider["id"]] = {"apiKey": key, "model": chosen["id"], "modelInfo": chosen, **({"baseUrl": normalize_url(base)} if provider["id"] in {"ollama", "ninerouter"} else {})}
     config["activeProvider"] = provider["id"]
+    update_session_alias_history(config, [_normalize_session_alias(saved.get("model", "")), _normalize_session_alias(chosen["id"])])
     write_config(config)
     print(ansi("32", f"✓ {provider['label']} · {chosen['id']} saved"))
     return 0
@@ -1566,7 +1635,7 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     dynamic_ratio = 0.07 if context <= 16384 else 0.06 if context <= 32768 else 0.05 if context <= 65536 else 0.04
     reserve = max(768, min(int(context * 0.10), int(context * dynamic_ratio)))
     input_limit = max(1024, context - reserve)
-    compaction_trigger = 0.52 if context <= 16384 else 0.60 if context <= 32768 else 0.68 if context <= 65536 else 0.76
+    compaction_trigger = CONTEXT_FIT_RATIO
     native_tools = native_tool_capability(pc)
     tool_use = True if proxy is not None else native_tools is not False
     capabilities = []
@@ -1619,6 +1688,18 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         f'display_name = {toml_quote(provider["label"] + " · " + model)}',
         *( [f'off_effort = {toml_quote(str(info.get("offEffort")))}'] if info.get("offEffort") else [] ),
         '',
+        *sum(([
+            f'[models.{json.dumps(alias)}]',
+            'provider = "lazydev"',
+            f'model = {toml_quote(model)}',
+            f'max_context_size = {context}',
+            f'max_input_size = {input_limit}',
+            f'max_output_size = {safe_output}',
+            f'capabilities = {json.dumps(capabilities)}',
+            *( [f'off_effort = {toml_quote(str(info.get("offEffort")))}'] if info.get('offEffort') else [] ),
+            f'display_name = {toml_quote("Session compatibility · " + provider["label"] + " · " + model)}',
+            '',
+        ] for alias in sorted(set((cfg.get("sessionModelAliases") or []) + discover_session_model_aliases(f"lazydev/{model}"))) if alias and alias != f"lazydev/{model}" and re.fullmatch(r"lazydev/[A-Za-z0-9][A-Za-z0-9._:@+/?=-]{1,240}", alias)), []),
         '[read]',
         'default_max_chars = 100000',
         'max_chars = 500000',
@@ -1792,6 +1873,8 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     if provider["id"] not in {"anthropic", "gemini"}:
         proxy = _ProviderProxy(provider, pc)
     try:
+        update_session_alias_history(cfg, discover_session_model_aliases(f"lazydev/{pc.get('model')}") + [_normalize_session_alias(pc.get("model", ""))])
+        write_config(cfg)
         write_kimi_files(provider, cfg, proxy)
         write_kimi_mcp_config()
     except Exception:
@@ -1803,9 +1886,9 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     # Do not pass --work-dir: that flag is not supported by every standalone Kimi Code build.
     args = ["--add-dir", str(ARTIFACT_DIR)]
     if sessions:
-        args.append("--session")
+        args += ["--session", "--model", f"lazydev/{pc.get('model')}"]
     elif continue_session:
-        args.append("--continue")
+        args += ["--continue", "--model", f"lazydev/{pc.get('model')}"]
     else:
         args += ["--agent", "default"]
     env = os.environ.copy()
@@ -1827,9 +1910,10 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     output = model_output_size(provider, pc)
     output_fraction = 0.20 if context <= 8192 else 0.25 if context <= 131072 else 0.20
     safe_output = max(256, min(output, max(256, int(context * output_fraction)), CONTEXT_ABSOLUTE_OUTPUT_CAP))
-    env["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(context)
-    env["KIMI_MODEL_MAX_COMPLETION_TOKENS"] = str(safe_output)
-    env["KIMI_MODEL_MAX_TOKENS"] = str(safe_output)
+    if provider["id"] != "ninerouter":
+        env["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(context)
+        env["KIMI_MODEL_MAX_COMPLETION_TOKENS"] = str(safe_output)
+        env["KIMI_MODEL_MAX_TOKENS"] = str(safe_output)
     try:
         return subprocess.call([kimi, *args], cwd=str(workspace), env=env)
     except KeyboardInterrupt:

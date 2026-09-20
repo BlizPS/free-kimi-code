@@ -51,7 +51,7 @@ const CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768;
 const CONTEXT_EXTRA_MULTIPLIER = Math.max(1.25, Math.min(4, Number(process.env.LAZYDEV_CONTEXT_EXTRA_MULTIPLIER || 2.0)));
 const VIRTUAL_CONTEXT_BUDGET_FRACTION = Math.max(0.08, Math.min(0.30, Number(process.env.LAZYDEV_VIRTUAL_CONTEXT_BUDGET_FRACTION || 0.20)));
 const VIRTUAL_CONTEXT_MAX_BUDGET = Math.max(2048, Math.min(32768, Number(process.env.LAZYDEV_VIRTUAL_CONTEXT_MAX_BUDGET || 16000)));
-const CONTEXT_FIT_RATIO = 1;
+const CONTEXT_FIT_RATIO = Math.max(0.65, Math.min(0.85, Number(process.env.LAZYDEV_CONTEXT_FIT_RATIO || 0.75)));
 const CONTEXT_RECENT_MESSAGES = Math.max(4, Math.min(20, Number(process.env.LAZYDEV_CONTEXT_RECENT_MESSAGES || 10)));
 const CONTEXT_ARCHIVE_SNIPPET_CHARS = Math.max(80, Math.min(800, Number(process.env.LAZYDEV_CONTEXT_ARCHIVE_SNIPPET_CHARS || 240)));
 const CONTEXT_TOOL_RESULT_CHARS = Math.max(400, Math.min(6000, Number(process.env.LAZYDEV_CONTEXT_TOOL_RESULT_CHARS || 1200)));
@@ -584,7 +584,8 @@ function fitMessagesToContext(messages, context, outputCap, virtualStore = null)
   const physical = Math.max(1024, Number(context) || 16384);
   const safeOutput = Math.max(256, Math.min(Number(outputCap) || 8192, Math.max(256, Math.floor(physical * 0.25)), CONTEXT_ABSOLUTE_OUTPUT_CAP));
   // Never reduce the model's declared context window. Only reserve output headroom.
-  const target = Math.max(1024, physical - safeOutput - 512);
+  const proactiveTarget = Math.max(1024, Math.floor(physical * CONTEXT_FIT_RATIO));
+  const target = Math.max(1024, Math.min(physical - safeOutput - 512, proactiveTarget));
   const before = estimateMessagesTokens(source);
   if (before <= target) return { messages: source, changed: false, before, after: before, virtualMultiplier: CONTEXT_EXTRA_MULTIPLIER, virtualUsed: 0, virtualHits: 0 };
 
@@ -1692,27 +1693,39 @@ ${tail.toString('utf8')}`;
   } catch { return ''; }
 }
 
+function sessionCompatibilityHomes() {
+  const homes = [kimiHome()];
+  const defaultHome = path.join(process.env.HOME || process.env.USERPROFILE || process.cwd(), '.kimi-code');
+  if (!homes.includes(defaultHome)) homes.push(defaultHome);
+  const explicitHome = String(process.env.KIMI_CODE_HOME || '').trim();
+  if (explicitHome && !homes.includes(explicitHome)) homes.push(explicitHome);
+  return [...new Set(homes)];
+}
+
 function discoverSessionModelAliases(currentAlias = '') {
-  const rootDir = path.join(kimiHome(), 'sessions');
-  const sources = [path.join(kimiHome(), 'session_index.jsonl')];
-  try {
-    if (fs.existsSync(rootDir)) {
-      const stack = [rootDir];
-      let inspected = 0;
-      while (stack.length && inspected < 5000) {
-        const dir = stack.pop();
-        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-          const file = path.join(dir, entry.name);
-          if (entry.isDirectory()) stack.push(file);
-          else if (entry.name === 'state.json' || entry.name === 'wire.jsonl' || entry.name === 'context.jsonl') sources.push(file);
-          inspected += 1;
-          if (inspected >= 5000) break;
+  const sources = [];
+  for (const home of sessionCompatibilityHomes()) {
+    const rootDir = path.join(home, 'sessions');
+    sources.push(path.join(home, 'session_index.jsonl'));
+    try {
+      if (fs.existsSync(rootDir)) {
+        const stack = [rootDir];
+        let inspected = 0;
+        while (stack.length && inspected < 5000) {
+          const dir = stack.pop();
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const file = path.join(dir, entry.name);
+            if (entry.isDirectory()) stack.push(file);
+            else if (entry.name === 'state.json' || entry.name === 'wire.jsonl' || entry.name === 'context.jsonl') sources.push(file);
+            inspected += 1;
+            if (inspected >= 5000) break;
+          }
         }
       }
-    }
-  } catch {}
+    } catch {}
+  }
   const texts = [];
-  for (const file of sources.slice(0, 1500)) {
+  for (const file of sources.slice(0, 3000)) {
     const text = readTextSlice(file, file.endsWith('wire.jsonl') || file.endsWith('context.jsonl') ? 196608 : 131072);
     if (text) texts.push(text);
   }
@@ -1803,7 +1816,7 @@ function contextBudget(modelInfo = {}) {
   const output = Math.max(256, Math.min(rawOutput, Math.max(256, Math.floor(max * outputFraction)), CONTEXT_ABSOLUTE_OUTPUT_CAP));
   const reserve = Math.max(768, Math.min(output, Math.floor(max * 0.25)));
   const input = Math.max(1024, max - reserve);
-  const ratio = 0.90;
+  const ratio = CONTEXT_FIT_RATIO;
   return { max, output, reserve, input, ratio };
 }
 
@@ -2003,6 +2016,13 @@ function buildTuiConfig() {
   ].join('\n') + '\n';
 }
 
+function updateSessionModelAliasHistory(cfg, aliases = []) {
+  const current = Array.isArray(cfg?.sessionModelAliases) ? cfg.sessionModelAliases : [];
+  const all = [...current, ...aliases].map((value) => String(value || '').trim())
+    .filter((value) => /^lazydev\/[A-Za-z0-9][A-Za-z0-9._:@+/?=-]{1,240}$/.test(value));
+  cfg.sessionModelAliases = [...new Set(all)].slice(-256);
+}
+
 async function setup() {
   const cfg = normalizeConfig(readConfig());
   clearScreen();
@@ -2063,6 +2083,7 @@ async function setup() {
       ? { baseUrl, apiKey: provider.id === 'ollama' ? 'ollama' : apiKey, model: chosen.id, modelInfo: chosen }
       : { apiKey, model: chosen.id, modelInfo: chosen };
     cfg.activeProvider = provider.id;
+    updateSessionModelAliasHistory(cfg, [saved.model, chosen.id].filter(Boolean).map((model) => `lazydev/${model}`));
     writeConfig(cfg);
     line(green(`✓ ${provider.label} · saved`));
     line(green(`✓ ${chosen.id} · saved`));
@@ -2331,7 +2352,10 @@ async function chat() {
   const proxy = !['gemini', 'anthropic'].includes(provider.id)
     ? await createProxy(provider, pc)
     : null;
-  const sessionAliases = discoverSessionModelAliases(`lazydev/${pc.model}`);
+  const sessionAliases = [...new Set([...(Array.isArray(cfg.sessionModelAliases) ? cfg.sessionModelAliases : []), ...discoverSessionModelAliases(`lazydev/${pc.model}`)])]
+    .filter((alias) => alias && alias !== `lazydev/${pc.model}`).slice(-256);
+  updateSessionModelAliasHistory(cfg, [...sessionAliases, `lazydev/${pc.model}`]);
+  writeConfig(cfg);
   if (provider.id === 'ollama') assertHttpUrl(ollamaChatUrl(pc.baseUrl), 'Ollama API URL');
   else if (provider.id === 'gemini') {
     // Standard Gemini models use Kimi Code's native Google GenAI adapter.
@@ -2362,6 +2386,7 @@ async function chat() {
   else if (mode === 'continue') launchArgs.push('--continue');
   else launchArgs.push('--agent', 'default');
   const budget = contextBudget(pc.modelInfo);
+  writeContextMeter({ provider, pc, context: budget.max, beforeMessages: [], afterMessages: [], fit: null });
   const authBridgeStop = startKimiAuthBridge({ configPath, provider, pc, proxy, sessionAliases });
   // The runtime model override keeps the selected LazyDev route stable during the child TUI.
   // 9Router needs the generated [models] entry (including off_effort) to remain authoritative.
@@ -2379,7 +2404,7 @@ async function chat() {
     LAZYDEV_CONTEXT_EXTRA_MULTIPLIER: String(CONTEXT_EXTRA_MULTIPLIER),
     LAZYDEV_TRANSIENT_RETRIES: String(PROVIDER_TRANSIENT_MAX_RETRIES),
     LAZYDEV_READ_MAX_CHARS: process.env.LAZYDEV_READ_MAX_CHARS || '500000',
-    LAZYDEV_CONTEXT_FIT_RATIO: '1',
+    LAZYDEV_CONTEXT_FIT_RATIO: String(CONTEXT_FIT_RATIO),
     LAZYDEV_CONTEXT_RECENT_MESSAGES: String(CONTEXT_RECENT_MESSAGES),
   };
   const child = spawn(invocation.command, launchArgs, {
