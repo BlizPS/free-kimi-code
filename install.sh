@@ -3,7 +3,7 @@ set -eu
 
 REPO="BlizPS/lazy-developer-free-kimi-code"
 BRANCH="${LAZYDEV_BRANCH:-main}"
-LAZYDEV_VERSION="1.0.0"
+LAZYDEV_VERSION="1.0.1"
 KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"
 KIMI_RELEASE_API_URL="https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest"
 RTK_INSTALL_URL="https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh"
@@ -86,7 +86,7 @@ get_kimi_latest_version() {
   response="$TMP_DIR/kimi-release.json"
   if curl -fsSL \
     -H 'Accept: application/vnd.github+json' \
-    -H 'User-Agent: lazy-developer-installer/1.0.0' \
+    -H 'User-Agent: lazy-developer-installer/1.0.1' \
     "$KIMI_RELEASE_API_URL" -o "$response" 2>/dev/null; then
     tag_line="$(grep -m1 -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' "$response" 2>/dev/null || true)"
     version="$(printf '%s\n' "$tag_line" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | tail -n 1 || true)"
@@ -305,7 +305,7 @@ get_remote_revision() {
   curl -fsSL \
     -H 'Accept: application/vnd.github+json' \
     -H 'X-GitHub-Api-Version: 2022-11-28' \
-    -H 'User-Agent: lazy-developer-installer/1.0.0' \
+    -H 'User-Agent: lazy-developer-installer/1.0.1' \
     "$GITHUB_API_URL" -o "$response" || return 1
   grep -m1 -o '"sha"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]\{40\}"' "$response" 2>/dev/null \
     | sed 's/.*"\([0-9a-fA-F]\{40\}\)"/\1/' | head -n 1
@@ -360,7 +360,7 @@ get_rtk_latest_version() {
   response="$TMP_DIR/rtk-release.json"
   curl -fsSL \
     -H 'Accept: application/vnd.github+json' \
-    -H 'User-Agent: lazy-developer-installer/1.0.0' \
+    -H 'User-Agent: lazy-developer-installer/1.0.1' \
     'https://api.github.com/repos/rtk-ai/rtk/releases/latest' -o "$response" || return 1
   grep -m1 -o '"tag_name"[[:space:]]*:[[:space:]]*"v[0-9.]*"' "$response" \
     | sed 's/.*"v\([0-9.]*\)".*/\1/' | head -n 1

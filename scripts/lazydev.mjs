@@ -26,7 +26,7 @@ import { compressAgenticMessages, FOVEANCE_DEFAULTS } from '../systems/token/fov
 import { VirtualContextStore, extractContextPaths } from '../systems/context/virtual-store.mjs';
 import { pruneLazyDevSystemMessages } from '../systems/context/prompt-prune.mjs';
 
-const version = '1.0.0';
+const version = '1.0.1';
 const TOKEN_SAVINGS_FLOOR = 0.75;
 const TOKEN_SAVINGS_TARGET = 0.80;
 const MAX_SKILL_FRACTION = 0.24;

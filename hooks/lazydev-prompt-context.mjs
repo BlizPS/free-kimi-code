@@ -33,7 +33,7 @@ if (task.primary === 'ui') {
   try {
     const ds = generateDesignSystem(prompt, { cwd: record.cwd });
     const out = {
-      version: '1.0.0',
+      version: '1.0.1',
       task: prompt,
       generatedAt: Date.now(),
       stack: ds.stack,

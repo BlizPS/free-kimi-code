@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "lazy-developer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Token-efficient engineering, anti-slop UI/UX, artifact routing, and verification.",
   "author": {
     "name": "BlizPS"

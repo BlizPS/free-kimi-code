@@ -21,7 +21,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 USER_AGENT = os.environ.get("LAZYDEV_BROWSER_USER_AGENT", f"LazyDev-Browser/{VERSION}")
 TIMEOUT = max(3, min(60, int(os.environ.get("LAZYDEV_BROWSER_TIMEOUT_MS", "15000")) / 1000))
 MAX_CHARS = max(2048, min(200000, int(os.environ.get("LAZYDEV_BROWSER_MAX_CHARS", "50000"))))

@@ -1,6 +1,6 @@
 {
   "name": "lazy-developer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Token-efficient engineering workflow, anti-slop UI, artifact routing, and verification for the managed agent adapter.",
   "author": {
     "name": "BlizPS"

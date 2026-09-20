@@ -7,7 +7,7 @@ $ProgressPreference = 'SilentlyContinue'
 
 $Repo = 'BlizPS/lazy-developer-free-kimi-code'
 $Branch = if ($env:LAZYDEV_BRANCH) { $env:LAZYDEV_BRANCH } else { 'main' }
-$LazyDevVersion = '1.0.0'
+$LazyDevVersion = '1.0.1'
 $KimiInstallUrl = 'https://code.kimi.com/kimi-code/install.ps1'
 $KimiReleasesApiUrl = 'https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest'
 $ArchiveUrl = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
@@ -91,7 +91,7 @@ function Ensure-PythonRunner {
     Write-Host '✓ uv is available as the Python bootstrapper.'
 }
 function Get-GitHubRevision {
-    $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.0' }
+    $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.1' }
     try {
         $data = Invoke-RestMethod -Headers $headers -Uri $GitHubApiUrl
         if ($data.sha -match '^[0-9a-fA-F]{40}$') { return $data.sha }
@@ -100,7 +100,7 @@ function Get-GitHubRevision {
 }
 function Get-RtkLatestVersion {
     try {
-        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.0' }
+        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.1' }
         $data = Invoke-RestMethod -Headers $headers -Uri $RtkApiUrl
         if ($data.tag_name -match '^v(\d+\.\d+\.\d+)$') { return $Matches[1] }
     } catch {}
@@ -108,7 +108,7 @@ function Get-RtkLatestVersion {
 }
 function Get-KimiLatestVersion {
     try {
-        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.0' }
+        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.1' }
         $data = Invoke-RestMethod -Headers $headers -Uri $KimiReleasesApiUrl
         $tag = [string]$data.tag_name
         $m = [regex]::Match($tag, '(\d+\.\d+\.\d+)$')
@@ -138,7 +138,7 @@ function Install-Rtk {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-rtk-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmp -Force | Out-Null
     try {
-        $release = Invoke-RestMethod -Headers @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.0' } -Uri $RtkApiUrl
+        $release = Invoke-RestMethod -Headers @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.1' } -Uri $RtkApiUrl
         $asset = $release.assets | Where-Object { $_.name -eq "rtk-$target.zip" } | Select-Object -First 1
         if (-not $asset) { Fail "RTK release $latest does not contain rtk-$target.zip." }
         $archive = Join-Path $tmp $asset.name

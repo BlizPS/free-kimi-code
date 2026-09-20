@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Verify that all shipped LazyDev manifests remain on version 1.0.0."""
+"""Verify that all shipped LazyDev manifests remain on version 1.0.1."""
 from __future__ import annotations
 import json
 import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED = "1.0.0"
+EXPECTED = "1.0.1"
 JSON_FILES = [
     "package.json",
     "kimi.plugin.json",
@@ -24,8 +24,8 @@ def main() -> None:
         assert str(data.get("version")) == EXPECTED, f"{rel}: version mismatch"
     for rel in TEXT_FILES:
         text = (ROOT / rel).read_text(encoding="utf-8")
-        assert re.search(r"(?m)^version:\s*1\.0\.0\s*$", text), f"{rel}: version mismatch"
-    print("PASS: LazyDev version audit 1.0.0")
+        assert re.search(r"(?m)^version:\s*1\.0\.1\s*$", text), f"{rel}: version mismatch"
+    print("PASS: LazyDev version audit 1.0.1")
 
 
 if __name__ == "__main__":
