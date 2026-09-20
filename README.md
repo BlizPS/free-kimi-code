@@ -160,7 +160,7 @@ Then run the normal Lazy Developer installer inside the guest.
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE)
 
 <div align="center">
   <sub>Built by <strong>BlizPS</strong> · Lazy Developer 1.0.1</sub>
