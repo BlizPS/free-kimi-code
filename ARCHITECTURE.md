@@ -69,7 +69,7 @@ Typical entry points include:
 ```bash
 lazydev setup
 lazydev chat
-lazydev sessions
+lazydev resume
 lazydev skills
 lazydev artifact <filename>
 lazydev env
@@ -244,13 +244,15 @@ The artifact layer:
 - preserves existing files;
 - adds a numeric suffix on filename collisions.
 
-For example:
+For example, filenames are chosen from the task rather than fixed template names:
 
 ```text
-report.html
-report1.html
-report2.html
+tiktok.html
+tiktok1.html
+tiktok2.html
 ```
+
+Generic standalone placeholders such as `index.html` are rejected. Existing artifacts are preserved on create/generate requests; only the lowest free numeric suffix is used on collision.
 
 The CLI also exposes artifact inspection through:
 
@@ -278,7 +280,7 @@ Current session route
 Session management remains part of the Kimi Code workflow and is surfaced through:
 
 ```bash
-lazydev sessions
+lazydev resume
 ```
 
 ## 10. Browser and Search

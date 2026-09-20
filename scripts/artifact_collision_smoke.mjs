@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { nextAvailableArtifactName } from '../runtime/artifact-naming.mjs';
+import { isGenericArtifactName, nextAvailableArtifactName } from '../runtime/artifact-naming.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lazydev-artifacts-'));
 const home = path.join(dir, 'kimi-home');
@@ -19,6 +19,8 @@ fs.writeFileSync(path.join(home, 'lazydev-last-prompt.json'), JSON.stringify({ p
 
 try {
   assert.equal(nextAvailableArtifactName(dir, 'report.html'), 'report3.html');
+  assert.equal(isGenericArtifactName('index.html'), true);
+  assert.equal(isGenericArtifactName('tiktok.html'), false);
   assert.equal(nextAvailableArtifactName(dir, 'archive.zip'), 'archive1.zip');
   assert.equal(nextAvailableArtifactName(dir, 'script.ahk'), 'script.ahk');
   assert.equal(nextAvailableArtifactName(dir, 'fresh.html'), 'fresh.html');
@@ -37,6 +39,19 @@ try {
   assert.equal(result.status, 2, `expected collision Write to be blocked: ${result.stderr}`);
   assert.match(result.stderr, /report3\.html/u);
   assert.equal(fs.readFileSync(existing, 'utf8'), 'OLD HTML');
+
+  const generic = spawnSync(process.execPath, [guard], {
+    input: JSON.stringify({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Write',
+      cwd: '/tmp',
+      tool_input: { path: 'index.html', content: '<html></html>' },
+    }),
+    encoding: 'utf8',
+    env,
+  });
+  assert.equal(generic.status, 2, `expected generic standalone name to be blocked: ${generic.stderr}`);
+  assert.match(generic.stderr, /AI-chosen descriptive filename/u);
 
   const legacy = spawnSync(process.execPath, [guard], {
     input: JSON.stringify({

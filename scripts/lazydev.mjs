@@ -2260,7 +2260,7 @@ async function help() {
   line();
   line(`  ${ansi('36','lazydev chat'.padEnd(24))} Open the installed Kimi Code, Codex, or Antigravity UI`);
   line(`  ${ansi('36','lazydev setup'.padEnd(24))} Choose your provider, API key, and model`);
-  line(`  ${ansi('36','lazydev sessions'.padEnd(24))} Work with saved Kimi sessions`);
+  line(`  ${ansi('36','lazydev resume'.padEnd(24))} Resume a saved Kimi, Codex, or Antigravity chat`);
   line(`  ${ansi('36','lazydev skills'.padEnd(24))} Browse bundled LazyDev skills`);
   line(`  ${ansi('36','lazydev artifact'.padEnd(24))} Work with a standalone artifact path`);
   line(`  ${ansi('36','lazydev env'.padEnd(24))} Inspect the current runtime environment`);
@@ -2293,15 +2293,15 @@ function findAvailableAgentCli() {
   for (const command of candidates) if (commandExists(command)) return { command, args: [] };
   return null;
 }
-function runNativeChat() {
+function runNativeCommand(subcommand = 'chat') {
   const pythonFile = path.join(root, 'cli', 'lazydev.py');
   if (!fs.existsSync(pythonFile)) {
     line(red('LazyDev Python runtime is missing: cli/lazydev.py'));
     return 1;
   }
   const candidates = isWin
-    ? [['py.exe', ['-3', pythonFile, 'chat']], ['python.exe', [pythonFile, 'chat']]]
-    : [['python3', [pythonFile, 'chat']], ['python', [pythonFile, 'chat']]];
+    ? [['py.exe', ['-3', pythonFile, subcommand]], ['python.exe', [pythonFile, subcommand]]]
+    : [['python3', [pythonFile, subcommand]], ['python', [pythonFile, subcommand]]];
   for (const [command, args] of candidates) {
     const result = spawnSync(command, args, {
       cwd: process.cwd(),
@@ -2312,12 +2312,15 @@ function runNativeChat() {
     if (result.error && result.error.code === 'ENOENT') continue;
     return typeof result.status === 'number' ? result.status : 1;
   }
-  line(red('Python 3 is required for LazyDev chat. Re-run the official LazyDev installer to repair the runtime.'));
+  line(red('Python 3 is required for LazyDev commands. Re-run the official LazyDev installer to repair the runtime.'));
   return 1;
 }
 
 async function chat() {
-  return runNativeChat();
+  return runNativeCommand('chat');
+}
+async function resume() {
+  return runNativeCommand('resume');
 }
 
 async function main() {
@@ -2334,7 +2337,7 @@ async function main() {
   if (cmd === 'artifact' || cmd === 'artifacts') return artifactCommand(process.argv[3]);
   if (cmd === 'setup') return setup();
   if (cmd === 'chat') return chat();
-  if (cmd === 'sessions') { process.argv.splice(2, 1, 'chat'); process.argv.push('--sessions'); return chat(); }
+  if (cmd === 'resume') return resume();
   line(red(`Unknown command: ${cmd}`));
   await help();
   process.exitCode = 1;

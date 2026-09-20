@@ -132,12 +132,12 @@ Standalone artifacts use the canonical `lazydevfile` directory and **never overw
 - `lazydevfile` is the visible shared workspace/artifact root.
 - Termux/PRoot is the only storage exception for visible artifacts.
 
-Collisions receive the lowest available numeric suffix:
+Filenames are chosen by the active AI from the task and artifact purpose — not from fixed placeholders such as `index.html`. Collisions receive the lowest available numeric suffix before the extension, while the existing artifact stays untouched:
 
 ```text
-report.html
-report1.html
-report2.html
+tiktok.html
+tiktok1.html
+tiktok2.html
 ```
 
 ### 🌐 Search & Browser Resilience
@@ -232,11 +232,23 @@ The repository includes reusable skill assets and compatibility-oriented project
 
 ## 🧰 Useful Commands
 
+## 🔄 Resuming chats
+
+To continue an existing chat instead of starting a new one, run:
+
+```text
+lazydev resume
+```
+
+LazyDev uses the same AI UI selector as `lazydev chat`. Choose Kimi Code, Codex, or Antigravity, then press Enter. Kimi opens its native `/sessions` session picker, Codex launches `codex resume`, and Antigravity opens its native `/resume` conversation picker. The selected UI keeps the LazyDev provider/model routing, MCP, shared Skills, workspace, and runtime configuration active while restoring the saved conversation history.
+
+For Codex, LazyDev supplies resume-time proxy credentials and environment configuration so the resumed thread does not depend on a stale or missing `LAZYDEV_CODEX_API_KEY` in the shell.
+
 ```text
 lazydev help
 lazydev setup
 lazydev chat
-lazydev sessions
+lazydev resume
 lazydev skills
 lazydev artifact <filename>
 lazydev env

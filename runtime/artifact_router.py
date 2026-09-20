@@ -10,8 +10,16 @@ from typing import Any
 from .platform_paths import platform_paths, ensure_artifact_directory
 
 STANDALONE_EXTENSIONS = {
-    ".html", ".htm", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-    ".zip", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".csv", ".md", ".txt",
+    ".html", ".htm", ".css", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
+    ".py", ".go", ".rs", ".java", ".kt", ".kts", ".swift", ".c", ".h", ".cpp", ".hpp",
+    ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".sql", ".json", ".jsonc",
+    ".xml", ".yaml", ".yml", ".toml", ".ini", ".conf", ".env", ".properties",
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip",
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".csv", ".md", ".txt",
+}
+GENERIC_ARTIFACT_STEMS = {
+    "index", "main", "app", "default", "output", "result", "file", "new",
+    "untitled", "document", "artifact", "generated", "temp", "tmp",
 }
 ARTIFACT_INTENT_RE = re.compile(
     r"\b(save|export|download|generate|create|produce|write|artifact|deliverable|make|build|simpan|menyimpan|unduh|hasilkan|buat|bikin|buatin|buatkan|bikinin)\b",
@@ -52,6 +60,23 @@ def _has_project_markers(cwd: Path) -> bool:
         return any((cwd / marker).exists() for marker in PROJECT_MARKERS)
     except OSError:
         return False
+
+
+def is_generic_artifact_name(filename: str) -> bool:
+    stem = Path(str(filename or "")).stem.strip().lower()
+    return stem in GENERIC_ARTIFACT_STEMS
+
+
+def next_available_artifact_name(directory: Path, filename: str) -> str:
+    raw = Path(str(filename or "")).name
+    candidate = directory / raw
+    if not candidate.exists():
+        return raw
+    stem, suffix = Path(raw).stem, Path(raw).suffix
+    index = 1
+    while (directory / f"{stem}{index}{suffix}").exists():
+        index += 1
+    return f"{stem}{index}{suffix}"
 
 
 def should_route(prompt: str, target: Path, cwd: Path) -> bool:
@@ -96,9 +121,9 @@ def route_written_artifact(target: str, prompt: str, cwd: str | None = None) -> 
     if destination.exists():
         stem, suffix = src.stem, src.suffix
         index = 1
-        while (out / f"{stem}-{index}{suffix}").exists():
+        while (out / f"{stem}{index}{suffix}").exists():
             index += 1
-        destination = out / f"{stem}-{index}{suffix}"
+        destination = out / f"{stem}{index}{suffix}"
     try:
         shutil.move(str(src), str(destination))
     except OSError:

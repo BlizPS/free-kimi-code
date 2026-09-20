@@ -3,7 +3,7 @@
 Route: implementation/UI → `lazy-developer`; failure → `lazy-debug`; verification → `lazy-test`; review/audit → `lazy-review`.
 
 Inspect only the relevant scope. Preserve working behavior. Never invent tests/results. Standalone deliverables use `LAZYDEV_ARTIFACT_DIR`; on Termux/PRoot Debian/Ubuntu this is `/storage/emulated/0/lazydevfile`, while Windows/Linux/macOS use the user-home `lazydevfile` directory. Native CLI data stays in each tool’s normal user-home location. Repository source stays in the project workspace. Verify the final path before saying “saved”.
-New standalone files should use descriptive names, not `index.*`; on collision, preserve the existing file and use the lowest free numeric suffix before the extension.
+New standalone files must use an AI-chosen descriptive name derived from the user request and artifact purpose, never `index.*` or another generic placeholder. On collision, preserve the existing file and use the lowest free numeric suffix immediately before the extension: `tiktok.html` → `tiktok1.html` → `tiktok2.html`. This applies to every generated file type, and create/generate/export requests are never allowed to edit or overwrite an existing standalone artifact.
 
 For UI, use the LazyDev anti-slop rules and real responsive/state proof. Avoid generic dashboard/card/gradient/glass decoration.
 

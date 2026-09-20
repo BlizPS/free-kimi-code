@@ -10,7 +10,7 @@ const launcher = fs.readFileSync(path.join(root, 'scripts', 'lazydev.mjs'), 'utf
 assert.doesNotMatch(python, /['\"]--work-dir['\"]/);
 assert.doesNotMatch(launcher, /['\"]--work-dir['\"]/);
 assert.match(python, /subprocess\.call\(\[kimi, \*args\], cwd=str\(workspace\)/);
-assert.match(launcher, /function runNativeChat\(\) \{[\s\S]*?spawnSync\(command, args, \{[\s\S]*?cwd: process\.cwd\(\)/);
+assert.match(launcher, /function runNativeCommand\(subcommand = 'chat'\) \{[\s\S]*?spawnSync\(command, args, \{[\s\S]*?cwd: process\.cwd\(\)/);
 assert.match(python, /args = \[\"--add-dir\", str\(ARTIFACT_DIR\)\]/);
 assert.match(launcher, /const pythonFile = path\.join\(root, 'cli', 'lazydev\.py'\)/);
 console.log('kimi workspace flag smoke: PASS');

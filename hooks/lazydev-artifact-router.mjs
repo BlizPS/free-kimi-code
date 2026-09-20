@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { platformPaths } from '../runtime/platform-policy.mjs';
+import { isGenericArtifactName } from '../runtime/artifact-naming.mjs';
 
-const EXTENSIONS = new Set(['.html','.htm','.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.zip','.png','.jpg','.jpeg','.webp','.gif','.svg','.csv','.md','.txt']);
+const EXTENSIONS = new Set(['.html','.htm','.css','.js','.mjs','.cjs','.ts','.tsx','.jsx','.py','.go','.rs','.java','.kt','.swift','.c','.h','.cpp','.hpp','.sh','.bash','.zsh','.ps1','.bat','.cmd','.sql','.json','.jsonc','.xml','.yaml','.yml','.toml','.ini','.conf','.env','.properties','.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.zip','.png','.jpg','.jpeg','.webp','.gif','.svg','.csv','.md','.txt']);
 const ARTIFACT_INTENT = /\b(save|export|download|generate|create|produce|write|artifact|deliverable|make|build|simpan|menyimpan|unduh|hasilkan|buat|bikin|buatin|buatkan|bikinin)\b/iu;
 const PROJECT_MARKERS = ['.git','package.json','pyproject.toml','go.mod','go.work','Cargo.toml','tsconfig.json','requirements.txt'];
 function norm(p) { return path.resolve(String(p || '')); }
@@ -28,7 +29,7 @@ function shouldRoute(target, cwd, prompt) {
 function availableName(dir, raw) {
   const ext = path.extname(raw), stem = raw.slice(0, raw.length - ext.length);
   let candidate = path.join(dir, raw), i = 1;
-  while (fs.existsSync(candidate)) candidate = path.join(dir, `${stem}-${i++}${ext}`);
+  while (fs.existsSync(candidate)) candidate = path.join(dir, `${stem}${i++}${ext}`);
   return candidate;
 }
 async function main() {
@@ -42,6 +43,7 @@ async function main() {
   try { if (!fs.statSync(target).isFile()) return; } catch { return; }
   const prompt = loadPrompt(); if (!shouldRoute(target, cwd, prompt)) return;
   const out = artifactDir(); fs.mkdirSync(out, { recursive: true });
+  if (isGenericArtifactName(path.basename(target))) return;
   const dest = availableName(out, path.basename(target));
   try { fs.renameSync(target, dest); } catch { try { fs.copyFileSync(target, dest); fs.unlinkSync(target); } catch { return; } }
   process.stdout.write(`LazyDev artifact router: saved standalone deliverable at ${dest}.\n`);

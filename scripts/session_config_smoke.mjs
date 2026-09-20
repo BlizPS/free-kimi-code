@@ -6,6 +6,22 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const launcher = fs.readFileSync(path.join(root, 'scripts', 'lazydev.mjs'), 'utf8');
+const runtime = fs.readFileSync(path.join(root, 'cli', 'lazydev.py'), 'utf8');
+const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+assert.match(runtime, /if cmd == "resume":\s*return chat\(resume=True\)/);
+assert.doesNotMatch(runtime, /if cmd == "sessions":/);
+assert.match(runtime, /return _launch_codex\([\s\S]*?resume=resume/);
+assert.match(runtime, /args = base_args \+ \(\['resume'\] if resume else \[\]\)/);
+assert.match(runtime, /return _launch_with_initial_slash\(agy, args, ARTIFACT_DIR, env, '\/resume'\)/);
+assert.match(runtime, /env\['LAZYDEV_CODEX_API_KEY'\]=token/);
+assert.match(runtime, /env\['CODEX_API_KEY'\]=token/);
+assert.match(runtime, /env\['OPENAI_API_KEY'\]=token/);
+assert.match(runtime, /env\['OPENAI_BASE_URL'\]=f'http:\/\/127\.0\.0\.1:\{responses\.port\}\/v1'/);
+assert.match(launcher, /if \(cmd === 'resume'\) return resume\(\);/);
+assert.doesNotMatch(launcher, /if \(cmd === 'sessions'\)/);
+assert.match(readme, /lazydev resume/);
+assert.doesNotMatch(readme, /lazydev sessions/);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lazydev-session-config-'));
 const bin = path.join(tmp, 'bin');
 const xdg = path.join(tmp, 'xdg');
@@ -51,7 +67,7 @@ try {
   assert.match(args, /--add-dir/);
   assert.doesNotMatch(args, /--mcp-config-file/);
   assert.match(config, /max_steps_per_turn = 0/);
-  console.log('PASS: launch-time config remaps old session models, preserves session files, exposes artifact path, and loads search MCP');
+  console.log('PASS: launch-time config remaps old session models, preserves session files, exposes artifact path, loads search MCP, and supports unified resume routing');
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

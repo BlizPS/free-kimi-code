@@ -8,6 +8,16 @@ function splitFilename(filename) {
   return { stem: raw.slice(0, -ext.length), ext };
 }
 
+const GENERIC_STEMS = new Set([
+  'index', 'main', 'app', 'default', 'output', 'result', 'file', 'new',
+  'untitled', 'document', 'artifact', 'generated', 'temp', 'tmp',
+]);
+
+export function isGenericArtifactName(filename) {
+  const { stem } = splitFilename(path.basename(String(filename || '')));
+  return GENERIC_STEMS.has(stem.trim().toLowerCase());
+}
+
 export function nextAvailableArtifactName(directory, filename) {
   const dir = path.resolve(String(directory || ''));
   const raw = path.basename(String(filename || '').trim());

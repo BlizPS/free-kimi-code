@@ -1770,6 +1770,35 @@ class _ProviderProxy:
                 return out
 
             @staticmethod
+            def _next_artifact_write_path(raw_target: Any, cwd: str) -> tuple[str, bool]:
+                """Return a collision-safe standalone output path for Antigravity writes.
+
+                The native UI can emit write_to_file with Overwrite=true even when the
+                user asked for a new standalone deliverable. Keep existing artifacts
+                immutable and allocate the lowest numeric suffix before the extension.
+                """
+                raw = str(raw_target or "").strip()
+                if not raw:
+                    return raw, False
+                artifact_root = Path(os.environ.get("LAZYDEV_ARTIFACT_DIR") or ARTIFACT_DIR).expanduser().resolve()
+                target = Path(raw).expanduser()
+                if not target.is_absolute():
+                    target = (Path(cwd).expanduser() / target).resolve()
+                else:
+                    target = target.resolve()
+                try:
+                    target.relative_to(artifact_root)
+                except ValueError:
+                    return str(target), False
+                if not target.exists():
+                    return str(target), False
+                stem, suffix = target.stem, target.suffix
+                index = 1
+                while (artifact_root / f"{stem}{index}{suffix}").exists():
+                    index += 1
+                return str(artifact_root / f"{stem}{index}{suffix}"), True
+
+            @staticmethod
             def _normalize_antigravity_tool_args(name: str, raw_args: Any, cwd: str) -> dict[str, Any]:
                 """Normalize model-emitted args to Antigravity's native tool schema.
 
@@ -1818,6 +1847,14 @@ class _ProviderProxy:
                         args["Overwrite"] = False
                     else:
                         args["Overwrite"] = as_bool(args["Overwrite"], False)
+                    # Standalone artifacts are create-only. If the model targets an
+                    # existing artifact, transparently allocate the next AI-like name
+                    # (tiktok.html -> tiktok1.html) instead of editing the old file.
+                    if args.get("TargetFile"):
+                        safe_target, collision = _ProviderProxy._next_artifact_write_path(args.get("TargetFile"), cwd)
+                        if collision:
+                            args["TargetFile"] = safe_target
+                            args["Overwrite"] = False
                     if not isinstance(args.get("Description"), str) or not args["Description"].strip():
                         args["Description"] = "Write requested file"
                     if "IsArtifact" in args:
@@ -1856,6 +1893,8 @@ class _ProviderProxy:
                     "The native Antigravity tools use strict JSON types. Always emit booleans as JSON booleans (true/false), not strings, and WaitMsBeforeAsync as a JSON number.\n"
                     "write_to_file: TargetFile string, CodeContent string, Overwrite boolean, Description string; toolSummary/toolAction are also accepted when requested.\n"
                     f"run_command: CommandLine string, Cwd string (default workspace: {cwd}), WaitMsBeforeAsync integer; toolSummary/toolAction are also accepted when requested.\n"
+                    "Standalone file rule: for create/generate/export requests, choose a semantic filename yourself from the user's request and artifact purpose. Never use index.*, main.*, app.*, output.*, result.*, file.*, untitled.*, or another generic placeholder. This applies to HTML, CSS, JS, TS, JSON, images, documents, and every other generated file type.\n"
+                    "Standalone files are create-only: never overwrite or edit an existing artifact. When the chosen basename already exists, use the lowest free numeric suffix immediately before the extension (tiktok.html -> tiktok1.html -> tiktok2.html).\n"
                     "Do not quote booleans or integers as strings. Current LazyDev model: " + model + "."
                 )
 
@@ -2508,6 +2547,10 @@ def write_runtime_system(provider: dict[str, Any], model: str) -> None:
         f"- Current date: {today}. Treat this only as the current calendar date; never use it as a historical event year.",
         f"- Active provider: {provider['label']}; model: {model}.",
         f"- Standalone artifacts must be saved under the exact canonical directory: {ARTIFACT_DIR}.",
+        "- Standalone generated files are create-only: choose the filename yourself from the user's request and artifact purpose; never use generic placeholders such as index.html, index.css, index.js, main.*, app.*, output.*, result.*, file.*, or untitled.*.",
+        "- Filename policy applies to every generated standalone file type, not only HTML. Prefer a concise semantic basename directly connected to the requested subject, feature, or deliverable.",
+        "- Never overwrite or edit an existing standalone artifact when fulfilling a create/generate/export request. If the desired basename already exists, use the lowest free numeric suffix immediately before the extension: tiktok.html → tiktok1.html → tiktok2.html.",
+        "- For standalone create requests, treat the model-generated filename as part of the answer: do not replace it with index.*, autogenerated placeholders, or a fixed template filename.",
         f"- Local context archive: retain older history outside the physical model window; send only the fitted messages required for the current request.",
         "- File search: Glob uses path=<real directory> and pattern=<relative glob>; never put an absolute path or wildcard into pattern, and never scan OS/system roots.",
         "- Read: max_chars is optional and may be small; use the configured default for normal source files and pagination for large files. Do not emit an artificial minimum-max_chars error.",
@@ -2708,40 +2751,6 @@ def _codex_runtime_home() -> Path:
     return home
 
 
-def _migrate_legacy_codex_project_config() -> None:
-    """Remove only LazyDev-managed provider routing from the workspace config.
-
-    Recent Codex releases intentionally ignore `model_provider` and
-    `model_providers` in project-local `.codex/config.toml`. Older LazyDev
-    releases wrote those keys there, which now produces a warning and can make
-    the workspace look like it controls provider routing when it does not. Keep
-    the migration narrowly scoped to configs that clearly contain the LazyDev
-    provider, and preserve a one-time backup before changing anything.
-    """
-    cfg = ARTIFACT_DIR / ".codex" / "config.toml"
-    if not cfg.exists() or not cfg.is_file():
-        return
-    try:
-        text = cfg.read_text(encoding="utf-8")
-    except OSError:
-        return
-    markers = (
-        'model_provider = "lazydev"',
-        '[model_providers.lazydev]',
-        'name = "LazyDev"',
-        'LazyDevResponsesProxy',
-    )
-    if not any(marker in text for marker in markers):
-        return
-    backup = cfg.with_name("config.toml.lazydev-backup")
-    try:
-        if not backup.exists():
-            backup.write_text(text, encoding="utf-8")
-        cfg.unlink()
-    except OSError:
-        return
-
-
 def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
     # Codex workspace remains the same canonical lazydevfile directory shown
     # in its TUI. Only CODEX_HOME is relocated on Android/Termux so app-server
@@ -2795,6 +2804,9 @@ def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
         'model_provider = "lazydev"',
         f'model_context_window = {int(context)}',
         f'model_max_output_tokens = {int(min(output, CONTEXT_ABSOLUTE_OUTPUT_CAP))}',
+        'developer_instructions = ' + toml_quote(
+            "LazyDev file creation policy: for standalone create/generate/export requests, choose a concise semantic filename yourself from the user's request and the artifact purpose. Never use generic placeholder names such as index.html, index.css, index.js, main.*, app.*, output.*, result.*, file.*, untitled.*, or fixed template names. This applies to every generated file type. Standalone deliverables are create-only: never overwrite or edit an existing artifact. If the intended basename already exists, preserve it and choose the lowest free numeric suffix immediately before the extension, for example tiktok.html -> tiktok1.html -> tiktok2.html. The model-generated filename is part of the deliverable; do not substitute index.* or another placeholder."
+        ),
         f'model_catalog_json = {toml_quote(str(catalog_path))}',
         'approval_policy = "never"',
         'sandbox_mode = "danger-full-access"',
@@ -2984,83 +2996,20 @@ class _ResponsesProxy:
                 except Exception as exc: return self._send(502,{"error":{"message":f"Invalid upstream JSON: {exc}"}})
                 result=self._from_chat(completion)
                 if body.get("stream"):
-                    response_obj = {
-                        "id": result["id"],
-                        "object": result["object"],
-                        "created_at": result["created_at"],
-                        "model": result["model"],
-                        "status": result["status"],
-                        "output": result.get("output", []),
-                        "usage": result.get("usage"),
-                    }
                     events=[
-                        {"type":"response.created","response":response_obj},
-                        {"type":"response.in_progress","response":{"id":result["id"]}},
+                        {"type":"response.created","response":{k:result[k] for k in ("id","object","created_at","model","status")}},
                     ]
-                    output = result.get("output", [])
-                    for output_index, item in enumerate(output):
-                        item_type = item.get("type") if isinstance(item, dict) else None
-                        if item_type == "message":
-                            item_id = str(item.get("id") or f"msg_{secrets.token_hex(6)}")
-                            item = dict(item)
-                            item["id"] = item_id
-                            events.append({"type":"response.output_item.added","output_index":output_index,"item":item})
-                            content = item.get("content") if isinstance(item.get("content"), list) else []
-                            for content_index, part in enumerate(content):
-                                if not isinstance(part, dict):
-                                    continue
-                                part = dict(part)
-                                part.setdefault("type", "output_text")
-                                part.setdefault("annotations", [])
-                                events.append({
-                                    "type":"response.content_part.added",
-                                    "item_id":item_id,
-                                    "output_index":output_index,
-                                    "content_index":content_index,
-                                    "part":part,
-                                })
-                                text = str(part.get("text") or "")
-                                if text:
-                                    events.append({
-                                        "type":"response.output_text.delta",
-                                        "item_id":item_id,
-                                        "output_index":output_index,
-                                        "content_index":content_index,
-                                        "delta":text,
-                                    })
-                                    events.append({
-                                        "type":"response.output_text.done",
-                                        "item_id":item_id,
-                                        "output_index":output_index,
-                                        "content_index":content_index,
-                                        "text":text,
-                                    })
-                                events.append({
-                                    "type":"response.content_part.done",
-                                    "item_id":item_id,
-                                    "output_index":output_index,
-                                    "content_index":content_index,
-                                    "part":part,
-                                })
-                            events.append({"type":"response.output_item.done","output_index":output_index,"item":item})
-                        elif item_type == "function_call":
-                            item_id = str(item.get("id") or f"fc_{secrets.token_hex(6)}")
-                            item = dict(item); item["id"] = item_id
-                            events.append({"type":"response.output_item.added","output_index":output_index,"item":item})
-                            arguments = str(item.get("arguments") or "{}")
-                            events.append({"type":"response.function_call_arguments.delta","item_id":item_id,"output_index":output_index,"delta":arguments})
-                            events.append({"type":"response.function_call_arguments.done","item_id":item_id,"output_index":output_index,"arguments":arguments})
-                            events.append({"type":"response.output_item.done","output_index":output_index,"item":item})
+                    text=str(result.get("output_text") or "")
+                    if text:
+                        events.append({"type":"response.output_text.delta","item_id":result["output"][0]["id"],"output_index":0,"content_index":0,"delta":text})
+                        events.append({"type":"response.output_text.done","item_id":result["output"][0]["id"],"output_index":0,"content_index":0,"text":text})
+                    for item in result.get("output",[]):
+                        if item.get("type")=="function_call":
+                            events.append({"type":"response.output_item.added","output_index":0,"item":item})
+                            events.append({"type":"response.function_call_arguments.delta","item_id":item["id"],"output_index":0,"delta":item["arguments"]})
+                            events.append({"type":"response.function_call_arguments.done","item_id":item["id"],"output_index":0,"arguments":item["arguments"]})
                     events.append({"type":"response.completed","response":result})
-                    chunks=[]
-                    for event in events:
-                        event_type = str(event.get("type") or "message")
-                        chunks.append(
-                            f"event: {event_type}\n".encode("utf-8")
-                            + b"data: " + json.dumps(event,separators=(",",":"),ensure_ascii=False).encode("utf-8")
-                            + b"\n\n"
-                        )
-                    raw=b"".join(chunks)
+                    raw=b"".join((b"data: "+json.dumps(e,separators=(",",":")).encode()+b"\n\n") for e in events)
                     return self._send(200,raw,"text/event-stream")
                 return self._send(200,result)
         return Handler
@@ -3089,20 +3038,96 @@ def _clean_ui_env() -> dict[str, str]:
     return env
 
 
-def _launch_codex(codex: str, proxy: _ProviderProxy, pc: dict[str, Any], workspace: Path, provider: dict[str,Any]) -> int:
+
+def _launch_with_initial_slash(command: str, args: list[str], cwd: Path, env: dict[str, str], slash_command: str) -> int:
+    """Start an interactive CLI, inject one slash command, then relay its PTY to the user."""
+    if os.name == 'nt':
+        try:
+            return subprocess.call([command, '--continue'], cwd=str(cwd), env=env)
+        except KeyboardInterrupt:
+            return 130
+    try:
+        import pty
+        import select
+        import termios
+        import tty
+        master, slave = pty.openpty()
+        proc = subprocess.Popen([command, *args], cwd=str(cwd), env=env,
+                                stdin=slave, stdout=slave, stderr=slave,
+                                close_fds=True, start_new_session=True)
+        os.close(slave)
+        old_attrs = None
+        try:
+            if sys.stdin.isatty():
+                old_attrs = termios.tcgetattr(sys.stdin.fileno())
+                tty.setraw(sys.stdin.fileno())
+            os.write(master, (slash_command.rstrip('\n') + '\n').encode())
+            stdin_fd = sys.stdin.fileno() if sys.stdin.isatty() else None
+            while True:
+                fds = [master] + ([stdin_fd] if stdin_fd is not None else [])
+                readable, _, _ = select.select(fds, [], [], 0.15)
+                if master in readable:
+                    try:
+                        data = os.read(master, 65536)
+                    except OSError:
+                        data = b''
+                    if data:
+                        os.write(sys.stdout.fileno(), data)
+                if stdin_fd is not None and stdin_fd in readable:
+                    try:
+                        data = os.read(stdin_fd, 65536)
+                    except OSError:
+                        data = b''
+                    if data:
+                        os.write(master, data)
+                if proc.poll() is not None:
+                    break
+        finally:
+            if old_attrs is not None:
+                try:
+                    termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_attrs)
+                except Exception:
+                    pass
+            try:
+                os.close(master)
+            except OSError:
+                pass
+        return int(proc.returncode or 0)
+    except (ImportError, OSError):
+        try:
+            return subprocess.call([command, *args], cwd=str(cwd), env=env)
+        except KeyboardInterrupt:
+            return 130
+
+def _launch_codex(codex: str, proxy: _ProviderProxy, pc: dict[str, Any], workspace: Path,
+                 provider: dict[str,Any], resume: bool = False) -> int:
     _ensure_cross_ui_skills()
     responses = _ResponsesProxy(proxy, provider, pc)
     try:
-        _migrate_legacy_codex_project_config()
         home = _write_codex_runtime(responses, pc)
         env = _clean_ui_env()
         env['CODEX_HOME']=str(home); env['LAZYDEV_VERSION']=VERSION
         env['LAZYDEV_ARTIFACT_DIR']=str(ARTIFACT_DIR); env['LAZYDEV_MODEL']=str(pc.get('model') or '')
-        env['LAZYDEV_CODEX_API_KEY']=str(responses.token)
-        env['LAZYDEV_CONTEXT_DIR']=str(HOME / ".lazydev")
-        args=["--config", f"model={toml_quote(str(pc.get('model')))}", "--config", "model_provider=lazydev"]
-        try: return subprocess.call([codex,*args],cwd=str(ARTIFACT_DIR),env=env)
-        except KeyboardInterrupt: return 130
+        token = str(responses.token)
+        # Codex can bootstrap auth through different env paths while spawning its
+        # app-server. Keep every relevant alias on the same ephemeral proxy token.
+        env['LAZYDEV_CODEX_API_KEY']=token
+        env['CODEX_API_KEY']=token
+        env['OPENAI_API_KEY']=token
+        env['OPENAI_BASE_URL']=f'http://127.0.0.1:{responses.port}/v1'
+        env['LAZYDEV_CODEX_RESUME_MODE']='1' if resume else '0'
+        env['LAZYDEV_CONTEXT_DIR']=str(HOME / '.lazydev')
+        base_args=[
+            '--config', f'model={toml_quote(str(pc.get("model")))}',
+            '--config', 'model_provider=lazydev',
+            '--config', 'approval_policy="never"',
+            '--config', 'sandbox_mode="danger-full-access"',
+        ]
+        args = base_args + (['resume'] if resume else [])
+        try:
+            return subprocess.call([codex, *args], cwd=str(ARTIFACT_DIR), env=env)
+        except KeyboardInterrupt:
+            return 130
     finally:
         responses.close()
 
@@ -3119,7 +3144,7 @@ def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
     settings_file.write_text(json.dumps(settings, indent=2)+"\n", encoding="utf-8")
 
     # Antigravity's official global MCP location is native HOME-level config.
-    # Keep unrelated user servers intact and only add/update LazyDev's server.
+    # Keep unrelated user servers intact and only add LazyDev's server entry.
     native_root = HOME / ".gemini" / "config"
     native_root.mkdir(parents=True, exist_ok=True)
     mcp_file = native_root / "mcp_config.json"
@@ -3139,7 +3164,7 @@ def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
     return settings_file, mcp_file
 
 
-def _launch_antigravity(agy: str, provider: dict[str,Any], pc: dict[str,Any], workspace: Path, proxy: _ProviderProxy) -> int:
+def _launch_antigravity(agy: str, provider: dict[str,Any], pc: dict[str,Any], workspace: Path, proxy: _ProviderProxy, resume: bool = False) -> int:
     _ensure_cross_ui_skills()
     _write_antigravity_runtime(pc)
     env=_clean_ui_env()
@@ -3153,11 +3178,14 @@ def _launch_antigravity(agy: str, provider: dict[str,Any], pc: dict[str,Any], wo
     # of which native Gemini model name the UI sends on the wire.
     env['LAZYDEV_ANTIGRAVITY_UPSTREAM_MODEL']=str(pc.get('model') or '')
     args=[]
+    if resume:
+        env['LAZYDEV_RESUME_MODE']='1'
+        return _launch_with_initial_slash(agy, args, ARTIFACT_DIR, env, '/resume')
     try: return subprocess.call([agy,*args],cwd=str(ARTIFACT_DIR),env=env)
     except KeyboardInterrupt: return 130
 
 
-def chat(sessions: bool = False, continue_session: bool = False) -> int:
+def chat(sessions: bool = False, continue_session: bool = False, resume: bool = False) -> int:
     clear_terminal()
     cfg = read_config()
     provider = active_provider(cfg)
@@ -3197,11 +3225,11 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     _ensure_cross_ui_skills()
     workspace = ARTIFACT_DIR
     if ui == "codex":
-        try: return _launch_codex(find_codex() or "codex", proxy, pc, workspace, provider)
+        try: return _launch_codex(find_codex() or "codex", proxy, pc, workspace, provider, resume=resume)
         finally:
             if proxy is not None: proxy.close()
     if ui == "antigravity":
-        try: return _launch_antigravity(find_antigravity() or "agy", provider, pc, workspace, proxy)
+        try: return _launch_antigravity(find_antigravity() or "agy", provider, pc, workspace, proxy, resume=resume)
         finally:
             if proxy is not None: proxy.close()
     kimi = find_kimi()
@@ -3212,7 +3240,7 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     # Kimi Code uses the child process working directory as its workspace root.
     # Do not pass --work-dir: that flag is not supported by every standalone Kimi Code build.
     args = ["--add-dir", str(ARTIFACT_DIR)]
-    if sessions:
+    if resume or sessions:
         args += ["--session", "--model", f"lazydev/{pc.get('model')}"]
     elif continue_session:
         args += ["--continue", "--model", f"lazydev/{pc.get('model')}"]
@@ -3229,6 +3257,7 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     env["LAZYDEV_VERSION"] = VERSION
     env["LAZYDEV_CONTEXT_DIR"] = str(HOME / ".lazydev")
     env["LAZYDEV_MODEL"] = str(pc.get("model"))
+    env["LAZYDEV_RESUME_MODE"] = "1" if resume else "0"
     # Keep Kimi's established in-memory model override contract. These fields
     # outrank on-disk defaults and keep the selected LazyDev provider/model fixed
     # for the lifetime of the child process, including native login/logout edits.
@@ -3576,7 +3605,7 @@ def help_command() -> int:
     rows = [
         ("lazydev chat", "Open the installed Kimi Code, Codex, or Antigravity UI"),
         ("lazydev setup", "Choose provider, API key, and live model"),
-        ("lazydev sessions", "Open saved Kimi sessions"),
+        ("lazydev resume", "Resume a saved Kimi, Codex, or Antigravity chat"),
         ("lazydev skills", "Browse bundled LazyDev skills"),
         ("lazydev artifact", "Show the standalone artifact directory"),
         ("lazydev env", "Inspect the native CLI environment"),
@@ -3633,8 +3662,8 @@ def main(argv: list[str]) -> int:
         return setup()
     if cmd == "chat":
         return chat()
-    if cmd == "sessions":
-        return chat(sessions=True)
+    if cmd == "resume":
+        return chat(resume=True)
     if cmd == "continue":
         return chat(continue_session=True)
     print(f"Unknown command: {cmd}", file=sys.stderr)

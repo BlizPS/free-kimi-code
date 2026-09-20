@@ -1611,7 +1611,7 @@ async function help() {
   line();
   line(`  ${ansi('36','lazydev chat'.padEnd(24))} Open the installed Kimi Code, Codex, or Antigravity UI`);
   line(`  ${ansi('36','lazydev setup'.padEnd(24))} Choose your provider, API key, and model`);
-  line(`  ${ansi('36','lazydev sessions'.padEnd(24))} Work with saved Kimi sessions`);
+  line(`  ${ansi('36','lazydev resume'.padEnd(24))} Resume a saved Kimi, Codex, or Antigravity chat`);
   line(`  ${ansi('36','lazydev skills'.padEnd(24))} Browse bundled LazyDev skills`);
   line(`  ${ansi('36','lazydev artifact'.padEnd(24))} Work with a standalone artifact path`);
   line(`  ${ansi('36','lazydev env'.padEnd(24))} Inspect the current runtime environment`);

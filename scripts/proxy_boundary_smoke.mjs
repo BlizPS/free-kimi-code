@@ -11,10 +11,10 @@ const policy = JSON.parse(fs.readFileSync(path.join(root, 'runtime', 'token-poli
 
 // scripts/lazydev.mjs is intentionally only a thin compatibility wrapper now;
 // cli/lazydev.py owns the canonical chat/runtime implementation.
-assert.match(launcher, /function runNativeChat\(\)/);
+assert.match(launcher, /function runNativeCommand\(subcommand = 'chat'\)/);
 assert.match(launcher, /path\.join\(root, 'cli', 'lazydev\.py'\)/);
 assert.match(launcher, /spawnSync\(command, args/);
-assert.match(launcher, /return runNativeChat\(\);/);
+assert.match(launcher, /return runNativeCommand\('chat'\);/);
 assert.doesNotMatch(launcher, /['"]--config-file['"]/);
 
 // Canonical runtime keeps Kimi's established workspace/proxy boundaries.
@@ -34,7 +34,7 @@ for (const needle of [
   'KIMI_MODEL_MAX_CONTEXT_SIZE',
   'write_kimi_mcp_config',
 ]) assert.ok(runtime.includes(needle), `canonical runtime missing ${needle}`);
-assert.ok(launcher.includes('runNativeChat'), 'compat wrapper must expose native chat delegation');
+assert.ok(launcher.includes('runNativeCommand'), 'compat wrapper must expose native chat delegation');
 
 console.log('proxy boundary smoke: PASS');
 

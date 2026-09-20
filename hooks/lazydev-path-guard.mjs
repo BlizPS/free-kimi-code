@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { platformPaths } from '../runtime/platform-policy.mjs';
-import { nextAvailableArtifactName } from '../runtime/artifact-naming.mjs';
+import { isGenericArtifactName, nextAvailableArtifactName } from '../runtime/artifact-naming.mjs';
 
 function norm(p) { return path.resolve(String(p || '')); }
 function inside(target, root) {
@@ -34,19 +34,25 @@ async function main() {
   const resolved=norm(target);
   const ctx=loadContext();
   const implied=Boolean(ctx.task?.artifact) || explicitArtifactPrompt(ctx.prompt || '');
-  const standaloneExt=/\.(?:html?|pdf|docx?|xlsx?|pptx?|zip|ahk|png|jpe?g|webp|gif|svg|csv|md|txt)$/iu.test(resolved);
+  const standaloneExt=/\.(?:html?|css|js|mjs|cjs|ts|tsx|jsx|py|go|rs|java|kt|swift|c|h|cpp|hpp|sh|bash|zsh|ps1|bat|cmd|sql|json|jsonc|xml|ya?ml|toml|ini|conf|env|properties|pdf|docx?|xlsx?|pptx?|zip|ahk|png|jpe?g|webp|gif|svg|csv|md|txt)$/iu.test(resolved);
   const workspaceRootFile=path.dirname(resolved) === cwd;
   const toolName=String(event.tool_name || '');
   const artifactSegment=path.basename(out);
   const pathSegments=resolved.split(path.sep).filter(Boolean);
   const looksLikeArtifactAlias=pathSegments.includes(artifactSegment) && !inside(resolved,out);
-  // Misplaced standalone files are recoverable: the PostToolUse artifact
-  // router moves successful Write/WriteFile outputs to the canonical path.
-  // Keep this pre-tool hook focused on collision protection.
-  if (implied && /^(?:Write|WriteFile)$/u.test(toolName) && inside(resolved, out) && fs.existsSync(resolved)) {
-    const nextName = nextAvailableArtifactName(out, path.basename(resolved));
-    process.stderr.write(`BLOCKED by LazyDev: the standalone deliverable already exists at ${resolved}. Keep the existing file untouched and retry Write with ${path.join(out, nextName)}. Do not claim success until that exact new path is verified.\n`);
-    process.exit(2);
+  // Standalone deliverables are create-only: never use generic placeholder names
+  // and never overwrite/edit an existing deliverable. The model must choose the
+  // semantic basename itself; the hook only enforces the contract.
+  if (implied && standaloneExt && /^(?:Write|WriteFile)$/u.test(toolName)) {
+    if (isGenericArtifactName(path.basename(resolved))) {
+      process.stderr.write(`BLOCKED by LazyDev: standalone deliverables require an AI-chosen descriptive filename, not ${path.basename(resolved)}. Retry with a semantic name derived from the user's request and artifact purpose (for example, tiktok.html). Do not use index.* or another generic placeholder.\n`);
+      process.exit(2);
+    }
+    if (fs.existsSync(resolved)) {
+      const nextName = nextAvailableArtifactName(out, path.basename(resolved));
+      process.stderr.write(`BLOCKED by LazyDev: standalone deliverables are create-only and ${resolved} already exists. Keep the existing file untouched and retry as ${path.join(out, nextName)}. Use the lowest free numeric suffix before the extension (for example, tiktok1.html). Do not edit or overwrite the existing artifact.\n`);
+      process.exit(2);
+    }
   }
   process.exit(0);
 }

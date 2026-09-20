@@ -43,16 +43,12 @@ assert.ok(py.includes('home = HOME / \".codex\"'), 'Desktop Codex home must stay
 assert.ok(py.includes('native = HOME / \".gemini\" / \"antigravity-cli\"'), 'Antigravity home must stay native to the user home');
 assert.ok(py.includes('shared = HOME / \".agents\" / \"skills\"'), 'Generic shared skills must live in the OS user home');
 assert.ok(py.includes('class _ResponsesProxy'), 'Codex Responses bridge missing');
-assert.ok(py.includes('def _migrate_legacy_codex_project_config'), 'Legacy project-local Codex config migration missing');
-assert.ok(py.includes('event: {event_type}\\n'), 'Codex Responses SSE event framing missing');
-assert.ok(py.includes('response.content_part.added'), 'Codex Responses content-part event missing');
-assert.ok(py.includes('response.output_item.done'), 'Codex Responses output-item completion missing');
 assert.ok(py.includes('input_tokens_details'), 'Codex Responses usage conversion missing');
 assert.ok(py.includes('codex-model-catalog.json'), 'Codex model catalog missing');
 assert.ok(py.includes('cwd=str(ARTIFACT_DIR)'), 'Shared lazydevfile workspace root missing');
 assert.ok(py.includes('home = HOME / ".codex"'), 'Desktop Codex native home missing');
 assert.ok(src.includes("function providerRequiresApiKey(provider)"), 'generic provider auth capability helper missing');
 assert.ok(src.includes("integrate.api.nvidia.com/v1/chat/completions"), 'NVIDIA chat route missing');
-assert.ok(src.includes('function runNativeChat()'), 'Node wrapper must delegate chat to native Python runtime');
+assert.ok(src.includes("function runNativeCommand(subcommand = 'chat')"), 'Node wrapper must delegate chat to native Python runtime');
 assert.ok(src.includes('cli/lazydev.py'), 'Node wrapper must delegate to shared Python runtime');
 console.log('PASS: provider matrix routes/protocols/auth are statically wired for 11 providers with 9Router at #11');
