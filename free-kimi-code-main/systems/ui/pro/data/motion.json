@@ -1,0 +1,42 @@
+[
+  {
+    "id": "micro",
+    "intensity": 2,
+    "timing": "120-180ms",
+    "easing": "ease-out",
+    "use": "press, focus, tiny state changes",
+    "avoid": "ornamental loops"
+  },
+  {
+    "id": "subtle",
+    "intensity": 3,
+    "timing": "160-220ms",
+    "easing": "ease-out",
+    "use": "hover, panel open, status",
+    "avoid": "large travel distance"
+  },
+  {
+    "id": "contextual",
+    "intensity": 5,
+    "timing": "180-320ms",
+    "easing": "cubic-bezier(.2,.8,.2,1)",
+    "use": "media transitions, navigation continuity",
+    "avoid": "blocking content"
+  },
+  {
+    "id": "expressive",
+    "intensity": 7,
+    "timing": "240-500ms",
+    "easing": "cubic-bezier(.16,1,.3,1)",
+    "use": "brand moments",
+    "avoid": "workflow-critical feedback"
+  },
+  {
+    "id": "reduced",
+    "intensity": 1,
+    "timing": "0-120ms",
+    "easing": "linear",
+    "use": "reduced-motion or high-risk surfaces",
+    "avoid": "complex choreography"
+  }
+]

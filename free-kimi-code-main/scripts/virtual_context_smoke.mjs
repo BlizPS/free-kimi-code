@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const s = fs.readFileSync(path.join(root, 'hooks', 'lazydev-statusline.mjs'), 'utf8');
+assert.match(s, /context_window_size/);
+assert.match(s, /LAZYDEV_CONTEXT_EXTRA_MULTIPLIER \|\| 2/);
+assert.match(s, /native/);
+assert.match(s, /virtual:/);
+assert.match(s, /storedTokens|capacityTokens|archive/);
+assert.match(s, /Math\.max\(size, Math\.round\(size \* virtualMultiplier\)\)/);
+console.log('PASS: statusline exposes native context separately from a virtual archive/display window');
+
+assert.ok(!s.includes('borrow a path from the entire transcript'), 'path guard remains focused');

@@ -1,0 +1,104 @@
+[
+  {
+    "id": "html-tailwind",
+    "keywords": [
+      "html",
+      "tailwind",
+      "css"
+    ],
+    "rules": [
+      "centralize semantic tokens with CSS variables",
+      "use utility classes for composition, not arbitrary one-off values",
+      "keep responsive variants intentional"
+    ],
+    "avoid": [
+      "thousands of arbitrary values",
+      "duplicated color literals"
+    ]
+  },
+  {
+    "id": "react",
+    "keywords": [
+      "react",
+      "components",
+      "hooks"
+    ],
+    "rules": [
+      "keep visual state in reusable components",
+      "avoid prop explosions",
+      "prefer semantic component boundaries"
+    ],
+    "avoid": [
+      "one giant page component",
+      "duplicated UI state"
+    ]
+  },
+  {
+    "id": "nextjs",
+    "keywords": [
+      "nextjs",
+      "next.js",
+      "app router",
+      "server components"
+    ],
+    "rules": [
+      "keep client components narrow",
+      "preserve streaming boundaries",
+      "load expensive UI on intent"
+    ],
+    "avoid": [
+      "turning the whole tree client-side",
+      "blocking first paint for optional UI"
+    ]
+  },
+  {
+    "id": "react-native",
+    "keywords": [
+      "react native",
+      "mobile"
+    ],
+    "rules": [
+      "design touch-first",
+      "account for safe areas and keyboard",
+      "prefer platform-appropriate navigation"
+    ],
+    "avoid": [
+      "desktop hover assumptions",
+      "web-only controls"
+    ]
+  },
+  {
+    "id": "flutter",
+    "keywords": [
+      "flutter",
+      "material",
+      "mobile app"
+    ],
+    "rules": [
+      "use theme tokens",
+      "respect platform density and accessibility",
+      "keep scrolling predictable"
+    ],
+    "avoid": [
+      "web layout transplanted without adaptation",
+      "unbounded nested scrolling"
+    ]
+  },
+  {
+    "id": "jetpack-compose",
+    "keywords": [
+      "compose",
+      "android",
+      "jetpack compose"
+    ],
+    "rules": [
+      "centralize Material/theme tokens",
+      "respect window size classes",
+      "use semantics for controls"
+    ],
+    "avoid": [
+      "hard-coded screen sizes",
+      "desktop-only interactions"
+    ]
+  }
+]

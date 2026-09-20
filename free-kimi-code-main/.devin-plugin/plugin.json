@@ -1,0 +1,12 @@
+{
+  "name": "lazy-developer",
+  "version": "1.0.2",
+  "description": "Token-efficient engineering skills with verification, security awareness, and intelligent UI/UX + 3D design-system generation.",
+  "author": {
+    "name": "BlizPS"
+  },
+  "homepage": "https://github.com/BlizPS/free-kimi-code",
+  "repository": "https://github.com/BlizPS/free-kimi-code",
+  "license": "MIT",
+  "skills": "./skills/"
+}
