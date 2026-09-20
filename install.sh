@@ -123,6 +123,14 @@ get_antigravity_latest_version() {
   get_github_release_version "$ANTIGRAVITY_RELEASE_API_URL" "$TMP_DIR/antigravity-release.json"
 }
 
+get_rtk_latest_version() {
+  url="$(curl -fsSL -o /dev/null -w '%{url_effective}' 'https://github.com/rtk-ai/rtk/releases/latest' 2>/dev/null || true)"
+  version="$(printf '%s\n' "$url" | sed -n 's#.*/tag/v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*#\1#p' | head -n 1)"
+  if [ -n "$version" ]; then printf '%s\n' "$version"; return 0; fi
+  response="$TMP_DIR/rtk-release.json"
+  get_github_release_version "https://api.github.com/repos/rtk-ai/rtk/releases/latest" "$response"
+}
+
 get_remote_revision() {
   response_file="$TMP_DIR/lazydev-commit.json"
   if curl -fsSL \
@@ -417,9 +425,14 @@ else
   say "RTK not found — installation available."
 fi
 
-# Wait for all release checks together, instead of making users wait through
-# several serial GitHub requests. Missing components never trigger a release check.
-for pid in ${KIMI_LATEST_PID:-} ${CODEX_LATEST_PID:-} ${AGY_LATEST_PID:-} ${RTK_LATEST_PID:-}; do
+# Start the LazyDev revision check in parallel too. This removes the extra
+# GitHub round-trip that previously happened only after the prompts.
+REMOTE_REVISION_FILE="$TMP_DIR/lazydev-revision"
+(get_remote_revision >"$REMOTE_REVISION_FILE" 2>/dev/null || true) &
+REMOTE_REVISION_PID=$!
+
+# Wait for all release/revision checks together instead of serially.
+for pid in ${KIMI_LATEST_PID:-} ${CODEX_LATEST_PID:-} ${AGY_LATEST_PID:-} ${RTK_LATEST_PID:-} ${REMOTE_REVISION_PID:-}; do
   wait "$pid" 2>/dev/null || true
 done
 
@@ -516,25 +529,8 @@ if [ "$AGY_UPDATE_AVAILABLE" -eq 1 ]; then
   if ask_install_ui "Install/update Antigravity?"; then INSTALL_ANTIGRAVITY=1; else AGY_NEEDS_UPDATE=0; say "Antigravity update/install declined — skipped."; fi
 fi
 
-# RTK is a managed developer dependency. It also checks its current release,
-# but unlike Lazy Developer itself, an offered update can be declined.
-RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
-RTK_CURRENT_VERSION=""
-RTK_LATEST_VERSION=""
-RTK_NEEDS_UPDATE=1
-RTK_UPDATE_AVAILABLE=0
-if [ -n "$RTK_COMMAND" ]; then
-  RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
-fi
-
-get_rtk_latest_version() {
-  url="$(curl -fsSL -o /dev/null -w '%{url_effective}' 'https://github.com/rtk-ai/rtk/releases/latest' 2>/dev/null || true)"
-  version="$(printf '%s\n' "$url" | sed -n 's#.*/tag/v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*#\1#p' | head -n 1)"
-  if [ -n "$version" ]; then printf '%s\n' "$version"; return 0; fi
-  response="$TMP_DIR/rtk-release.json"
-  get_github_release_version "https://api.github.com/repos/rtk-ai/rtk/releases/latest" "$response"
-}
-RTK_LATEST_VERSION="$(get_rtk_latest_version || true)"
+# RTK was already checked in parallel above; only its result is read here.
+RTK_LATEST_VERSION="$(cat "${RTK_LATEST_FILE:-/dev/null}" 2>/dev/null || true)"
 if [ -n "$RTK_COMMAND" ] && [ -n "$RTK_CURRENT_VERSION" ] && [ -n "$RTK_LATEST_VERSION" ]; then
   if version_at_least "$RTK_CURRENT_VERSION" "$RTK_LATEST_VERSION"; then
     RTK_NEEDS_UPDATE=0
@@ -568,7 +564,7 @@ clear 2>/dev/null || true
 # bootstrap until after the quick component detection and user choices.
 ensure_python_runner
 
-REMOTE_REVISION="$(get_remote_revision || true)"
+REMOTE_REVISION="$(cat "$REMOTE_REVISION_FILE" 2>/dev/null || true)"
 [ -n "$REMOTE_REVISION" ] || fatal "Could not read the current Lazy Developer revision from GitHub."
 
 CURRENT_LAZY_VERSION=""
@@ -635,7 +631,7 @@ fi
 if [ "$INSTALL_ANTIGRAVITY" -eq 1 ] && [ "$AGY_NEEDS_UPDATE" -eq 1 ]; then
   step "Installing/updating official Antigravity CLI"
   AGY_LOG="$TMP_DIR/antigravity-install.log"
-  if ! curl -fsSL "$ANTIGRAVITY_INSTALL_URL" | bash -s -- --skip-aliases >"$AGY_LOG" 2>&1; then cat "$AGY_LOG" >&2 || true; fatal "Antigravity installer failed."; fi
+  if ! curl -fsSL "$ANTIGRAVITY_INSTALL_URL" | bash >"$AGY_LOG" 2>&1; then cat "$AGY_LOG" >&2 || true; fatal "Antigravity installer failed."; fi
   PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
   AGY_COMMAND="$(find_antigravity 2>/dev/null || true)"
   [ -n "$AGY_COMMAND" ] || fatal "Antigravity did not install a usable launcher."

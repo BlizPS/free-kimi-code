@@ -439,7 +439,7 @@ if ($InstallAntigravity -and $AgyNeedsUpdate) {
     $agyInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-antigravity-install-" + [guid]::NewGuid().ToString('N') + '.log')
     try {
         Invoke-WebRequest -UseBasicParsing -Uri $AntigravityInstallUrl -OutFile $agyInstallerPath
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agyInstallerPath --skip-aliases *> $agyInstallerLog
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agyInstallerPath *> $agyInstallerLog
         $agyExitCode = $LASTEXITCODE
         if (Test-Path -LiteralPath $agyInstallerLog) { Get-Content -LiteralPath $agyInstallerLog | Write-Host }
         if ($agyExitCode -ne 0) { Fail "Antigravity installer exited with code $agyExitCode." }
