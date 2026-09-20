@@ -26,6 +26,6 @@ assert.doesNotMatch(launcher, /Do not invoke account login, logout/);
 
 console.log('proxy boundary smoke: PASS');
 
-const directEnvGuard = launcher.match(/const modelEnv = proxy \? buildKimiModelEnv\(provider, pc, proxy, budget\) : \{\};/);
-assert.ok(directEnvGuard, 'direct providers must not receive runtime KIMI_MODEL overrides');
-console.log('PASS: direct providers use config.toml instead of forced KIMI_MODEL_* runtime overrides');
+const directEnvGuard = launcher.match(/const modelEnv = proxy && provider\.id !== 'ninerouter' \? buildKimiModelEnv\(provider, pc, proxy, budget\) : \{\};/);
+assert.ok(directEnvGuard, 'direct providers and 9Router must use config.toml when runtime KIMI_MODEL overrides would drop required model metadata');
+console.log('PASS: direct providers use runtime overrides only where safe; 9Router keeps config.toml authoritative for off_effort');

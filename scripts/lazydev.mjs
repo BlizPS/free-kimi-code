@@ -793,6 +793,33 @@ function normalizeModel(item, provider) {
     const toolUse = capabilities.tool_use?.supported === true || capabilities.tools?.supported === true ? true : (capabilities.tool_use?.supported === false || capabilities.tools?.supported === false ? false : null);
     return applyKnownModelLimits({ id, name: String(item.display_name || item.name || id), inputLimit: Number(item.max_input_tokens) || known.inputLimit || null, outputLimit: Number(item.max_tokens) || known.outputLimit || null, contextLimit: Number(item.max_input_tokens) || known.contextLimit || null, live: true, capabilities, toolUse, toolUseSource: toolUse === null ? 'unknown' : 'live' }, provider);
   }
+  if (provider.id === 'ninerouter') {
+    const capabilities = item.capabilities && typeof item.capabilities === 'object' ? item.capabilities : {};
+    const supportedParameters = Array.isArray(item.supported_parameters) ? item.supported_parameters : [];
+    const toolUse = capabilities.tools === true || capabilities.tool_use === true || supportedParameters.includes('tools') ? true : (capabilities.tools === false || capabilities.tool_use === false ? false : null);
+    const reasoning = capabilities.reasoning === true || capabilities.thinking === true || item.reasoning === true || item.thinking === true;
+    const thinkingCanDisable = typeof capabilities.thinkingCanDisable === 'boolean' ? capabilities.thinkingCanDisable : (typeof item.thinkingCanDisable === 'boolean' ? item.thinkingCanDisable : null);
+    const offEffort = String(item.off_effort || item.offEffort || capabilities.off_effort || capabilities.offEffort || '').trim()
+      || (thinkingCanDisable !== false ? 'none' : '');
+    const contextLimit = Number(capabilities.contextWindow) || Number(item.contextWindow) || Number(item.context_window) || Number(item.max_context_size) || Number(item.context_length) || null;
+    const outputLimit = Number(capabilities.maxOutput) || Number(item.maxOutput) || Number(item.max_output) || Number(item.max_completion_tokens) || null;
+    return applyKnownModelLimits({
+      id,
+      name: String(item.name || item.id || id),
+      inputLimit: contextLimit,
+      outputLimit,
+      contextLimit,
+      live: true,
+      supportedParameters,
+      capabilities,
+      reasoning,
+      thinking: reasoning,
+      thinkingCanDisable,
+      offEffort: offEffort || null,
+      toolUse,
+      toolUseSource: toolUse === null ? 'unknown' : 'live',
+    }, provider);
+  }
   const supportedParameters = Array.isArray(item.supported_parameters) ? item.supported_parameters : null;
   const pricing = item.pricing && typeof item.pricing === 'object' ? item.pricing : {};
   const isFree = id === OPENROUTER_FREE_MODEL || /:free$/i.test(id) || (provider.id === 'openrouter' && String(pricing.prompt ?? '') === '0' && String(pricing.completion ?? '') === '0');
@@ -1758,6 +1785,13 @@ function shellQuoteCommand(executable, args = []) {
 }
 function effectiveModelInfo(provider, pc) {
   const info = applyKnownModelLimits({ id: pc?.model, ...(pc?.modelInfo || {}) }, provider);
+  // Kimi Code requires an explicit off_effort for models that reason by default.
+  // 9Router is a gateway and may omit this field from /v1/models, so default only
+  // the gateway's unknown/disable-able case to the standard OpenAI `none` value.
+  if (provider?.id === 'ninerouter' && !info.offEffort && info.thinkingCanDisable !== false) {
+    info.offEffort = 'none';
+    info.offEffortSource = '9router-safe-default';
+  }
   return info;
 }
 
@@ -1784,7 +1818,21 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
   const intelligence = modelIntelligenceProfile(pc.model);
   const nativeTools = nativeToolCapability(provider, pc);
   const toolUse = proxy ? true : nativeTools !== false;
-  const modelCapabilities = toolUse ? (provider.id === 'gemini' ? ['tool_use','thinking','dynamically_loaded_tools'] : ['tool_use','dynamically_loaded_tools']) : [];
+  const liveCaps = pc?.modelInfo?.capabilities && typeof pc.modelInfo.capabilities === 'object' ? pc.modelInfo.capabilities : {};
+  const liveReasoning = pc?.modelInfo?.reasoning === true || pc?.modelInfo?.thinking === true || liveCaps.reasoning === true || liveCaps.thinking === true;
+  const alwaysThinking = provider.id === 'ninerouter' && pc?.modelInfo?.thinkingCanDisable === false && liveReasoning;
+  const modelCapabilities = toolUse
+    ? [
+      'tool_use',
+      ...(provider.id === 'gemini' ? ['thinking'] : []),
+      ...(provider.id !== 'gemini' && liveReasoning ? ['thinking'] : []),
+      ...(alwaysThinking ? ['always_thinking'] : []),
+      'dynamically_loaded_tools',
+    ]
+    : [
+      ...(provider.id !== 'gemini' && liveReasoning ? ['thinking'] : []),
+      ...(alwaysThinking ? ['always_thinking'] : []),
+    ];
   const disabledToolsLines = toolUse ? [] : [
     '',
     '[tools]',
@@ -1834,6 +1882,7 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
     `max_input_size = ${Math.max(1024, budget.input)}`,
     `max_output_size = ${Math.max(256, output)}`, 
     `capabilities = ${JSON.stringify(modelCapabilities)}`,
+    ...(effectiveModelInfo(provider, pc).offEffort ? [`off_effort = ${tomlQuote(effectiveModelInfo(provider, pc).offEffort)}`] : []),
     `display_name = ${tomlQuote(`${provider.label} · ${pc.model}`)}`,
     ``,
     ...sessionAliases
@@ -1846,6 +1895,7 @@ function buildKimiConfig(provider, pc, proxy = null, sessionAliases = []) {
         `max_input_size = ${Math.max(1024, budget.input)}`,
         `max_output_size = ${Math.max(256, output)}`,
         `capabilities = ${JSON.stringify(modelCapabilities)}`,
+        ...(effectiveModelInfo(provider, pc).offEffort ? [`off_effort = ${tomlQuote(effectiveModelInfo(provider, pc).offEffort)}`] : []),
         `display_name = ${tomlQuote(`Session compatibility · ${provider.label} · ${pc.model}`)}`,
         ``,
       ]),
@@ -2314,7 +2364,9 @@ async function chat() {
   const budget = contextBudget(pc.modelInfo);
   const authBridgeStop = startKimiAuthBridge({ configPath, provider, pc, proxy, sessionAliases });
   // The runtime model override keeps the selected LazyDev route stable during the child TUI.
-  const modelEnv = proxy ? buildKimiModelEnv(provider, pc, proxy, budget) : {};
+  // 9Router needs the generated [models] entry (including off_effort) to remain authoritative.
+  // KIMI_MODEL_* creates a temporary in-memory model definition and would drop off_effort.
+  const modelEnv = proxy && provider.id !== 'ninerouter' ? buildKimiModelEnv(provider, pc, proxy, budget) : {};
   const childEnv = {
     ...sanitizeKimiChildEnv(provider),
     ...modelEnv,

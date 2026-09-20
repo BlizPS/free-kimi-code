@@ -175,6 +175,11 @@ def apply_model_limits(model_info: dict[str, Any], provider: dict[str, Any], mod
         info["toolUse"] = bool(known["toolUse"])
     if known.get("offEffort"):
         info["offEffort"] = known["offEffort"]
+    elif str(provider.get("id")) == "ninerouter" and not info.get("offEffort") and info.get("thinkingCanDisable") is not False:
+        # 9Router is an OpenAI-compatible gateway and may omit the disable-effort
+        # metadata. Kimi Code requires an explicit off_effort for default-thinking models.
+        info["offEffort"] = "none"
+        info["offEffortSource"] = "9router-safe-default"
     info["context"] = max(1024, int(info["context"]))
     output_value = min(max(256, int(info["output"])), CONTEXT_ABSOLUTE_OUTPUT_CAP)
     # Live model metadata and exact model rules are authoritative. Provider
@@ -309,6 +314,25 @@ def normalize_model(item: dict[str, Any], provider: dict[str, Any]) -> dict[str,
                 for entry in live_records
             ],
             "pricing": item.get("pricing") if isinstance(item.get("pricing"), dict) else {},
+        }
+        return apply_model_limits(info, provider, raw) | {"id": raw, "name": item.get("name") or raw, "live": True}
+    if pid == "ninerouter":
+        raw = str(item.get("id") or item.get("name") or item.get("model") or "").strip()
+        capabilities = item.get("capabilities") if isinstance(item.get("capabilities"), dict) else {}
+        supported = item.get("supported_parameters") if isinstance(item.get("supported_parameters"), list) else []
+        tool_use = True if capabilities.get("tools") is True or capabilities.get("tool_use") is True or "tools" in supported else False if capabilities.get("tools") is False or capabilities.get("tool_use") is False else None
+        reasoning = bool(capabilities.get("reasoning") is True or capabilities.get("thinking") is True or item.get("reasoning") is True or item.get("thinking") is True)
+        thinking_can_disable = capabilities.get("thinkingCanDisable") if isinstance(capabilities.get("thinkingCanDisable"), bool) else item.get("thinkingCanDisable") if isinstance(item.get("thinkingCanDisable"), bool) else None
+        off_effort = str(item.get("off_effort") or item.get("offEffort") or capabilities.get("off_effort") or capabilities.get("offEffort") or "").strip()
+        if not off_effort and thinking_can_disable is not False:
+            off_effort = "none"
+        context = (_positive_int(capabilities.get("contextWindow")) or _positive_int(item.get("contextWindow")) or _positive_int(item.get("context_window")) or _positive_int(item.get("max_context_size")) or _positive_int(item.get("context_length")))
+        output = (_positive_int(capabilities.get("maxOutput")) or _positive_int(item.get("maxOutput")) or _positive_int(item.get("max_output")) or _positive_int(item.get("max_completion_tokens")))
+        info = {
+            "id": raw, "name": item.get("name") or raw, "context": context, "output": output,
+            "toolUse": tool_use, "toolUseSource": "live" if tool_use is not None else "unknown",
+            "supportedParameters": supported, "capabilities": capabilities, "reasoning": reasoning,
+            "thinking": reasoning, "thinkingCanDisable": thinking_can_disable, "offEffort": off_effort or None,
         }
         return apply_model_limits(info, provider, raw) | {"id": raw, "name": item.get("name") or raw, "live": True}
     if pid == "ollama":
@@ -1551,6 +1575,7 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     if provider["id"] == "gemini" and not is_antigravity_model_name(model):
         capabilities.append("thinking")
     known = known_model_limits(provider, model)
+    info = apply_model_limits(pc.get("modelInfo") if isinstance(pc.get("modelInfo"), dict) else {}, provider, model)
     if provider["id"] == "ollama":
         base = normalize_url(pc.get("baseUrl") or provider["base"]) + "/v1"
     elif provider["id"] == "gemini":
@@ -1592,7 +1617,7 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         f'max_output_size = {safe_output}',
         f'capabilities = {json.dumps(capabilities)}',
         f'display_name = {toml_quote(provider["label"] + " · " + model)}',
-        *( [f'off_effort = {toml_quote(known["offEffort"])}'] if known.get("offEffort") else [] ),
+        *( [f'off_effort = {toml_quote(str(info.get("offEffort")))}'] if info.get("offEffort") else [] ),
         '',
         '[read]',
         'default_max_chars = 100000',
