@@ -166,7 +166,7 @@ function Connect-RtkToKimi([string]$RtkExe) {
     Push-Location $KimiRuntimeHome
     try {
         $env:RTK_TELEMETRY_DISABLED = '1'
-        & $RtkExe init --agent kimi
+        & $RtkExe init --agent kimi --auto-patch
         if ($LASTEXITCODE -ne 0) { Fail "RTK Kimi integration failed with exit code $LASTEXITCODE." }
     } finally { Pop-Location }
 }

@@ -425,7 +425,7 @@ fi
 if [ "$RTK_CONNECT_NEEDED" -ne 0 ]; then
   mkdir -p "$KIMI_RUNTIME_HOME"
   step "Connecting RTK to Kimi Code"
-  (cd "$KIMI_RUNTIME_HOME" && RTK_TELEMETRY_DISABLED=1 "$RTK_COMMAND" init --agent kimi) || fatal "RTK Kimi integration failed."
+  (cd "$KIMI_RUNTIME_HOME" && RTK_TELEMETRY_DISABLED=1 "$RTK_COMMAND" init --agent kimi --auto-patch) || fatal "RTK Kimi integration failed."
   say "✓ RTK is connected to Kimi Code"
 elif [ -n "$RTK_COMMAND" ]; then
   say "RTK Kimi integration already current — skipped."

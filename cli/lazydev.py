@@ -20,6 +20,7 @@ import time
 import http.server
 import http.client
 import io
+import hashlib
 import sys
 import textwrap
 import urllib.error
@@ -87,6 +88,9 @@ CONTEXT_UNKNOWN_OUTPUT_FRACTION = 0.25
 CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768
 CONTEXT_EXTRA_MULTIPLIER = max(1.25, min(4.0, float(os.environ.get("LAZYDEV_CONTEXT_EXTRA_MULTIPLIER", "1.6") or 1.6)))
 CONTEXT_FIT_RATIO = max(0.65, min(0.85, float(os.environ.get("LAZYDEV_CONTEXT_FIT_RATIO", "0.75") or 0.75)))
+CONTEXT_PRUNE_RATIO = max(0.50, min(CONTEXT_FIT_RATIO, float(os.environ.get("LAZYDEV_CONTEXT_PRUNE_RATIO", "0.60") or 0.60)))
+CONTEXT_OUTPUT_KEEP_CHARS = max(360, min(2400, int(os.environ.get("LAZYDEV_CONTEXT_OUTPUT_KEEP_CHARS", "720") or 720)))
+CONTEXT_ARCHIVE_DIR = Path(os.environ.get("LAZYDEV_CONTEXT_ARCHIVE_DIR", str(HOME / ".lazydev" / "tool-archive")))
 CONTEXT_RECENT_MESSAGES = max(4, min(20, int(os.environ.get("LAZYDEV_CONTEXT_RECENT_MESSAGES", "10") or 10)))
 CONTEXT_ARCHIVE_SNIPPET_CHARS = max(80, min(800, int(os.environ.get("LAZYDEV_CONTEXT_ARCHIVE_SNIPPET_CHARS", "240") or 240)))
 CONTEXT_TOOL_RESULT_CHARS = max(400, min(6000, int(os.environ.get("LAZYDEV_CONTEXT_TOOL_RESULT_CHARS", "1200") or 1200)))
@@ -926,20 +930,122 @@ def _estimate_messages_tokens(messages: list[Any]) -> int:
         return 0
 
 
+
+def _tool_message(message: Any) -> bool:
+    return isinstance(message, dict) and message.get("role") in {"tool", "function"}
+
+
+def _signal_tool_lines(text: str) -> list[str]:
+    lines = [line.rstrip() for line in str(text or "").splitlines() if line.strip()]
+    signal = [line for line in lines if re.search(r"\b(error|failed|failure|exception|traceback|warning|denied|timeout|429|500|401|403|not found|invalid|assert|panic|fatal)\b", line, re.I)]
+    if signal:
+        deduped = []
+        seen = set()
+        for line in signal:
+            key = line.strip().lower()
+            if key not in seen:
+                deduped.append(line)
+                seen.add(key)
+        return deduped
+    return []
+
+
+def _archive_tool_output(text: str, *, role: str, source_index: int) -> str | None:
+    raw = str(text or "")
+    if len(raw) < 1800:
+        return None
+    try:
+        CONTEXT_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+        digest = hashlib.sha256(raw.encode("utf-8", "ignore")).hexdigest()[:16]
+        target = CONTEXT_ARCHIVE_DIR / f"tool-{int(time.time())}-{source_index}-{digest}.log"
+        if not target.exists():
+            target.write_text(raw, encoding="utf-8")
+            try:
+                target.chmod(0o600)
+            except OSError:
+                pass
+        return str(target)
+    except OSError:
+        return None
+
+
+def _compact_tool_result_preserving_signal(text: str, max_chars: int, *, archive_path: str | None = None) -> str:
+    raw = str(text or "")
+    if len(raw) <= max_chars:
+        return raw
+    lines = raw.splitlines()
+    signals = _signal_tool_lines(raw)
+    head_budget = max(120, int(max_chars * 0.34))
+    tail_budget = max(100, int(max_chars * 0.24))
+    signal_budget = max(80, max_chars - head_budget - tail_budget - 96)
+    signal_text = "\n".join(signals[: max(1, signal_budget // 80)])
+    if len(signal_text) > signal_budget:
+        signal_text = signal_text[:signal_budget].rstrip()
+    head = raw[:head_budget].rstrip()
+    tail = raw[-tail_budget:].lstrip()
+    parts = [head]
+    if signal_text and signal_text not in head and signal_text not in tail:
+        parts.append("[important output]\n" + signal_text)
+    parts.append("… [LazyDev tool output pruned for context] …")
+    if archive_path:
+        parts.append(f"[full output archived: {archive_path}]")
+    parts.append(tail)
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _rolling_prune_tool_outputs(messages: list[Any], context: int, *, trigger_ratio: float) -> tuple[list[Any], dict[str, Any]]:
+    source = [dict(item) if isinstance(item, dict) else item for item in (messages or [])]
+    if not source:
+        return source, {"changed": False, "saved": 0, "pruned": 0, "archived": 0}
+    before = _estimate_messages_tokens(source)
+    trigger = max(0.5, min(0.9, float(trigger_ratio or CONTEXT_PRUNE_RATIO)))
+    if before < max(1, int(context * trigger)):
+        return source, {"changed": False, "saved": 0, "pruned": 0, "archived": 0}
+    protect = max(CONTEXT_RECENT_MESSAGES, 8)
+    start = max(0, len(source) - protect)
+    pruned = 0
+    archived = 0
+    working = source
+    for idx, msg in enumerate(working):
+        if idx >= start or not _tool_message(msg):
+            continue
+        text = _message_content_text(msg)
+        if len(text) < 1200:
+            continue
+        archive_path = _archive_tool_output(text, role=str(msg.get("role") or "tool"), source_index=idx)
+        compacted = _compact_tool_result_preserving_signal(text, CONTEXT_OUTPUT_KEEP_CHARS, archive_path=archive_path)
+        if compacted != text:
+            msg["content"] = compacted
+            pruned += 1
+            archived += 1 if archive_path else 0
+    after = _estimate_messages_tokens(working)
+    return working, {"changed": after != before, "saved": max(0, before - after), "pruned": pruned, "archived": archived}
+
+
 def _fit_messages_to_context(messages: list[Any], context: int, output_cap: int) -> tuple[list[Any], dict[str, Any]]:
     source = [dict(item) if isinstance(item, dict) else item for item in (messages or [])]
     if not source:
-        return source, {"changed": False, "before": 0, "after": 0, "virtualMultiplier": CONTEXT_EXTRA_MULTIPLIER}
+        return source, {"changed": False, "before": 0, "after": 0, "virtualMultiplier": CONTEXT_EXTRA_MULTIPLIER, "rollingPruned": 0, "archived": 0}
     physical = max(1024, int(context or DEFAULT_MODEL_CONTEXT))
     safe_output = max(256, min(int(output_cap or DEFAULT_MODEL_OUTPUT), max(256, int(physical * 0.25)), CONTEXT_ABSOLUTE_OUTPUT_CAP))
-    # Keep the model's full declared context window. Only reserve space for the
-    # optimized response and a small serialization margin.
+    # Preserve the model's declared context window. Input fitting is driven by
+    # the physical window minus the actual response budget, not a smaller fake window.
     target = max(1024, physical - safe_output - 512)
     before = _estimate_messages_tokens(source)
-    if before <= target:
-        return source, {"changed": False, "before": before, "after": before, "virtualMultiplier": CONTEXT_EXTRA_MULTIPLIER}
+    working, rolling = _rolling_prune_tool_outputs(source, physical, trigger_ratio=CONTEXT_PRUNE_RATIO)
 
-    working = source
+    if _estimate_messages_tokens(working) <= target:
+        after = _estimate_messages_tokens(working)
+        return working, {
+            "changed": working != source,
+            "before": before,
+            "after": after,
+            "virtualMultiplier": CONTEXT_EXTRA_MULTIPLIER,
+            "rollingPruned": rolling["pruned"],
+            "archived": rolling["archived"],
+            "saved": max(0, before - after),
+        }
+
     recent_cut = max(0, len(working) - CONTEXT_RECENT_MESSAGES)
     for idx in range(recent_cut):
         msg = working[idx]
@@ -948,7 +1054,7 @@ def _fit_messages_to_context(messages: list[Any], context: int, output_cap: int)
         text = _message_content_text(msg)
         if not text:
             continue
-        limit = CONTEXT_TOOL_RESULT_CHARS if msg.get("role") in {"tool", "function"} else max(700, CONTEXT_ARCHIVE_SNIPPET_CHARS * 3)
+        limit = CONTEXT_OUTPUT_KEEP_CHARS if _tool_message(msg) else max(700, CONTEXT_ARCHIVE_SNIPPET_CHARS * 3)
         compacted = _compact_message_text(text, limit)
         if compacted != text:
             msg["content"] = compacted
@@ -970,7 +1076,6 @@ def _fit_messages_to_context(messages: list[Any], context: int, output_cap: int)
             hint = f" files={', '.join(paths[-3:])}" if paths else ""
             archive_lines.append(f"[{role}]{hint} {_compact_message_text(text, CONTEXT_ARCHIVE_SNIPPET_CHARS)}")
         archive = "[LazyDev context archive — older conversation kept outside the physical model window]\n" + "\n".join(archive_lines)
-        # Archive capacity scales with the physical window, while never becoming the majority of it.
         archive_chars = max(600, int(max(600, target * 3.6 * 0.18)))
         archive = _compact_message_text(archive, archive_chars)
         system_msgs = [m for m in working if isinstance(m, dict) and m.get("role") == "system"]
@@ -981,7 +1086,9 @@ def _fit_messages_to_context(messages: list[Any], context: int, output_cap: int)
         removable = [i for i, m in enumerate(working) if isinstance(m, dict) and m.get("role") != "system"]
         if len(removable) <= 3:
             break
-        working.pop(removable[0])
+        # Remove oldest non-system/tool material first. Recent turns remain protected.
+        victim = removable[0]
+        working.pop(victim)
 
     while _estimate_messages_tokens(working) > target:
         changed = False
@@ -991,7 +1098,12 @@ def _fit_messages_to_context(messages: list[Any], context: int, output_cap: int)
             text = _message_content_text(msg)
             if len(text) <= 240:
                 continue
-            msg["content"] = _compact_message_text(text, max(240, len(text) // 2))
+            limit = max(240, len(text) // 2)
+            if _tool_message(msg):
+                archive_path = _archive_tool_output(text, role=str(msg.get("role") or "tool"), source_index=idx)
+                msg["content"] = _compact_tool_result_preserving_signal(text, min(limit, CONTEXT_OUTPUT_KEEP_CHARS), archive_path=archive_path)
+            else:
+                msg["content"] = _compact_message_text(text, limit)
             changed = True
             if _estimate_messages_tokens(working) <= target:
                 break
@@ -999,7 +1111,15 @@ def _fit_messages_to_context(messages: list[Any], context: int, output_cap: int)
             break
 
     after = _estimate_messages_tokens(working)
-    return working, {"changed": working != source, "before": before, "after": after, "virtualMultiplier": CONTEXT_EXTRA_MULTIPLIER}
+    return working, {
+        "changed": after != before or working != source,
+        "before": before,
+        "after": after,
+        "virtualMultiplier": CONTEXT_EXTRA_MULTIPLIER,
+        "rollingPruned": rolling["pruned"],
+        "archived": rolling["archived"],
+        "saved": max(0, before - after),
+    }
 
 
 def _synthetic_tool_prompt(tools: list[dict[str, Any]], max_chars: int = SYNTHETIC_TOOL_MAX_SCHEMA_CHARS) -> str:
@@ -1634,7 +1754,7 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     safe_output = max(256, min(output, max(256, int(context * output_fraction)), CONTEXT_ABSOLUTE_OUTPUT_CAP))
     dynamic_ratio = 0.07 if context <= 16384 else 0.06 if context <= 32768 else 0.05 if context <= 65536 else 0.04
     reserve = max(768, min(int(context * 0.10), int(context * dynamic_ratio)))
-    input_limit = max(1024, context - reserve)
+    input_limit = max(1024, context)
     compaction_trigger = CONTEXT_FIT_RATIO
     native_tools = native_tool_capability(pc)
     tool_use = True if proxy is not None else native_tools is not False
@@ -1707,6 +1827,9 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
         '[thinking]',
         f'enabled = {"true" if provider["id"] == "gemini" else "false"}',
         'effort = "low"' if provider["id"] == "gemini" else '',
+        '',
+        '[experimental]',
+        'tool-select = true',
         '',
         '[loop_control]',
         'max_attempts_per_step = 10',
@@ -1902,6 +2025,9 @@ def chat(sessions: bool = False, continue_session: bool = False) -> int:
     env["LAZYDEV_TRANSIENT_RETRIES"] = str(PROXY_MAX_RETRIES)
     env["LAZYDEV_READ_MAX_CHARS"] = os.environ.get("LAZYDEV_READ_MAX_CHARS", "500000")
     env["LAZYDEV_CONTEXT_FIT_RATIO"] = str(CONTEXT_FIT_RATIO)
+    env["LAZYDEV_CONTEXT_PRUNE_RATIO"] = str(CONTEXT_PRUNE_RATIO)
+    env["LAZYDEV_CONTEXT_OUTPUT_KEEP_CHARS"] = str(CONTEXT_OUTPUT_KEEP_CHARS)
+    env["LAZYDEV_CONTEXT_ARCHIVE_DIR"] = str(CONTEXT_ARCHIVE_DIR)
     env["LAZYDEV_CONTEXT_RECENT_MESSAGES"] = str(CONTEXT_RECENT_MESSAGES)
     for name in list(env):
         if name.startswith("KIMI_MODEL_"):

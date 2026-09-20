@@ -15,7 +15,7 @@ export function computeTokenBudget(input = {}) {
   const output = Math.max(256, Math.min(rawOutput, Math.floor(max * outputFraction), Number(input.absoluteOutputCap) || 32768));
   const reserve = Math.max(DEFAULTS.reserveFloor, Math.min(output, Math.floor(max * 0.25)));
   const inputBudget = Math.max(DEFAULTS.inputFloor, max - reserve);
-  const trigger = Math.max(0.50, Math.min(0.90, Number(input.compactionRatio) || 0.90));
+  const trigger = Math.max(0.50, Math.min(0.90, Number(input.compactionRatio) || 0.75));
   return Object.freeze({ max, output, reserve, input: inputBudget, trigger });
 }
 
@@ -42,7 +42,7 @@ export function shouldCompact(usage = {}) {
   const max = Math.max(1, Number(usage.max ?? usage.contextLimit) || 1);
   const used = Math.max(0, Number(usage.used ?? usage.inputTokens) || 0);
   const reserve = Math.max(0, Number(usage.reserve) || 0);
-  const ratio = Math.min(0.99, Math.max(0.5, Number(usage.trigger ?? usage.compactionRatio) || 0.88));
+  const ratio = Math.min(0.99, Math.max(0.5, Number(usage.trigger ?? usage.compactionRatio) || 0.75));
   return used >= max * ratio || max - used <= reserve;
 }
 

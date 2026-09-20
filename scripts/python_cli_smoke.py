@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory() as td:
         assert model_entry["max_context_size"] == 131072
         assert model_entry["max_context_size"] > 0
         assert model_entry["max_output_size"] == 16384
-        assert model_entry["max_input_size"] == 125830
+        assert model_entry["max_input_size"] == 131072
 
         # The exact NVIDIA model has a documented 1M context and agent/tool
         # support; when metadata is absent the built-in model rule supplies it.
@@ -80,7 +80,7 @@ with tempfile.TemporaryDirectory() as td:
         parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
         model_entry = parsed["models"]["lazydev/Nvidia/nemotron-3-super-120b-a12b"]
         assert model_entry["max_context_size"] == 1048576
-        assert model_entry["max_input_size"] == 1006633
+        assert model_entry["max_input_size"] == 1048576
         assert model_entry["max_output_size"] == 32768
         assert "tool_use" in model_entry["capabilities"]
         assert model_entry["off_effort"] == "none"
