@@ -620,8 +620,16 @@ fi
 
 if [ "$INSTALL_CODEX" -eq 1 ] && [ "$CODEX_NEEDS_UPDATE" -eq 1 ]; then
   step "Installing/updating official Codex CLI"
+  CODEX_INSTALL_SCRIPT="$TMP_DIR/codex-install.sh"
   CODEX_LOG="$TMP_DIR/codex-install.log"
-  if ! curl -fsSL "$CODEX_INSTALL_URL" | sh >"$CODEX_LOG" 2>&1; then cat "$CODEX_LOG" >&2 || true; fatal "Codex installer failed."; fi
+  if ! curl -fsSL "$CODEX_INSTALL_URL" -o "$CODEX_INSTALL_SCRIPT"; then
+    fatal "Could not download the official Codex installer."
+  fi
+  if ! sh "$CODEX_INSTALL_SCRIPT" >"$CODEX_LOG" 2>&1; then
+    cat "$CODEX_LOG" >&2 || true
+    fatal "Codex installer failed."
+  fi
+  cat "$CODEX_LOG"
   PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
   CODEX_COMMAND="$(find_codex 2>/dev/null || true)"
   [ -n "$CODEX_COMMAND" ] || fatal "Codex did not install a usable launcher."
@@ -630,8 +638,16 @@ fi
 
 if [ "$INSTALL_ANTIGRAVITY" -eq 1 ] && [ "$AGY_NEEDS_UPDATE" -eq 1 ]; then
   step "Installing/updating official Antigravity CLI"
+  AGY_INSTALL_SCRIPT="$TMP_DIR/antigravity-install.sh"
   AGY_LOG="$TMP_DIR/antigravity-install.log"
-  if ! curl -fsSL "$ANTIGRAVITY_INSTALL_URL" | bash >"$AGY_LOG" 2>&1; then cat "$AGY_LOG" >&2 || true; fatal "Antigravity installer failed."; fi
+  if ! curl -fsSL "$ANTIGRAVITY_INSTALL_URL" -o "$AGY_INSTALL_SCRIPT"; then
+    fatal "Could not download the official Antigravity installer."
+  fi
+  if ! bash "$AGY_INSTALL_SCRIPT" >"$AGY_LOG" 2>&1; then
+    cat "$AGY_LOG" >&2 || true
+    fatal "Antigravity installer failed."
+  fi
+  cat "$AGY_LOG"
   PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
   AGY_COMMAND="$(find_antigravity 2>/dev/null || true)"
   [ -n "$AGY_COMMAND" ] || fatal "Antigravity did not install a usable launcher."
