@@ -43,7 +43,7 @@ function Remove-CommandShims {
         $path = $cmd.Source
         if (-not $path) { continue }
         switch -Regex ($cmd.Name) {
-            '^lazydev' { Remove-IfManagedFile $path 'Lazy Developer managed launcher|lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code' }
+            '^lazydev' { Remove-IfManagedFile $path 'Lazy Developer managed launcher|lazydev\.mjs|@blizps/lazy-developer|free-kimi-code' }
             '^kimi' { Remove-IfManagedFile $path '\.kimi-code|kimi-code|@moonshot-ai/kimi-code' }
             '^rtk' { Remove-IfManagedFile $path 'rtk-ai/rtk|Rust Token Killer' }
         }

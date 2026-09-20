@@ -1479,8 +1479,8 @@ function ensureKimiInstalled() {
   if (launcher) return true;
   console.error(red(`Lazy Developer requires an installed Kimi Code CLI.`));
   console.error('Install it with the Lazy Developer installer, then run: lazydev chat');
-  console.error('macOS/Linux: curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.sh" | sh');
-  console.error('Windows PowerShell: irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1" -OutFile "$env:TEMP\lazydev-install.ps1"; & "$env:TEMP\lazydev-install.ps1"');
+  console.error('macOS/Linux: curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install.sh" | sh');
+  console.error('Windows PowerShell: irm "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install.ps1" -OutFile "$env:TEMP\lazydev-install.ps1"; & "$env:TEMP\lazydev-install.ps1"');
   return false;
 }
 function tomlQuote(text) { return JSON.stringify(String(text)); }

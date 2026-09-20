@@ -106,8 +106,8 @@ if 'scripts/lazydev.mjs' in sh or 'scripts\\lazydev.mjs' in ps:
     pass
 
 if pkg.get('version') != '1.0.1': errors.append('package version is not 1.0.1')
-if pkg.get('homepage') != 'https://github.com/BlizPS/lazy-developer-free-kimi-code': errors.append('package homepage mismatch')
-if pkg.get('repository',{}).get('url') != 'git+https://github.com/BlizPS/lazy-developer-free-kimi-code.git': errors.append('package repository URL mismatch')
+if pkg.get('homepage') != 'https://github.com/BlizPS/free-kimi-code': errors.append('package homepage mismatch')
+if pkg.get('repository',{}).get('url') != 'git+https://github.com/BlizPS/free-kimi-code.git': errors.append('package repository URL mismatch')
 for p in ROOT.rglob('*'):
     if not p.is_file() or '.git' in p.parts or p == ROOT/'scripts/installer_smoke.py': continue
     if p.suffix.lower() not in {'.md','.json','.yml','.yaml','.toml','.mjs','.js','.py','.sh','.ps1','.txt'}: continue

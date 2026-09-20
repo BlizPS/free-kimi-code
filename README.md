@@ -7,14 +7,14 @@
   <br>
   <br>
 
-  [![Version](https://img.shields.io/badge/version-1.0.1-7C3AED?style=for-the-badge)](https://github.com/BlizPS/lazy-developer-free-kimi-code)
+  [![Version](https://img.shields.io/badge/version-1.0.1-7C3AED?style=for-the-badge)](https://github.com/BlizPS/free-kimi-code)
   [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E?style=for-the-badge)](LICENSE)
   [![Platforms](https://img.shields.io/badge/platform-macOS%20·%20Linux%20·%20Windows%20·%20Termux-0EA5E9?style=for-the-badge)](#-installation)
-  [![Stars](https://img.shields.io/github/stars/BlizPS/lazy-developer-free-kimi-code?style=for-the-badge&color=F59E0B)](https://github.com/BlizPS/lazy-developer-free-kimi-code/stargazers)
+  [![Stars](https://img.shields.io/github/stars/BlizPS/free-kimi-code?style=for-the-badge&color=F59E0B)](https://github.com/BlizPS/free-kimi-code/stargazers)
 
   <p>
-    <a href="https://github.com/BlizPS/lazy-developer-free-kimi-code/issues">Issues</a> ·
-    <a href="https://github.com/BlizPS/lazy-developer-free-kimi-code/discussions">Discussions</a>
+    <a href="https://github.com/BlizPS/free-kimi-code/issues">Issues</a> ·
+    <a href="https://github.com/BlizPS/free-kimi-code/discussions">Discussions</a>
   </p>
 
   <p>
@@ -141,13 +141,13 @@ Large outputs can also be handled without blindly filling the active context.
 ### macOS / Linux
 
 ```sh
-curl -fsSL "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.sh" | sh
+curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install.sh" | sh
 ```
 
 ### Windows PowerShell
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/lazy-developer-free-kimi-code/main/install.ps1")))
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install.ps1")))
 ```
 
 Then:
@@ -162,7 +162,7 @@ lazydev chat
 The bundled skills can also be installed independently for compatible agent CLIs:
 
 ```sh
-npx skills add BlizPS/lazy-developer-free-kimi-code --all
+npx skills add BlizPS/free-kimi-code --all
 ```
 
 ## 🚀 Quick Start

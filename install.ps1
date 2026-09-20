@@ -5,7 +5,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$Repo = 'BlizPS/lazy-developer-free-kimi-code'
+$Repo = 'BlizPS/free-kimi-code'
 $Branch = if ($env:LAZYDEV_BRANCH) { $env:LAZYDEV_BRANCH } else { 'main' }
 $LazyDevVersion = '1.0.1'
 $KimiInstallUrl = 'https://code.kimi.com/kimi-code/install.ps1'
@@ -318,7 +318,7 @@ function Refresh-ExistingLazyDevLaunchers {
         if ($path -eq $canonical) { continue }
         try {
             $text = Get-Content -Raw -LiteralPath $path -ErrorAction Stop
-            if ($text -match 'Lazy Developer managed launcher|lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code') {
+            if ($text -match 'Lazy Developer managed launcher|lazydev\.mjs|@blizps/lazy-developer|free-kimi-code') {
                 Copy-Item -LiteralPath $canonical -Destination $path -Force
                 Write-Host "✓ Refreshed existing LazyDev launcher: $path"
             }

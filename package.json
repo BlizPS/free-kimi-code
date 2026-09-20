@@ -19,13 +19,13 @@
   "author": {
     "name": "BlizPS"
   },
-  "homepage": "https://github.com/BlizPS/lazy-developer-free-kimi-code",
+  "homepage": "https://github.com/BlizPS/free-kimi-code",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BlizPS/lazy-developer-free-kimi-code.git"
+    "url": "git+https://github.com/BlizPS/free-kimi-code.git"
   },
   "bugs": {
-    "url": "https://github.com/BlizPS/lazy-developer-free-kimi-code/issues"
+    "url": "https://github.com/BlizPS/free-kimi-code/issues"
   },
   "bin": {
     "lazydev": "./cli/lazydev.py"

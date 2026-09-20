@@ -60,10 +60,10 @@ remove_managed_launchers_from_path() {
       if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then continue; fi
       case "$name" in
         lazydev)
-          if is_managed_file "$candidate" 'Lazy Developer managed launcher|scripts/lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code'; then rm -f "$candidate" 2>/dev/null || true;
+          if is_managed_file "$candidate" 'Lazy Developer managed launcher|scripts/lazydev\.mjs|@blizps/lazy-developer|free-kimi-code'; then rm -f "$candidate" 2>/dev/null || true;
           elif [ -L "$candidate" ]; then
             link_target="$(readlink "$candidate" 2>/dev/null || true)"
-            if printf '%s\n' "$link_target" | grep -Eq 'lazydev|lazy-developer-free-kimi-code|scripts/lazydev'; then rm -f "$candidate" 2>/dev/null || true; fi
+            if printf '%s\n' "$link_target" | grep -Eq 'lazydev|free-kimi-code|scripts/lazydev'; then rm -f "$candidate" 2>/dev/null || true; fi
           fi
           ;;
         kimi)

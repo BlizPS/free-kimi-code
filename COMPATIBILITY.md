@@ -4,30 +4,51 @@ Lazy Developer has two sides: the built-in CLI experience and a portable skills/
 
 ## LazyDev CLI
 
-The built-in chat flow uses Kimi Code as its agent shell. Configure the provider, API key, and model with `lazydev setup`, then start with `lazydev chat`.
-
-Supported managed providers: Gemini, OpenRouter, NVIDIA, Anthropic, and OpenAI.
-
-## Other coding agents
-
-Use the universal Skills CLI when you want Lazy Developer's skills inside another compatible agent:
+The built-in chat flow uses Kimi Code as its agent shell. Configure your provider, credentials, and model with `lazydev setup`, then start with:
 
 ```bash
-npx skills add BlizPS/lazy-developer-free-kimi-code --all
+lazydev chat
+```
+
+Available providers and models are detected through the current Lazy Developer setup. Run:
+
+```bash
+lazydev setup
+```
+
+to view the providers, models, credentials, and capabilities available in your environment.
+
+## Other Coding Agents
+
+Use the universal Skills CLI when you want to use Lazy Developer's skills inside another compatible coding agent:
+
+```bash
+npx skills add BlizPS/free-kimi-code --all
 ```
 
 For a specific target supported by the Skills CLI:
 
 ```bash
-npx skills add BlizPS/lazy-developer-free-kimi-code --agent claude-code
+npx skills add BlizPS/free-kimi-code --agent claude-code
 ```
 
-LazyDev itself already bundles its own skills, so this universal install is for other agents, not for `lazydev chat`.
+LazyDev already bundles its own skills, so this universal installation is intended for other compatible agents, not for `lazydev chat`.
 
-## Plugins and extensions
+## Plugins and Extensions
 
-Native integration metadata is included for compatible coding-agent ecosystems. Use each host's normal plugin or extension installation flow.
+Native integration metadata is included for compatible coding-agent ecosystems.
+
+Use each host's standard plugin or extension installation flow to enable Lazy Developer where supported.
 
 ## Platforms
 
-Lazy Developer runtime paths include Windows, Linux, macOS, and Termux. The one-line desktop installer targets macOS/Linux/Windows because Kimi Code's current native installer does not provide an Android/Termux path.
+Lazy Developer supports runtime environments including:
+
+- Windows
+- Linux
+- macOS
+- Termux
+
+The one-line desktop installer targets Windows, Linux, and macOS.
+
+Kimi Code's current native installation flow does not provide a dedicated Android/Termux installation path, so Termux users should use the supported runtime and setup flow provided by Lazy Developer.

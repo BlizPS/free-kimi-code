@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO="BlizPS/lazy-developer-free-kimi-code"
+REPO="BlizPS/free-kimi-code"
 BRANCH="${LAZYDEV_BRANCH:-main}"
 LAZYDEV_VERSION="1.0.1"
 KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"
@@ -137,7 +137,7 @@ is_lazydev_launcher() {
       # that cached the old path with `hash` immediately resolve the new file.
       return 0
     fi
-    if printf '%s\n' "$link_target" | grep -Eq 'lazydev|scripts/lazydev\.mjs|lazy-developer-free-kimi-code'; then
+    if printf '%s\n' "$link_target" | grep -Eq 'lazydev|scripts/lazydev\.mjs|free-kimi-code'; then
       return 0
     fi
     if command -v readlink >/dev/null 2>&1; then
@@ -146,7 +146,7 @@ is_lazydev_launcher() {
     fi
   fi
   [ -f "$target" ] || return 1
-  grep -Eq 'Lazy Developer managed launcher|cli/lazydev\.py|scripts/lazydev\.mjs|@blizps/lazy-developer|lazy-developer-free-kimi-code' "$target" 2>/dev/null
+  grep -Eq 'Lazy Developer managed launcher|cli/lazydev\.py|scripts/lazydev\.mjs|@blizps/lazy-developer|free-kimi-code' "$target" 2>/dev/null
 }
 
 # If a previous install left a lazydev command in an earlier PATH entry,
