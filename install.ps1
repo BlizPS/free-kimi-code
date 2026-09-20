@@ -7,6 +7,9 @@ $ProgressPreference = 'SilentlyContinue'
 
 $Repo = 'BlizPS/free-kimi-code'
 $Branch = if ($env:LAZYDEV_BRANCH) { $env:LAZYDEV_BRANCH } else { 'main' }
+
+# Prefer bundled source when this script is executed from an extracted archive.
+$LocalSourceDir = if ($env:LAZYDEV_SOURCE_DIR) { $env:LAZYDEV_SOURCE_DIR } elseif ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'package.json')) -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'cli\lazydev.py'))) { $PSScriptRoot } else { '' }
 $LazyDevVersion = '1.0.2'
 $KimiInstallUrl = 'https://code.kimi.com/kimi-code/install.ps1'
 $CodexInstallUrl = 'https://chatgpt.com/codex/install.ps1'
@@ -387,11 +390,30 @@ Clear-Host
 # bootstrap until after the quick component detection and user choices.
 Ensure-PythonRunner
 
-$RemoteRevision = Get-GitHubRevision
+$RemoteRevision = if ($LocalSourceDir) { 'local' } else { Get-GitHubRevision }
 if (-not $RemoteRevision) { Fail 'Could not read the current Lazy Developer revision from GitHub.' }
 $InstalledLazyVersion = Get-InstalledLazyVersion
 $InstalledLazyRevision = Get-InstalledLazyRevision
 $Launcher = Join-Path $BinRoot 'lazydev.cmd'
+$LazyDevFeatureRefresh = $false
+$installedPy = Join-Path $InstallRoot 'cli\lazydev.py'
+if (-not (Test-Path -LiteralPath $installedPy -PathType Leaf)) {
+    $LazyDevFeatureRefresh = $true
+} else {
+    try {
+        $pyText = Get-Content -Raw -LiteralPath $installedPy
+        if ($pyText -notmatch 'if cmd == "resume":\s*return chat\(resume=True\)' -or $pyText -match ('lazydev ' + 'sessions')) { $LazyDevFeatureRefresh = $true }
+    } catch { $LazyDevFeatureRefresh = $true }
+}
+$installedMjs = Join-Path $InstallRoot 'scripts\lazydev.mjs'
+if (-not (Test-Path -LiteralPath $installedMjs -PathType Leaf)) {
+    $LazyDevFeatureRefresh = $true
+} else {
+    try {
+        $mjsText = Get-Content -Raw -LiteralPath $installedMjs
+        if ($mjsText -notmatch "if \(cmd === 'resume'\) return resume\(\);" -or $mjsText -match "if \(cmd === 'sessions'\)") { $LazyDevFeatureRefresh = $true }
+    } catch { $LazyDevFeatureRefresh = $true }
+}
 $LazyInstallComplete = (Test-Path -LiteralPath (Join-Path $InstallRoot 'package.json') -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $InstallRoot 'cli\lazydev.py') -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $InstallRoot 'skills\lazy-developer\SKILL.md') -PathType Leaf) -and
@@ -401,7 +423,13 @@ $LazyInstallComplete = (Test-Path -LiteralPath (Join-Path $InstallRoot 'package.
     (Test-Path -LiteralPath (Join-Path $InstallRoot 'cli\lazydev.py') -PathType Leaf) -and
     (Test-Path -LiteralPath $Launcher -PathType Leaf)
 $LazyDevNeedsUpdate = $true
-if ($InstalledLazyVersion -and $InstalledLazyVersion -ne $LazyDevVersion) {
+if ($LocalSourceDir) {
+    $LazyDevNeedsUpdate = $true
+    Write-Host "Using local Lazy Developer source: $LocalSourceDir"
+} elseif ($LazyDevFeatureRefresh) {
+    $LazyDevNeedsUpdate = $true
+    Write-Host 'Installed Lazy Developer is missing the current command surface — refreshing Lazy Developer only.'
+} elseif ($InstalledLazyVersion -and $InstalledLazyVersion -ne $LazyDevVersion) {
     Write-Host "Lazy Developer version $InstalledLazyVersion differs from $LazyDevVersion — update required."
 } elseif ($LazyInstallComplete -and $InstalledLazyRevision -and $InstalledLazyRevision -eq $RemoteRevision) {
     $LazyDevNeedsUpdate = $false
@@ -543,15 +571,24 @@ if ($LazyDevNeedsUpdate) {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
     try {
-        Invoke-WebRequest -UseBasicParsing -Uri $ArchiveUrl -OutFile $archive
-        Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
-        $sourceDir = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
-        if (-not $sourceDir) { Fail 'Downloaded Lazy Developer source could not be unpacked.' }
-        $packageJson = Join-Path $sourceDir.FullName 'package.json'
+        if ($LocalSourceDir) {
+            $sourceDirPath = $LocalSourceDir
+        } else {
+            Invoke-WebRequest -UseBasicParsing -Uri $ArchiveUrl -OutFile $archive
+            Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+            $sourceDir = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
+            if (-not $sourceDir) { Fail 'Downloaded Lazy Developer source could not be unpacked.' }
+            $sourceDirPath = $sourceDir.FullName
+        }
+        $packageJson = Join-Path $sourceDirPath 'package.json'
         if (-not (Test-Path -LiteralPath $packageJson -PathType Leaf)) { Fail 'Lazy Developer package.json was not found.' }
         $sourceVersion = ((Get-Content -Raw -LiteralPath $packageJson) | ConvertFrom-Json).version
         if ($sourceVersion -ne $LazyDevVersion) { Fail "Repository version is $sourceVersion; expected $LazyDevVersion." }
-        Get-ChildItem -LiteralPath $sourceDir.FullName -Force | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse -Force }
+        Get-ChildItem -LiteralPath $sourceDirPath -Force | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse -Force }
+        Remove-Item -LiteralPath (Join-Path $stage '.git') -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $stage 'node_modules') -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -LiteralPath $stage -Directory -Recurse -Force -Filter '__pycache__' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -LiteralPath $stage -File -Recurse -Force -Filter '*.pyc' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
         Set-Content -LiteralPath (Join-Path $stage '.lazydev-revision') -Value $RemoteRevision -Encoding ASCII
         if (Test-Path -LiteralPath $InstallRoot) {
             Remove-Item -LiteralPath "$InstallRoot.previous" -Recurse -Force -ErrorAction SilentlyContinue

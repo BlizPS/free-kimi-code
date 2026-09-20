@@ -1745,7 +1745,7 @@ async function main() {
   if (cmd === 'artifact' || cmd === 'artifacts') return artifactCommand(process.argv[3]);
   if (cmd === 'setup') return setup();
   if (cmd === 'chat') return chat();
-  if (cmd === 'sessions') { process.argv.splice(2, 1, 'chat'); process.argv.push('--sessions'); return chat(); }
+  if (cmd === 'resume') { process.argv.splice(2, 1, 'chat'); process.argv.push('--sessions'); return chat(); }
   line(red(`Unknown command: ${cmd}`));
   await help();
   process.exitCode = 1;

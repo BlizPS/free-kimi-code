@@ -3,6 +3,17 @@ set -eu
 
 REPO="BlizPS/free-kimi-code"
 BRANCH="${LAZYDEV_BRANCH:-main}"
+
+# When this script is executed from an extracted LazyDev archive, prefer the
+# bundled source so local repairs do not silently reinstall an older GitHub
+# checkout. Piped `curl | sh` still uses the GitHub branch as before.
+LAZYDEV_LOCAL_SOURCE_DIR="${LAZYDEV_SOURCE_DIR:-}"
+if [ -z "$LAZYDEV_LOCAL_SOURCE_DIR" ] && [ -n "${0:-}" ] && [ -f "${0:-}" ]; then
+  LAZYDEV_SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P 2>/dev/null || true)"
+  if [ -f "$LAZYDEV_SCRIPT_DIR/package.json" ] && [ -f "$LAZYDEV_SCRIPT_DIR/cli/lazydev.py" ]; then
+    LAZYDEV_LOCAL_SOURCE_DIR="$LAZYDEV_SCRIPT_DIR"
+  fi
+fi
 LAZYDEV_VERSION="1.0.2"
 KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"
 CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
@@ -551,11 +562,32 @@ clear 2>/dev/null || true
 ensure_python_runner
 
 REMOTE_REVISION="$(cat "$REMOTE_REVISION_FILE" 2>/dev/null || true)"
-[ -n "$REMOTE_REVISION" ] || fatal "Could not read the current Lazy Developer revision from GitHub."
+if [ -n "$LAZYDEV_LOCAL_SOURCE_DIR" ]; then
+  REMOTE_REVISION="local"
+elif [ -z "$REMOTE_REVISION" ]; then
+  fatal "Could not read the current Lazy Developer revision from GitHub."
+fi
 
 CURRENT_LAZY_VERSION=""
 CURRENT_LAZY_REVISION=""
 LAZYDEV_NEEDS_UPDATE=1
+LAZYDEV_FEATURE_REFRESH=0
+if [ -f "$LAZYDEV_HOME/cli/lazydev.py" ]; then
+  if ! grep -Eq 'if cmd == "resume":[[:space:]]*return chat\(resume=True\)' "$LAZYDEV_HOME/cli/lazydev.py" || \
+     grep -Eq 'lazydev[[:space:]]sessions' "$LAZYDEV_HOME/cli/lazydev.py"; then
+    LAZYDEV_FEATURE_REFRESH=1
+  fi
+else
+  LAZYDEV_FEATURE_REFRESH=1
+fi
+if [ -f "$LAZYDEV_HOME/scripts/lazydev.mjs" ]; then
+  if ! grep -Eq "if \(cmd === 'resume'\) return resume\(\);" "$LAZYDEV_HOME/scripts/lazydev.mjs" || \
+     grep -Eq "if \(cmd === 'sessions'\)" "$LAZYDEV_HOME/scripts/lazydev.mjs"; then
+    LAZYDEV_FEATURE_REFRESH=1
+  fi
+else
+  LAZYDEV_FEATURE_REFRESH=1
+fi
 if [ -f "$LAZYDEV_HOME/package.json" ]; then
   CURRENT_LAZY_VERSION="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LAZYDEV_HOME/package.json" | head -n 1)"
 fi
@@ -572,7 +604,13 @@ if [ -f "$LAZYDEV_HOME/package.json" ] && \
    [ -x "$LAZYDEV_BIN_DIR/lazydev" ]; then
   LAZYDEV_INSTALL_COMPLETE=1
 fi
-if [ -n "$CURRENT_LAZY_VERSION" ] && [ "$CURRENT_LAZY_VERSION" != "$LAZYDEV_VERSION" ]; then
+if [ -n "$LAZYDEV_LOCAL_SOURCE_DIR" ]; then
+  LAZYDEV_NEEDS_UPDATE=1
+  say "Using local Lazy Developer source: $LAZYDEV_LOCAL_SOURCE_DIR"
+elif [ "$LAZYDEV_FEATURE_REFRESH" -eq 1 ]; then
+  LAZYDEV_NEEDS_UPDATE=1
+  say "Installed Lazy Developer is missing the current command surface — refreshing Lazy Developer only."
+elif [ -n "$CURRENT_LAZY_VERSION" ] && [ "$CURRENT_LAZY_VERSION" != "$LAZYDEV_VERSION" ]; then
   say "Lazy Developer version $CURRENT_LAZY_VERSION differs from $LAZYDEV_VERSION — update required."
 elif [ "$LAZYDEV_INSTALL_COMPLETE" -eq 1 ] && [ -n "$CURRENT_LAZY_REVISION" ] && [ "$CURRENT_LAZY_REVISION" = "$REMOTE_REVISION" ]; then
   LAZYDEV_NEEDS_UPDATE=0
@@ -682,13 +720,22 @@ if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
   INSTALL_STAGE="$TMP_DIR/lazydev-stage"
   mkdir -p "$SOURCE_EXTRACT" "$INSTALL_STAGE"
   step "Installing/updating Lazy Developer $LAZYDEV_VERSION"
-  curl -fsSL "$REPO_ARCHIVE_URL" -o "$SOURCE_ARCHIVE"
-  tar -xzf "$SOURCE_ARCHIVE" -C "$SOURCE_EXTRACT"
-  SOURCE_DIR="$(find "$SOURCE_EXTRACT" -type f -name package.json -print | head -n 1 | sed 's#/package.json$##')"
-  [ -n "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/package.json" ] || fatal "Downloaded Lazy Developer source could not be located."
+  if [ -n "$LAZYDEV_LOCAL_SOURCE_DIR" ]; then
+    SOURCE_DIR="$LAZYDEV_LOCAL_SOURCE_DIR"
+  else
+    curl -fsSL "$REPO_ARCHIVE_URL" -o "$SOURCE_ARCHIVE"
+    tar -xzf "$SOURCE_ARCHIVE" -C "$SOURCE_EXTRACT"
+    SOURCE_DIR="$(find "$SOURCE_EXTRACT" -type f -name package.json -print | head -n 1 | sed 's#/package.json$##')"
+  fi
+  [ -n "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/package.json" ] || fatal "Lazy Developer source could not be located."
   SOURCE_VERSION="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"\]*\)".*/\1/p' "$SOURCE_DIR/package.json" | head -n 1)"
   [ "$SOURCE_VERSION" = "$LAZYDEV_VERSION" ] || fatal "Repository version is $SOURCE_VERSION; expected $LAZYDEV_VERSION."
   cp -R "$SOURCE_DIR/." "$INSTALL_STAGE/"
+  # Local source may come from a developer checkout; never install its VCS
+  # metadata, dependency trees, or Python bytecode into the managed runtime.
+  rm -rf "$INSTALL_STAGE/.git" "$INSTALL_STAGE/node_modules" 2>/dev/null || true
+  find "$INSTALL_STAGE" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
+  find "$INSTALL_STAGE" -type f -name '*.pyc' -delete 2>/dev/null || true
   printf '%s\n' "$REMOTE_REVISION" > "$INSTALL_STAGE/.lazydev-revision"
 
   mkdir -p "$LAZYDEV_BIN_DIR"
@@ -733,6 +780,7 @@ ensure_legacy_launcher_targets
 # Reconcile launchers and shell PATH even when every component was skipped.
 # This matters when an older npm/user-local launcher is still first in the current PATH.
 replace_legacy_lazydev_launchers
+hash -r 2>/dev/null || true
 case "${SHELL:-}" in
   */zsh) RC_FILE="$HOME/.zshrc" ; refresh_shell_path "$RC_FILE" ;;
   */fish)

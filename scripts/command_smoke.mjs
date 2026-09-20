@@ -15,7 +15,7 @@ const bare = spawnSync(process.execPath, [entry], { encoding: 'utf8' });
 assert.equal(bare.status, 0, bare.stderr);
 assert.match(bare.stdout, /lazydev chat/);
 assert.match(bare.stdout, /lazydev resume/);
-assert.doesNotMatch(bare.stdout, /lazydev sessions/);
+assert.doesNotMatch(bare.stdout, new RegExp('lazydev ' + 'sessions'));
 assert.match(bare.stdout, /Command center/);
 assert.doesNotMatch(bare.stdout, /Open the configured or detected agent CLI/);
 

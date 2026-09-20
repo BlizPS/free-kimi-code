@@ -14,6 +14,8 @@ checks=[
     ('install.sh', '.lazydev-revision', sh),
     ('install.sh', 'KIMI_NEEDS_UPDATE=0', sh),
     ('install.sh', 'LAZYDEV_NEEDS_UPDATE=0', sh),
+    ('install.sh', 'LAZYDEV_FEATURE_REFRESH=0', sh),
+    ('install.sh', 'LAZYDEV_LOCAL_SOURCE_DIR', sh),
     ('install.sh', 'Existing Kimi sessions and configuration were left in place.', sh),
     ('install.ps1', "$KimiReleasesApiUrl = 'https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest'", ps),
     ('install.ps1', "https://code.kimi.com/kimi-code/install.ps1", ps),
@@ -21,6 +23,8 @@ checks=[
     ('install.ps1', "'.lazydev-revision'", ps),
     ('install.ps1', '$KimiNeedsUpdate = $false', ps),
     ('install.ps1', '$LazyDevNeedsUpdate = $false', ps),
+    ('install.ps1', '$LazyDevFeatureRefresh = $false', ps),
+    ('install.ps1', '$LocalSourceDir', ps),
     ('install.ps1', 'Existing Kimi sessions and configuration were left in place.', ps),
     ('install.ps1', 'Refresh-ExistingLazyDevLaunchers', ps),
     ('install.ps1', '$LazyInstallComplete', ps),
@@ -60,6 +64,12 @@ checks += [
 for name, needle, text in checks:
     if needle not in text: errors.append(f'{name}: missing {needle}')
 
+cli_text = (ROOT / 'cli' / 'lazydev.py').read_text(encoding='utf-8')
+launcher_text = (ROOT / 'scripts' / 'lazydev.mjs').read_text(encoding='utf-8')
+if 'if cmd == "resume":' not in cli_text or ('lazydev ' + 'sessions') in cli_text:
+    errors.append('cli/lazydev.py: resume command surface is stale')
+if "if (cmd === 'resume') return resume();" not in launcher_text or "if (cmd === 'sessions')" in launcher_text:
+    errors.append('scripts/lazydev.mjs: resume command surface is stale')
 if 'KIMI_LATEST_VERSION=' not in sh or 'version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_LATEST_VERSION"' not in sh:
     errors.append('install.sh: Kimi version check must use dynamically discovered latest release')
 if '$KimiLatestVersion = Get-KimiLatestVersion' not in ps or 'Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion' not in ps:

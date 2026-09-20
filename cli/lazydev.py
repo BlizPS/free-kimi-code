@@ -3592,9 +3592,9 @@ def artifact_command(name: str | None) -> int:
     if target.exists():
         stem, suffix = raw.stem, raw.suffix
         i = 1
-        while (ARTIFACT_DIR / f"{stem}-{i}{suffix}").exists():
+        while (ARTIFACT_DIR / f"{stem}{i}{suffix}").exists():
             i += 1
-        target = ARTIFACT_DIR / f"{stem}-{i}{suffix}"
+        target = ARTIFACT_DIR / f"{stem}{i}{suffix}"
     print(str(target))
     return 0
 

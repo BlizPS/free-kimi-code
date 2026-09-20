@@ -21,7 +21,7 @@ assert.match(runtime, /env\['OPENAI_BASE_URL'\]=f'http:\/\/127\.0\.0\.1:\{respon
 assert.match(launcher, /if \(cmd === 'resume'\) return resume\(\);/);
 assert.doesNotMatch(launcher, /if \(cmd === 'sessions'\)/);
 assert.match(readme, /lazydev resume/);
-assert.doesNotMatch(readme, /lazydev sessions/);
+assert.doesNotMatch(readme, new RegExp('lazydev ' + 'sessions'));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lazydev-session-config-'));
 const bin = path.join(tmp, 'bin');
 const xdg = path.join(tmp, 'xdg');
