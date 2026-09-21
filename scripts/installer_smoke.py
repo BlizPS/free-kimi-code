@@ -61,6 +61,14 @@ checks += [
     ('uninstall.sh', 'Lazy Developer, Kimi Code, RTK', (ROOT/'uninstall.sh').read_text(encoding='utf-8')),
     ('uninstall.ps1', 'Lazy Developer, Kimi Code, RTK', (ROOT/'uninstall.ps1').read_text(encoding='utf-8')),
 ]
+
+# nounset regression: LazyDev state must be initialized before its first runtime use.
+_lazy_init = sh.index('LAZYDEV_NEEDS_UPDATE=1')
+_lazy_use = sh.index('if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then')
+if _lazy_init > _lazy_use:
+    errors.append('install.sh: LAZYDEV_NEEDS_UPDATE is read before initialization')
+if 'LAZYDEV_STATUS_MESSAGE=""' not in sh:
+    errors.append('install.sh: LAZYDEV_STATUS_MESSAGE initialization missing')
 for name, needle, text in checks:
     if needle not in text: errors.append(f'{name}: missing {needle}')
 

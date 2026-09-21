@@ -26,6 +26,13 @@ GITHUB_API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"
 
 LAZYDEV_HOME="${LAZYDEV_HOME:-$HOME/.local/share/lazydev}"
 LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-}"
+LAZYDEV_NEEDS_UPDATE=1
+LAZYDEV_FEATURE_REFRESH=0
+LAZYDEV_INSTALL_COMPLETE=0
+CURRENT_LAZY_VERSION=""
+CURRENT_LAZY_REVISION=""
+REMOTE_REVISION=""
+LAZYDEV_STATUS_MESSAGE=""
 
 # Termux is supported only when it is running a real glibc Linux userland
 # (for example through proot-distro). Native Android/bionic Termux is not a
@@ -6366,6 +6373,68 @@ if [ -n "$RTK_COMMAND" ] && [ -n "$RTK_CURRENT_VERSION" ]; then
   fi
 fi
 
+REMOTE_REVISION="$(cat "$REMOTE_REVISION_FILE" 2>/dev/null || true)"
+if [ -n "$LAZYDEV_LOCAL_SOURCE_DIR" ]; then
+  REMOTE_REVISION="local"
+elif [ -z "$REMOTE_REVISION" ]; then
+  fatal "Could not read the current Lazy Developer revision from GitHub."
+fi
+
+CURRENT_LAZY_VERSION=""
+CURRENT_LAZY_REVISION=""
+LAZYDEV_NEEDS_UPDATE=1
+LAZYDEV_FEATURE_REFRESH=0
+if [ -f "$LAZYDEV_HOME/cli/lazydev.py" ]; then
+  if ! grep -Eq 'if cmd == "resume":[[:space:]]*return chat\(resume=True\)' "$LAZYDEV_HOME/cli/lazydev.py" || \
+     grep -Eq 'lazydev[[:space:]]sessions' "$LAZYDEV_HOME/cli/lazydev.py"; then
+    LAZYDEV_FEATURE_REFRESH=1
+  fi
+else
+  LAZYDEV_FEATURE_REFRESH=1
+fi
+if [ -f "$LAZYDEV_HOME/scripts/lazydev.mjs" ]; then
+  if ! grep -Eq "if \(cmd === 'resume'\) return resume\(\);" "$LAZYDEV_HOME/scripts/lazydev.mjs" || \
+     grep -Eq "if \(cmd === 'sessions'\)" "$LAZYDEV_HOME/scripts/lazydev.mjs"; then
+    LAZYDEV_FEATURE_REFRESH=1
+  fi
+else
+  LAZYDEV_FEATURE_REFRESH=1
+fi
+if [ -f "$LAZYDEV_HOME/package.json" ]; then
+  CURRENT_LAZY_VERSION="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LAZYDEV_HOME/package.json" | head -n 1)"
+fi
+if [ -f "$LAZYDEV_HOME/.lazydev-revision" ]; then
+  CURRENT_LAZY_REVISION="$(tr -d '[:space:]' < "$LAZYDEV_HOME/.lazydev-revision")"
+fi
+LAZYDEV_INSTALL_COMPLETE=0
+LAZYDEV_STATUS_MESSAGE=""
+if [ -f "$LAZYDEV_HOME/package.json" ] && \
+   [ -f "$LAZYDEV_HOME/cli/lazydev.py" ] && \
+   [ -f "$LAZYDEV_HOME/skills/lazy-developer/SKILL.md" ] && \
+   [ -f "$LAZYDEV_HOME/skills/lazy-debug/SKILL.md" ] && \
+   [ -f "$LAZYDEV_HOME/skills/lazy-review/SKILL.md" ] && \
+   [ -f "$LAZYDEV_HOME/skills/lazy-test/SKILL.md" ] && \
+   [ -x "$LAZYDEV_BIN_DIR/lazydev" ]; then
+  LAZYDEV_INSTALL_COMPLETE=1
+fi
+if [ -n "$LAZYDEV_LOCAL_SOURCE_DIR" ]; then
+  LAZYDEV_NEEDS_UPDATE=1
+  LAZYDEV_STATUS_MESSAGE="Using local Lazy Developer source: $LAZYDEV_LOCAL_SOURCE_DIR"
+elif [ "$LAZYDEV_FEATURE_REFRESH" -eq 1 ]; then
+  LAZYDEV_NEEDS_UPDATE=1
+  LAZYDEV_STATUS_MESSAGE="Installed Lazy Developer is missing the current command surface — refreshing Lazy Developer only."
+elif [ -n "$CURRENT_LAZY_VERSION" ] && [ "$CURRENT_LAZY_VERSION" != "$LAZYDEV_VERSION" ]; then
+  LAZYDEV_STATUS_MESSAGE="Lazy Developer version $CURRENT_LAZY_VERSION differs from $LAZYDEV_VERSION — update required."
+elif [ "$LAZYDEV_INSTALL_COMPLETE" -eq 1 ] && [ -n "$CURRENT_LAZY_REVISION" ] && [ "$CURRENT_LAZY_REVISION" = "$REMOTE_REVISION" ]; then
+  LAZYDEV_NEEDS_UPDATE=0
+  LAZYDEV_STATUS_MESSAGE="Lazy Developer $LAZYDEV_VERSION is already current — skipped."
+elif [ -n "$CURRENT_LAZY_REVISION" ]; then
+  LAZYDEV_STATUS_MESSAGE="Lazy Developer changed on GitHub — updating Lazy Developer only."
+else
+  LAZYDEV_STATUS_MESSAGE="Lazy Developer is not installed cleanly — installing/repairing."
+fi
+
+
 INSTALL_KIMI=0
 INSTALL_CODEX=0
 INSTALL_ANTIGRAVITY=0
@@ -6562,71 +6631,10 @@ fi
 
 
 
-REMOTE_REVISION="$(cat "$REMOTE_REVISION_FILE" 2>/dev/null || true)"
-if [ -n "$LAZYDEV_LOCAL_SOURCE_DIR" ]; then
-  REMOTE_REVISION="local"
-elif [ -z "$REMOTE_REVISION" ]; then
-  fatal "Could not read the current Lazy Developer revision from GitHub."
-fi
+# Installation order: collect all Y/n choices first, then RTK → Lazy Developer → selected AI UIs (Kimi → Codex → Antigravity).
 
-CURRENT_LAZY_VERSION=""
-CURRENT_LAZY_REVISION=""
-LAZYDEV_NEEDS_UPDATE=1
-LAZYDEV_FEATURE_REFRESH=0
-if [ -f "$LAZYDEV_HOME/cli/lazydev.py" ]; then
-  if ! grep -Eq 'if cmd == "resume":[[:space:]]*return chat\(resume=True\)' "$LAZYDEV_HOME/cli/lazydev.py" || \
-     grep -Eq 'lazydev[[:space:]]sessions' "$LAZYDEV_HOME/cli/lazydev.py"; then
-    LAZYDEV_FEATURE_REFRESH=1
-  fi
-else
-  LAZYDEV_FEATURE_REFRESH=1
-fi
-if [ -f "$LAZYDEV_HOME/scripts/lazydev.mjs" ]; then
-  if ! grep -Eq "if \(cmd === 'resume'\) return resume\(\);" "$LAZYDEV_HOME/scripts/lazydev.mjs" || \
-     grep -Eq "if \(cmd === 'sessions'\)" "$LAZYDEV_HOME/scripts/lazydev.mjs"; then
-    LAZYDEV_FEATURE_REFRESH=1
-  fi
-else
-  LAZYDEV_FEATURE_REFRESH=1
-fi
-if [ -f "$LAZYDEV_HOME/package.json" ]; then
-  CURRENT_LAZY_VERSION="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LAZYDEV_HOME/package.json" | head -n 1)"
-fi
-if [ -f "$LAZYDEV_HOME/.lazydev-revision" ]; then
-  CURRENT_LAZY_REVISION="$(tr -d '[:space:]' < "$LAZYDEV_HOME/.lazydev-revision")"
-fi
-LAZYDEV_INSTALL_COMPLETE=0
-LAZYDEV_STATUS_MESSAGE=""
-if [ -f "$LAZYDEV_HOME/package.json" ] && \
-   [ -f "$LAZYDEV_HOME/cli/lazydev.py" ] && \
-   [ -f "$LAZYDEV_HOME/skills/lazy-developer/SKILL.md" ] && \
-   [ -f "$LAZYDEV_HOME/skills/lazy-debug/SKILL.md" ] && \
-   [ -f "$LAZYDEV_HOME/skills/lazy-review/SKILL.md" ] && \
-   [ -f "$LAZYDEV_HOME/skills/lazy-test/SKILL.md" ] && \
-   [ -x "$LAZYDEV_BIN_DIR/lazydev" ]; then
-  LAZYDEV_INSTALL_COMPLETE=1
-fi
-if [ -n "$LAZYDEV_LOCAL_SOURCE_DIR" ]; then
-  LAZYDEV_NEEDS_UPDATE=1
-  LAZYDEV_STATUS_MESSAGE="Using local Lazy Developer source: $LAZYDEV_LOCAL_SOURCE_DIR"
-elif [ "$LAZYDEV_FEATURE_REFRESH" -eq 1 ]; then
-  LAZYDEV_NEEDS_UPDATE=1
-  LAZYDEV_STATUS_MESSAGE="Installed Lazy Developer is missing the current command surface — refreshing Lazy Developer only."
-elif [ -n "$CURRENT_LAZY_VERSION" ] && [ "$CURRENT_LAZY_VERSION" != "$LAZYDEV_VERSION" ]; then
-  LAZYDEV_STATUS_MESSAGE="Lazy Developer version $CURRENT_LAZY_VERSION differs from $LAZYDEV_VERSION — update required."
-elif [ "$LAZYDEV_INSTALL_COMPLETE" -eq 1 ] && [ -n "$CURRENT_LAZY_REVISION" ] && [ "$CURRENT_LAZY_REVISION" = "$REMOTE_REVISION" ]; then
-  LAZYDEV_NEEDS_UPDATE=0
-  LAZYDEV_STATUS_MESSAGE="Lazy Developer $LAZYDEV_VERSION is already current — skipped."
-elif [ -n "$CURRENT_LAZY_REVISION" ]; then
-  LAZYDEV_STATUS_MESSAGE="Lazy Developer changed on GitHub — updating Lazy Developer only."
-else
-  LAZYDEV_STATUS_MESSAGE="Lazy Developer is not installed cleanly — installing/repairing."
-fi
-
-# Installation order: collect all Y/n choices first, then Kimi → Codex → Antigravity → RTK → Lazy Developer.
-
-# RTK is installed before the selected AI UIs; its Kimi integration is reconciled after Kimi is available.
-# Configure RTK integration after the native UIs and LazyDev runtime are ready.
+# RTK/Kimi integration is reconciled after the native UIs are available.
+# Keep the integration step after the UI installs so it can initialize against the actual Kimi command.
 RTK_CONNECT_NEEDED=0
 if [ -n "$RTK_COMMAND" ] && [ -n "$(find_kimi 2>/dev/null || true)" ]; then
   if [ "$KIMI_NEEDS_UPDATE" -ne 0 ] || [ "$RTK_NEEDS_UPDATE" -ne 0 ] || [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
