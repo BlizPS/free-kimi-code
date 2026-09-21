@@ -3117,13 +3117,12 @@ def _launch_codex(codex: str, proxy: _ProviderProxy, pc: dict[str, Any], workspa
         env['OPENAI_BASE_URL']=f'http://127.0.0.1:{responses.port}/v1'
         env['LAZYDEV_CODEX_RESUME_MODE']='1' if resume else '0'
         env['LAZYDEV_CONTEXT_DIR']=str(HOME / '.lazydev')
-        base_args=[
-            '--config', f'model={toml_quote(str(pc.get("model")))}',
-            '--config', 'model_provider=lazydev',
-            '--config', 'approval_policy="never"',
-            '--config', 'sandbox_mode="danger-full-access"',
-        ]
-        args = base_args + (['resume'] if resume else [])
+        # Codex receives LazyDev routing through CODEX_HOME/config.toml above.
+        # Do not pass --config flags here: some standalone 0.155.x builds reject
+        # the generic flag at this entry point even though the config file is
+        # fully supported. Keeping invocation minimal also makes resume use the
+        # native picker exactly as the official CLI expects.
+        args = ['resume'] if resume else []
         try:
             return subprocess.call([codex, *args], cwd=str(ARTIFACT_DIR), env=env)
         except KeyboardInterrupt:
