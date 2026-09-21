@@ -41,14 +41,16 @@ try {
   const mcp = {
     mcpServers: {
       'lazydev-search': { args: [path.join(root, 'runtime', 'browser-mcp.py')], toolTimeoutMs: 60000, startupTimeoutMs: 30000 },
-      context7: { command: 'npx', args: ['-y', '@upstash/context7-mcp@4.1.1'] },
+      'lazydev-dev': { args: [path.join(root, 'runtime', 'lazydev-dev-mcp.py')], toolTimeoutMs: 30000, startupTimeoutMs: 5000 },
     },
   };
   fs.writeFileSync(path.join(kimiHome, 'mcp.json'), JSON.stringify(mcp, null, 2));
   const parsed = JSON.parse(fs.readFileSync(path.join(kimiHome, 'mcp.json'), 'utf8'));
   assert.equal(parsed.mcpServers['lazydev-search'].args.at(-1), path.join(root, 'runtime', 'browser-mcp.py'));
   assert.equal(parsed.mcpServers['lazydev-search'].toolTimeoutMs, 60000);
-  assert.deepEqual(parsed.mcpServers.context7.args, ['-y', '@upstash/context7-mcp@4.1.1']);
+  assert.equal(parsed.mcpServers['lazydev-dev'].args.at(-1), path.join(root, 'runtime', 'lazydev-dev-mcp.py'));
+  assert.equal(parsed.mcpServers['lazydev-dev'].startupTimeoutMs, 5000);
+  assert.equal(parsed.mcpServers.context7, undefined);
   assert.match(config, /default_model = "lazydev\/gemini-3\.5-flash-lite"/);
   assert.match(config, /max_steps_per_turn = 0/);
 } finally {

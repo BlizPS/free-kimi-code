@@ -61,8 +61,8 @@ UI_RUNTIME_DIR = Path(os.environ.get("LAZYDEV_UI_RUNTIME", str(CONFIG_DIR / "ui-
 UI_PACKAGE = "@poppinss/cliui"
 UI_PACKAGE_VERSION = "6.8.1"
 UI_HELPER = ROOT / "runtime" / "lazydev-ui.mjs"
-CONTEXT7_MCP_PACKAGE = "@upstash/context7-mcp@4.1.1"
-CONTEXT7_MCP_NAME = "context7"
+LAZYDEV_DEV_MCP_NAME = "lazydev-dev"
+LAZYDEV_DEV_MCP_FILE = "lazydev-dev-mcp.py"
 
 PROVIDERS: list[dict[str, Any]] = [
     {"id": "openrouter", "label": "OpenRouter", "kind": "openai", "models": "https://openrouter.ai/api/v1/models", "base": "https://openrouter.ai/api/v1", "env": "OPENROUTER_API_KEY"},
@@ -2918,29 +2918,19 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     return config_path, tui_path
 
 
-def _npx_command() -> str | None:
-    """Return the host's npx executable without forcing a platform-specific path."""
-    env = _command_env_with_managed_bins()
-    names = ("npx.cmd", "npx") if IS_WINDOWS else ("npx",)
-    for name in names:
-        found = shutil.which(name, path=env.get("PATH"))
-        if found:
-            return found
-    return None
-
-
-def _context7_mcp_entry() -> dict[str, Any] | None:
-    npx = _npx_command()
-    if not npx:
-        return None
+def _lazydev_dev_mcp_entry() -> dict[str, Any]:
+    python_exe = str(Path(sys.executable).resolve())
+    server = str((ROOT / "runtime" / LAZYDEV_DEV_MCP_FILE).resolve())
     return {
-        "command": npx,
-        "args": ["-y", CONTEXT7_MCP_PACKAGE],
+        "command": python_exe,
+        "args": [server],
+        "cwd": str(ROOT),
+        "env": {"LAZYDEV_PROJECT_ROOT": os.getcwd()},
     }
 
 
 def write_kimi_mcp_config() -> Path:
-    """Register LazyDev search plus optional local Context7 without touching user servers."""
+    """Register only fast, dependency-free LazyDev MCP servers without touching user servers."""
     KIMI_HOME.mkdir(parents=True, exist_ok=True)
     mcp_file = KIMI_HOME / "mcp.json"
     try:
@@ -2959,15 +2949,17 @@ def write_kimi_mcp_config() -> Path:
         "startupTimeoutMs": 30000,
         "toolTimeoutMs": 60000,
     }
-    context7 = _context7_mcp_entry()
-    if context7 and (CONTEXT7_MCP_NAME not in servers or not isinstance(servers.get(CONTEXT7_MCP_NAME), dict)):
-        servers[CONTEXT7_MCP_NAME] = context7
+    servers[LAZYDEV_DEV_MCP_NAME] = {
+        **_lazydev_dev_mcp_entry(),
+        "startupTimeoutMs": 5000,
+        "toolTimeoutMs": 30000,
+    }
+    servers.pop("context7", None)
     data["mcpServers"] = servers
     temp = mcp_file.with_suffix(f".tmp-{os.getpid()}")
     temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     temp.replace(mcp_file)
     return mcp_file
-
 
 def write_runtime_system(provider: dict[str, Any], model: str) -> None:
     system_source = ROOT / "runtime" / "SYSTEM.md"
@@ -3353,15 +3345,16 @@ def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
         'tool_timeout_sec = 60',
         'env = { LAZYDEV_BROWSER_USER_AGENT = "LazyDev-Browser/1.0.2" }',
     ]) + '\n'
-    context7 = _context7_mcp_entry()
-    if context7:
-        config = config.rstrip() + '\n\n' + '\n'.join([
-            '[mcp_servers.context7]',
-            f'command = {toml_quote(str(context7["command"]))}',
-            f'args = [{toml_quote(str(context7["args"][0]))}, {toml_quote(str(context7["args"][1]))}]',
-            'startup_timeout_sec = 20',
-            'tool_timeout_sec = 60',
-        ]) + '\n'
+    dev_mcp = _lazydev_dev_mcp_entry()
+    config = config.rstrip() + '\n\n' + '\n'.join([
+        '[mcp_servers.lazydev-dev]',
+        f'command = {toml_quote(str(dev_mcp["command"]))}',
+        f'args = [{toml_quote(str(dev_mcp["args"][0]))}]',
+        f'cwd = {toml_quote(str(dev_mcp["cwd"]))}',
+        'startup_timeout_sec = 5',
+        'tool_timeout_sec = 30',
+        f'env = {{ LAZYDEV_PROJECT_ROOT = {toml_quote(os.getcwd())} }}',
+    ]) + '\n'
     (home/'config.toml').write_text(config, encoding='utf-8')
     return home
 
@@ -3722,9 +3715,13 @@ def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
         "cwd":str(ROOT),
         "env":{"LAZYDEV_BROWSER_USER_AGENT":f"LazyDev-Browser/{VERSION}"},
     }
-    context7 = _context7_mcp_entry()
-    if context7 and (CONTEXT7_MCP_NAME not in servers or not isinstance(servers.get(CONTEXT7_MCP_NAME), dict)):
-        servers[CONTEXT7_MCP_NAME] = context7
+    dev_mcp = _lazydev_dev_mcp_entry()
+    servers[LAZYDEV_DEV_MCP_NAME] = {
+        **dev_mcp,
+        "startupTimeoutMs": 5000,
+        "toolTimeoutMs": 30000,
+    }
+    servers.pop("context7", None)
     data["mcpServers"]=servers
     mcp_file.write_text(json.dumps(data, indent=2)+"\n", encoding="utf-8")
     return settings_file, mcp_file

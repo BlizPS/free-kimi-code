@@ -6367,7 +6367,8 @@ function Test-LazyDevSourceCurrent([string]$SourceDir) {
             $pyText -match 'def find_codex\(' -and
             $pyText -match 'def find_antigravity\(' -and
             $pyText -match 'response\.output_item\.done' -and
-            $pyText -match '_context7_mcp_entry' -and
+            $pyText -match '_lazydev_dev_mcp_entry' -and
+            (Test-Path -LiteralPath (Join-Path $SourceDir 'runtime\lazydev-dev-mcp.py') -PathType Leaf) -and
             $pyText -notmatch '["'']--config["'']' -and
             $mjsText -match 'resume' -and
             $mjsText -notmatch 'cmd\s*===\s*["'']sessions["'']'

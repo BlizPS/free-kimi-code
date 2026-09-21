@@ -104,9 +104,6 @@ LazyDev keeps MCP intentionally small instead of dumping a huge server catalog i
 
 **`lazydev-search`** is the bundled local search/browser MCP. It runs from the LazyDev runtime and is configured for Kimi Code, Codex, and Antigravity without replacing the UI's native tools.
 
-**Context7** is also added automatically when `npx` is available. The current pinned package is `@upstash/context7-mcp@4.1.1`, which provides documentation-oriented context without requiring a token for the basic local setup.
-
-The Context7 server is configured through local stdio, not a remote HTTP endpoint. This keeps the default configuration simpler and avoids the remote-MCP edge cases reported by some CLI clients.
 
 ### Optional: GitHub MCP
 

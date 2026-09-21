@@ -242,7 +242,8 @@ lazydev_source_is_current() {
   grep -Fq 'def find_codex(' "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
   grep -Fq 'def find_antigravity(' "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
   grep -Fq 'response.output_item.done' "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
-  grep -Fq '_context7_mcp_entry' "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
+  grep -Fq '_lazydev_dev_mcp_entry' "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
+  [ -f "$source_dir/runtime/lazydev-dev-mcp.py" ] || return 1
   ! grep -Eq "cmd[[:space:]]*===[[:space:]]*[\"']sessions[\"']" "$source_dir/scripts/lazydev.mjs" 2>/dev/null || return 1
   ! grep -Eq "[\"']--config[\"']" "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
   return 0

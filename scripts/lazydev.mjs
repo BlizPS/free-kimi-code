@@ -1725,6 +1725,7 @@ function writeLazyDevMcpConfig() {
   } catch {}
   const servers = data.mcpServers && typeof data.mcpServers === 'object' ? { ...data.mcpServers } : {};
   const pythonCommand = process.env.LAZYDEV_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+  const devServer = path.join(root, 'runtime', 'lazydev-dev-mcp.py');
   servers['lazydev-search'] = {
     deferred: true,
     command: pythonCommand,
@@ -1734,6 +1735,16 @@ function writeLazyDevMcpConfig() {
     startupTimeoutMs: 30000,
     toolTimeoutMs: 60000,
   };
+  servers['lazydev-dev'] = {
+    deferred: true,
+    command: pythonCommand,
+    args: [devServer],
+    env: { LAZYDEV_PROJECT_ROOT: process.cwd() },
+    cwd: root,
+    startupTimeoutMs: 5000,
+    toolTimeoutMs: 30000,
+  };
+  delete servers.context7;
   data.mcpServers = servers;
   writeJsonAtomic(file, data);
   return file;
