@@ -637,12 +637,7 @@ def setup() -> int:
 
 
 def _load_install_state() -> dict[str, str]:
-    """Read installer-owned component paths without requiring PATH setup.
-
-    Linux/macOS/Termux installers use a tiny key=value file; Windows uses JSON.
-    The detector accepts both so a CLI can resolve its real executable even in a
-    fresh shell where the install directory has not been exported to PATH.
-    """
+    """Load installer-owned state, but never require it for discovery."""
     try:
         if not INSTALL_STATE_FILE.is_file():
             return {}
@@ -655,7 +650,11 @@ def _load_install_state() -> dict[str, str]:
         try:
             data = json.loads(stripped)
             if isinstance(data, dict):
-                return {str(k): str(v) for k, v in data.items() if v is not None and str(v).strip()}
+                return {
+                    str(k): str(v)
+                    for k, v in data.items()
+                    if v is not None and str(v).strip()
+                }
         except (ValueError, TypeError):
             pass
 
@@ -676,24 +675,124 @@ def _state_command(state: dict[str, str], key: str) -> str | None:
     if not value:
         return None
     path = Path(value).expanduser()
-    if not path.is_file():
-        return None
-    if IS_WINDOWS or os.access(path, os.X_OK):
+    if path.is_file() and (IS_WINDOWS or os.access(path, os.X_OK)):
         return str(path)
     return None
 
 
-def _state_bin_dirs(state: dict[str, str]) -> list[Path]:
-    keys = ("bin_dir", "kimi_bin_dir", "codex_bin_dir", "rtk_bin_dir")
+def _path_entry(value: str | None) -> Path | None:
+    value = str(value or "").strip()
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    return path if path.is_dir() else None
+
+
+def _append_unique_path(dirs: list[Path], value: str | Path | None) -> None:
+    path = _path_entry(str(value) if value is not None else None)
+    if path is not None and path not in dirs:
+        dirs.append(path)
+
+
+def _tooling_bin_dirs() -> list[Path]:
+    """Collect common user/global CLI bin directories without trusting PATH."""
     dirs: list[Path] = []
-    for key in keys:
-        raw = str(state.get(key, "")).strip()
-        if not raw:
+    state = _load_install_state()
+
+    for key in (
+        "bin_dir",
+        "kimi_bin_dir",
+        "codex_bin_dir",
+        "rtk_bin_dir",
+        "ui_runtime_dir",
+    ):
+        raw = state.get(key, "")
+        # ui_runtime_dir is not a binary directory, so only add it when a bin
+        # subdirectory actually exists.
+        if key == "ui_runtime_dir":
+            _append_unique_path(dirs, Path(raw) / "bin")
             continue
-        path = Path(raw).expanduser()
-        if path not in dirs:
-            dirs.append(path)
+        _append_unique_path(dirs, raw)
+
+    env_values = (
+        os.environ.get("XDG_BIN_HOME"),
+        os.environ.get("UV_TOOL_BIN_DIR"),
+        os.environ.get("BUN_INSTALL"),
+        os.environ.get("NPM_CONFIG_PREFIX"),
+    )
+    for raw in env_values:
+        _append_unique_path(dirs, raw)
+        if raw:
+            _append_unique_path(dirs, Path(raw) / "bin")
+
+    _append_unique_path(dirs, HOME / ".local" / "bin")
+    _append_unique_path(dirs, HOME / ".cargo" / "bin")
+    _append_unique_path(dirs, HOME / ".bun" / "bin")
+    _append_unique_path(dirs, HOME / ".deno" / "bin")
+    _append_unique_path(dirs, HOME / ".opencode" / "bin")
+    _append_unique_path(dirs, HOME / ".npm-global" / "bin")
+    _append_unique_path(dirs, HOME / ".local" / "share" / "pnpm")
+    _append_unique_path(dirs, HOME / ".pnpm" / "bin")
+    _append_unique_path(dirs, HOME / ".yarn" / "bin")
+    _append_unique_path(dirs, HOME / ".config" / "yarn" / "global" / "node_modules" / ".bin")
+    _append_unique_path(dirs, HOME / ".codex" / "packages" / "standalone" / "current" / "bin")
+    _append_unique_path(dirs, HOME / ".kimi-code" / "bin")
+    _append_unique_path(dirs, HOME / ".kimi" / "bin")
+    _append_unique_path(dirs, HOME / ".local" / "opt" / "codex")
+
+    if IS_MAC:
+        _append_unique_path(dirs, "/opt/homebrew/bin")
+        _append_unique_path(dirs, "/usr/local/bin")
+    else:
+        _append_unique_path(dirs, "/usr/local/bin")
+        _append_unique_path(dirs, "/usr/bin")
+        _append_unique_path(dirs, "/bin")
+
+    if IS_TERMUX:
+        prefix = os.environ.get("PREFIX")
+        if prefix:
+            _append_unique_path(dirs, prefix)
+            _append_unique_path(dirs, Path(prefix) / "bin")
+
+    # Copy npm/pnpm/bun global bin locations into the resolver even when those
+    # package-manager bin directories are absent from PATH.
+    commands = [
+        ("npm", ["prefix", "-g"], "bin"),
+        ("pnpm", ["bin", "-g"], None),
+        ("bun", ["pm", "bin", "-g"], None),
+        ("yarn", ["global", "bin"], None),
+    ]
+    for command, args, suffix in commands:
+        executable = shutil.which(command)
+        if not executable:
+            continue
+        try:
+            proc = subprocess.run(
+                [executable, *args],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            raw = (proc.stdout or "").strip().splitlines()
+            if not raw:
+                continue
+            value = raw[-1].strip()
+            if suffix:
+                value = str(Path(value) / suffix)
+            _append_unique_path(dirs, value)
+        except (OSError, subprocess.SubprocessError):
+            continue
+
+    # Keep the current PATH as a fallback, but never rely on it exclusively.
+    for raw in os.environ.get("PATH", "").split(os.pathsep):
+        _append_unique_path(dirs, raw)
     return dirs
+
+
+def _state_bin_dirs(state: dict[str, str]) -> list[Path]:
+    return _tooling_bin_dirs()
 
 
 def _resolve_from_dirs(names: tuple[str, ...], dirs: list[Path]) -> str | None:
@@ -705,8 +804,51 @@ def _resolve_from_dirs(names: tuple[str, ...], dirs: list[Path]) -> str | None:
     return None
 
 
+def _recursive_cli_scan(names: tuple[str, ...], roots: list[Path], max_depth: int = 6) -> str | None:
+    """Recover manually-installed CLIs from known tool roots, without scanning all of HOME."""
+    wanted = set(names)
+    for root in roots:
+        if not root.is_dir():
+            continue
+        base_depth = len(root.parts)
+        try:
+            for current, dirs, files in os.walk(root, topdown=True):
+                depth = len(Path(current).parts) - base_depth
+                if depth >= max_depth:
+                    dirs[:] = []
+                dirs[:] = [d for d in dirs if d not in {".git", "cache", "Cache", "__pycache__"}]
+                for filename in files:
+                    if filename not in wanted:
+                        continue
+                    candidate = Path(current) / filename
+                    if candidate.is_file() and (IS_WINDOWS or os.access(candidate, os.X_OK)):
+                        return str(candidate)
+        except OSError:
+            continue
+    return None
+
+
+def _persist_detected_command(key: str, path: str) -> None:
+    """Self-heal installer state after discovering a real external CLI."""
+    if not path:
+        return
+    state = _load_install_state()
+    if state.get(key) == path:
+        return
+    state[key] = path
+    state.setdefault("version", "3")
+    state["last_detected"] = str(int(time.time()))
+    try:
+        INSTALL_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = INSTALL_STATE_FILE.with_name(INSTALL_STATE_FILE.name + f".{os.getpid()}.tmp")
+        lines = [f"{k}={v}" for k, v in state.items() if str(v).strip()]
+        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.replace(tmp, INSTALL_STATE_FILE)
+    except OSError:
+        pass
+
+
 def _apply_persisted_ui_runtime() -> None:
-    """Honor the installer-persisted UI runtime directory across shell restarts."""
     global UI_RUNTIME_DIR
     if os.environ.get("LAZYDEV_UI_RUNTIME"):
         return
@@ -720,88 +862,85 @@ _apply_persisted_ui_runtime()
 
 
 def _command_env_with_managed_bins() -> dict[str, str]:
-    """Build a child-process env whose PATH includes every persisted UI bin."""
-    state = _load_install_state()
-    dirs = _state_bin_dirs(state)
-    dirs.extend([HOME / ".local" / "bin", HOME / ".cargo" / "bin", HOME / ".kimi-code" / "bin"])
-    if IS_TERMUX:
-        prefix = os.environ.get("PREFIX")
-        if prefix:
-            dirs.append(Path(prefix) / "bin")
-    if not IS_WINDOWS:
-        existing = os.environ.get("PATH", "")
-        parts = [str(p) for p in dirs if p]
-        parts.extend(existing.split(os.pathsep) if existing else [])
-        deduped = list(dict.fromkeys(parts))
-    else:
-        existing = os.environ.get("PATH", "")
-        parts = [str(p) for p in dirs if p]
-        parts.extend(existing.split(os.pathsep) if existing else [])
-        deduped = list(dict.fromkeys(parts))
     env = dict(os.environ)
-    env["PATH"] = os.pathsep.join(deduped)
+    dirs = _tooling_bin_dirs()
+    env["PATH"] = os.pathsep.join(str(p) for p in dirs)
     return env
 
 
 def _managed_which(name: str) -> str | None:
-    state = _load_install_state()
     env = _command_env_with_managed_bins()
     found = shutil.which(name, path=env.get("PATH"))
     if found:
         return found
     suffixes = (".exe", ".cmd") if IS_WINDOWS else ()
     names = tuple(dict.fromkeys((name, *(f"{name}{s}" for s in suffixes))))
-    return _resolve_from_dirs(names, _state_bin_dirs(state))
+    return _resolve_from_dirs(names, _tooling_bin_dirs())
 
 
-def find_kimi() -> str | None:
-    state = _load_install_state()
-    exact = _state_command(state, "kimi_command")
-    if exact:
-        return exact
-
-    names = ("kimi.exe", "kimi.cmd", "kimi") if IS_WINDOWS else ("kimi",)
-    managed = _resolve_from_dirs(names, [
-        *[Path(v).expanduser() for k, v in state.items() if k == "kimi_bin_dir" and v],
-        HOME / ".kimi-code" / "bin",
-        HOME / ".local" / "bin",
-        HOME / ".local" / "share" / "lazydev",
-    ])
-    if managed:
-        return managed
-    return _managed_which("kimi")
-
-
-def _find_managed_cli(command_name: str, state_key: str, extra_names: tuple[str, ...], extra_dirs: list[Path]) -> str | None:
+def _discover_command(
+    *,
+    command_name: str,
+    state_key: str,
+    aliases: tuple[str, ...] = (),
+    extra_dirs: tuple[Path, ...] = (),
+    scan_roots: tuple[Path, ...] = (),
+) -> str | None:
     state = _load_install_state()
     exact = _state_command(state, state_key)
     if exact:
         return exact
-    names = tuple(dict.fromkeys((command_name, *extra_names)))
-    dirs = [*extra_dirs, *_state_bin_dirs(state), HOME / ".local" / "bin", HOME / ".local" / "share" / "lazydev"]
-    managed = _resolve_from_dirs(names, dirs)
-    if managed:
-        return managed
-    for name in names:
-        found = _managed_which(name)
-        if found:
-            return found
-    return None
+
+    env_override = os.environ.get(state_key.upper())
+    if env_override:
+        path = Path(env_override).expanduser()
+        if path.is_file() and (IS_WINDOWS or os.access(path, os.X_OK)):
+            _persist_detected_command(state_key, str(path))
+            return str(path)
+
+    names = tuple(dict.fromkeys((command_name, *aliases)))
+    dirs = [*extra_dirs, *_tooling_bin_dirs()]
+    found = _resolve_from_dirs(names, dirs)
+    if not found:
+        found = _managed_which(command_name)
+    if not found and scan_roots:
+        found = _recursive_cli_scan(names, list(scan_roots))
+    if found:
+        _persist_detected_command(state_key, found)
+    return found
+
+
+def find_kimi() -> str | None:
+    return _discover_command(
+        command_name="kimi",
+        state_key="kimi_command",
+        aliases=("kimi.exe", "kimi.cmd") if IS_WINDOWS else (),
+        extra_dirs=(HOME / ".kimi-code" / "bin", HOME / ".kimi" / "bin"),
+        scan_roots=(HOME / ".kimi-code", HOME / ".kimi", HOME / ".local"),
+    )
 
 
 def find_codex() -> str | None:
-    names = ("codex.exe", "codex.cmd", "codex") if IS_WINDOWS else ("codex",)
-    return _find_managed_cli("codex", "codex_command", names[1:], [
-        HOME / ".codex" / "bin",
-        HOME / ".local" / "bin",
-    ])
+    return _discover_command(
+        command_name="codex",
+        state_key="codex_command",
+        aliases=("codex.exe", "codex.cmd") if IS_WINDOWS else (),
+        extra_dirs=(
+            HOME / ".local" / "bin",
+            HOME / ".codex" / "packages" / "standalone" / "current" / "bin",
+        ),
+        scan_roots=(HOME / ".codex", HOME / ".local", HOME / ".npm-global"),
+    )
 
 
 def find_antigravity() -> str | None:
-    names = ("agy.exe", "agy.cmd", "agy") if IS_WINDOWS else ("agy",)
-    extra = [HOME / "AppData" / "Local" / "agy" / "bin"] if IS_WINDOWS else [HOME / ".local" / "bin"]
-    return _find_managed_cli("agy", "antigravity_command", names[1:], extra)
-
+    return _discover_command(
+        command_name="agy",
+        state_key="antigravity_command",
+        aliases=("agy.exe", "agy.cmd") if IS_WINDOWS else (),
+        extra_dirs=(HOME / ".local" / "bin",),
+        scan_roots=(HOME / ".local", HOME / ".config"),
+    )
 
 def toml_quote(value: str) -> str:
     return json.dumps(str(value))
@@ -3797,7 +3936,12 @@ def doctor() -> int:
     title(f"Lazy Developer doctor · {VERSION}")
     py = platform.python_version()
     print(f"Runtime       {platform.system()} · {platform.machine()} · Python {py}")
-    print(f"Agent CLI     {find_kimi() or 'not detected'}")
+    kimi = find_kimi()
+    codex = find_codex()
+    agy = find_antigravity()
+    print(f"Kimi Code    {kimi or 'not detected'}")
+    print(f"Codex        {codex or 'not detected'}")
+    print(f"Antigravity  {agy or 'not detected'}")
     print(f"Skills        {len(SKILLS)} bundled")
     print(f"Artifacts     {ARTIFACT_DIR}")
     provider = active_provider(cfg)
