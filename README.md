@@ -4,10 +4,10 @@
   <br>
   <br>
 
-  [![Version](https://img.shields.io/npm/v/%40blizps%2Flazy-developer?style=for-the-badge)](https://www.npmjs.com/package/@blizps/lazy-developer)
-  [![CI](https://github.com/BlizPS/free-kimi-code/actions/workflows/ci.yml/badge.svg)](https://github.com/BlizPS/free-kimi-code/actions/workflows/ci.yml)
+  [![Validated](https://github.com/BlizPS/free-kimi-code/actions/workflows/validate.yml/badge.svg)](https://github.com/BlizPS/free-kimi-code/actions/workflows/validate.yml)
   [![License](https://img.shields.io/badge/license-MIT-22C55E?style=for-the-badge)](LICENSE)
   [![Platforms](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows%20%C2%B7%20Termux-0EA5E9?style=for-the-badge)](#-installation)
+  [![Stars](https://img.shields.io/github/stars/BlizPS/free-kimi-code?style=for-the-badge&color=F59E0B)](https://github.com/BlizPS/free-kimi-code/stargazers)
 
   <p>
     <strong>One portable developer layer for Kimi Code, Codex, and Antigravity.</strong><br>
@@ -186,7 +186,7 @@ Then run the normal installer inside the Linux guest.
 The repository includes smoke tests and evaluations covering skills, providers, MCP, artifacts, filesystem guards, context handling, sessions, proxies, authentication, installers, efficiency, language detection, and plugin manifests.
 
 ```sh
-npm test
+python3 scripts/validate.py
 ```
 
 ## 🛡️ Safe by Default
