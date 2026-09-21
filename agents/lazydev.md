@@ -1,7 +1,7 @@
 ---
 name: default
 description: Focused LazyDev agent with evidence-first execution and verification.
-whenToUse: Default main agent for LazyDev coding tasks.
+whenToUse: Default main agent for LazyDev sessions.
 override: true
 ---
 ${base_prompt}

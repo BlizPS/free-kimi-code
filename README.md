@@ -152,7 +152,7 @@ Large outputs are handled without blindly filling the active context.
 
 ### macOS / Linux
 
-During installation, the installer first checks the **Kimi Code**, **Codex**, and **Antigravity** UIs and collects their install/update choices. It then installs or updates **RTK**, refreshes **Lazy Developer**, explicitly skips provider/model setup, and only after that installs or updates the selected native UIs in **Kimi Code → Codex → Antigravity** order. The installer never opens `lazydev setup`; provider/model configuration remains a separate runtime step. Existing AI UI configurations and sessions are left in place, while LazyDev keeps the provider/model, proxy/routing, context optimization, and shared skills layer common across the UIs.
+During installation, the installer first collects the **Kimi Code**, **Codex**, and **Antigravity** install/update choices. It then installs or updates **RTK**, refreshes **Lazy Developer**, skips provider/model setup, and only after that installs or updates the selected native UIs in **Kimi Code → Codex → Antigravity** order. The installer never opens `lazydev setup`; provider/model configuration remains a separate runtime step. Existing AI UI configurations and sessions are left in place, while LazyDev keeps the provider/model, proxy/routing, context optimization, and shared skills layer common across the UIs.
 Codex downloads use the official release archive directly with resumable retries and checksum verification, so a transient CDN reset does not force a full restart. Partial downloads are cached outside the workspace and can be resumed by rerunning the installer.
 
 ```sh
