@@ -72,6 +72,15 @@ if 'LAZYDEV_STATUS_MESSAGE=""' not in sh:
 for name, needle, text in checks:
     if needle not in text: errors.append(f'{name}: missing {needle}')
 
+# RTK verification regression: the POSIX installer must define its helper
+# before using it, and must rediscover the managed RTK location on reinstall.
+if sh.index('rtk_is_token_killer() {') > sh.index('rtk_is_token_killer "$RTK_COMMAND"'):
+    errors.append('install.sh: rtk_is_token_killer is defined after first use')
+if '$HOME/.local/share/lazydev/rtk' not in sh:
+    errors.append('install.sh: managed RTK location is not discoverable on reinstall')
+if '"$candidate" gain >/dev/null 2>&1' not in sh:
+    errors.append('install.sh: RTK identity verification must use rtk gain')
+
 cli_text = (ROOT / 'cli' / 'lazydev.py').read_text(encoding='utf-8')
 launcher_text = (ROOT / 'scripts' / 'lazydev.mjs').read_text(encoding='utf-8')
 if 'if cmd == "resume":' not in cli_text or ('lazydev ' + 'sessions') in cli_text:

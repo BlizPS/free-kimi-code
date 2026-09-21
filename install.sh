@@ -6348,16 +6348,34 @@ ask_install_ui() {
 }
 
 find_rtk() {
+  # Prefer LazyDev-managed locations so a stale/wrong global `rtk` cannot
+  # shadow the verified Rust Token Killer installation.
+  for candidate in \
+    "${LAZYDEV_BIN_DIR:-}/rtk" \
+    "$HOME/.local/share/lazydev/rtk" \
+    "$HOME/.local/bin/rtk" \
+    "$HOME/.cargo/bin/rtk"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
   if command -v rtk >/dev/null 2>&1; then
     command -v rtk
     return 0
   fi
-  for candidate in "$HOME/.local/bin/rtk" "$HOME/.cargo/bin/rtk"; do
-    if [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
-  done
   return 1
 }
 
+# Verify that an rtk executable is the Rust Token Killer (rtk-ai/rtk),
+# not the unrelated Rust Type Kit. Upstream documents `rtk gain` as the
+# canonical identity check. Keep this silent so installer output stays clean.
+rtk_is_token_killer() {
+  candidate="$1"
+  [ -n "$candidate" ] || return 1
+  [ -x "$candidate" ] || return 1
+  "$candidate" gain >/dev/null 2>&1
+}
 
 is_lazydev_launcher() {
   file="$1"
