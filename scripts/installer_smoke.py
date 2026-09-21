@@ -57,8 +57,8 @@ checks += [
     ('install.ps1', '$RtkApiUrl =', ps),
     ('install.ps1', '$RtkNeedsUpdate = $false', ps),
     ('install.ps1', 'init --agent kimi', ps),
-    ('uninstall.sh', 'Lazy Developer, Kimi Code, RTK', (ROOT/'uninstall.sh').read_text(encoding='utf-8')),
-    ('uninstall.ps1', 'Lazy Developer, Kimi Code, RTK', (ROOT/'uninstall.ps1').read_text(encoding='utf-8')),
+    ('uninstall.sh', 'Native Kimi Code, Codex, Antigravity, and RTK user data were preserved.', (ROOT/'uninstall.sh').read_text(encoding='utf-8')),
+    ('uninstall.ps1', 'Native AI CLI and RTK user data were preserved', (ROOT/'uninstall.ps1').read_text(encoding='utf-8')),
 ]
 
 # nounset regression: LazyDev state must be initialized before its first runtime use.
@@ -75,12 +75,15 @@ for name, needle, text in checks:
 state_needles = [
     'LAZYDEV_STATE_FILE',
     'load_install_state()',
-    'write_install_state()',
+    'write_install_state() {',
     'rtk_bin_dir=',
     'kimi_bin_dir=',
     'codex_bin_dir=',
+    'lazydev_command=',
+    'write_cli_registry()',
     'CODEX_BIN_DIR/codex',
     'HOME/.local/share/lazydev/codex',
+    'LAZYDEV_CLI_REGISTRY_FILE=',
 ]
 for needle in state_needles:
     if needle not in sh: errors.append(f'install.sh: persistent install state/discovery missing: {needle}')
@@ -96,8 +99,10 @@ if '## 🗑️ Uninstall' not in (ROOT/'README.md').read_text(encoding='utf-8'):
 if sh.index('rtk_is_token_killer() {') > sh.index('rtk_is_token_killer "$RTK_COMMAND"'):
     errors.append('install.sh: rtk_is_token_killer is defined after first use')
 if '$HOME/.local/share/lazydev/rtk' not in sh:
-    errors.append('install.sh: managed RTK location is not discoverable on reinstall')
-if 'LAZYDEV_STATE_FILE' not in sh or 'load_install_state()' not in sh or 'write_install_state()' not in sh:
+    errors.append('install.sh: legacy RTK location is not discoverable on reinstall')
+if 'RTK_INSTALL_DIR="$RTK_BIN_DIR"' not in sh:
+    errors.append('install.sh: RTK must be installed into the durable external bin directory')
+if 'LAZYDEV_STATE_FILE' not in sh or 'load_install_state()' not in sh or 'write_install_state() {' not in sh:
     errors.append('install.sh: persistent installer state missing')
 if 'LAZYDEV_STATE_LOADED=1' not in sh or 'if [ "$LAZYDEV_STATE_LOADED" -eq 0 ] &&' not in sh:
     errors.append('install.sh: persisted state must prevent PATH-based bin directory drift')

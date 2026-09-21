@@ -4,6 +4,7 @@ set -eu
 LAZYDEV_HOME="${LAZYDEV_HOME:-$HOME/.local/share/lazydev}"
 LAZYDEV_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/lazydev"
 LAZYDEV_STATE_FILE="$LAZYDEV_STATE_HOME/install-state"
+LAZYDEV_STATE_BACKUP_FILE="$LAZYDEV_STATE_FILE.bak"
 LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-}"
 RTK_BIN_DIR="${LAZYDEV_BIN_DIR:-}"
 CODEX_BIN_DIR="${LAZYDEV_BIN_DIR:-}"
@@ -144,30 +145,23 @@ rm -f "$RTK_BIN_DIR/rtk" "$RTK_BIN_DIR/rtk.exe" 2>/dev/null || true
 rm -f "$HOME/.local/bin/lazydev" "$HOME/.local/bin/lazydev.cmd" "$HOME/.local/bin/lazydev.ps1" 2>/dev/null || true
 if [ -n "${PREFIX:-}" ]; then rm -f "$PREFIX/bin/lazydev" "$PREFIX/bin/lazydev.cmd" "$PREFIX/bin/lazydev.ps1" 2>/dev/null || true; fi
 
-step "Removing Kimi Code"
-rm -rf "$KIMI_NATIVE_HOME" "$KIMI_LEGACY_HOME" 2>/dev/null || true
-for dir in $KIMI_CONFIG_DIRS; do rm -rf "$dir" 2>/dev/null || true; done
-rm -rf "$HOME/.local/share/kimi-code" "$HOME/.cache/kimi-code" "$HOME/.local/state/kimi-code" 2>/dev/null || true
-rm -rf "$HOME/Library/Application Support/kimi-code" "$HOME/Library/Caches/kimi-code" "$HOME/Library/Logs/kimi-code" 2>/dev/null || true
-# Remove legacy npm installs when npm happens to be present; npm is not required for uninstall.
-if command -v npm >/dev/null 2>&1; then
-  npm uninstall -g @blizps/lazy-developer @moonshot-ai/kimi-code >/dev/null 2>&1 || true
-fi
-# Remove legacy global package directories even when npm itself is unavailable.
-for npm_root in \
-  "$HOME/.npm-global/lib/node_modules" \
-  "$HOME/.local/lib/node_modules" \
-  "$HOME/.nvm/versions/node"/*/lib/node_modules \
-  "${PREFIX:-}/lib/node_modules" \
-  "/usr/local/lib/node_modules" \
-  "/usr/lib/node_modules"; do
-  [ -d "$npm_root" ] || continue
-  rm -rf "$npm_root/@blizps/lazy-developer" "$npm_root/@moonshot-ai/kimi-code" 2>/dev/null || true
+step "Removing Kimi Code launcher"
+# Preserve ~/.kimi-code and ~/.kimi: official Kimi Code stores configuration,
+# credentials, logs, and session history there. Remove only executable launchers.
+for file in \
+  "$KIMI_BIN_DIR/kimi" "$KIMI_BIN_DIR/kimi.exe" "$KIMI_BIN_DIR/kimi.cmd" \
+  "$LAZYDEV_BIN_DIR/kimi" "$LAZYDEV_BIN_DIR/kimi.exe" "$LAZYDEV_BIN_DIR/kimi.cmd" \
+  "$HOME/.local/bin/kimi" "$HOME/.local/bin/kimi.exe" "$HOME/.local/bin/kimi.cmd"; do
+  if [ -e "$file" ] || [ -L "$file" ]; then
+    if is_managed_file "$file" '\.kimi-code|kimi-code|@moonshot-ai/kimi-code|lazydev'; then
+      rm -f "$file" 2>/dev/null || true
+    fi
+  fi
 done
-rm -f "$LAZYDEV_BIN_DIR/kimi" "$LAZYDEV_BIN_DIR/kimi.exe" "$LAZYDEV_BIN_DIR/kimi.cmd" "$HOME/.local/bin/kimi" "$HOME/.local/bin/kimi.exe" "$HOME/.local/bin/kimi.cmd" 2>/dev/null || true
 
-step "Removing Codex and Antigravity"
-rm -rf "$CODEX_HOME" "$ANTIGRAVITY_HOME" 2>/dev/null || true
+step "Removing Codex and Antigravity launchers"
+# Preserve ~/.codex and Antigravity runtime/state. Codex keeps sessions under
+# ~/.codex, and Antigravity owns its own authentication/history data.
 # Preserve other Antigravity MCP servers while removing only LazyDev's managed entry.
 AGY_MCP_FILE="$HOME/.gemini/config/mcp_config.json"
 if [ -f "$AGY_MCP_FILE" ]; then
@@ -186,8 +180,21 @@ if isinstance(servers,dict) and 'lazydev-search' in servers:
 PY
   fi
 fi
-rm -f "$LAZYDEV_BIN_DIR/codex" "$LAZYDEV_BIN_DIR/codex.bin" "$LAZYDEV_BIN_DIR/codex.exe" "$LAZYDEV_BIN_DIR/codex.cmd" "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.exe" "$HOME/.local/bin/codex.cmd" 2>/dev/null || true
-rm -f "$LAZYDEV_BIN_DIR/agy" "$LAZYDEV_BIN_DIR/agy.exe" "$LAZYDEV_BIN_DIR/agy.cmd" "$HOME/.local/bin/agy" "$HOME/.local/bin/agy.exe" "$HOME/.local/bin/agy.cmd" 2>/dev/null || true
+for file in \
+  "$CODEX_BIN_DIR/codex" "$CODEX_BIN_DIR/codex.bin" "$CODEX_BIN_DIR/codex.exe" "$CODEX_BIN_DIR/codex.cmd" \
+  "$LAZYDEV_BIN_DIR/codex" "$LAZYDEV_BIN_DIR/codex.bin" "$LAZYDEV_BIN_DIR/codex.exe" "$LAZYDEV_BIN_DIR/codex.cmd" \
+  "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.exe" "$HOME/.local/bin/codex.cmd"; do
+  if [ -e "$file" ] || [ -L "$file" ]; then
+    if is_managed_file "$file" 'openai/codex|Codex CLI|codex/packages/standalone|free-kimi-code|lazydev'; then rm -f "$file" 2>/dev/null || true; fi
+  fi
+done
+for file in \
+  "$LAZYDEV_BIN_DIR/agy" "$LAZYDEV_BIN_DIR/agy.exe" "$LAZYDEV_BIN_DIR/agy.cmd" \
+  "$HOME/.local/bin/agy" "$HOME/.local/bin/agy.exe" "$HOME/.local/bin/agy.cmd"; do
+  if [ -e "$file" ] || [ -L "$file" ]; then
+    if is_managed_file "$file" 'antigravity|google-antigravity|free-kimi-code|lazydev'; then rm -f "$file" 2>/dev/null || true; fi
+  fi
+done
 
 step "Removing RTK"
 RTK_PATH="$(command -v rtk 2>/dev/null || true)"
@@ -196,9 +203,14 @@ if [ -n "$RTK_PATH" ]; then
     "$RTK_PATH" init -g --uninstall >/dev/null 2>&1 || true
   fi
 fi
-rm -f "$LAZYDEV_BIN_DIR/rtk" "$HOME/.local/bin/rtk" "$HOME/.cargo/bin/rtk" 2>/dev/null || true
-rm -rf "$RTK_CONFIG_DIR" "$RTK_DATA_DIR" "$RTK_CACHE_DIR" 2>/dev/null || true
-rm -rf "$HOME/Library/Application Support/rtk" "$HOME/Library/Caches/rtk" 2>/dev/null || true
+for file in "$RTK_BIN_DIR/rtk" "$LAZYDEV_BIN_DIR/rtk" "$HOME/.local/bin/rtk" "$HOME/.cargo/bin/rtk"; do
+  if [ -e "$file" ] || [ -L "$file" ]; then
+    if is_managed_file "$file" 'rtk-ai/rtk|Rust Token Killer|lazydev'; then rm -f "$file" 2>/dev/null || true; fi
+  fi
+done
+# Keep native RTK config/data/cache so another RTK installation or manual
+# recovery does not lose user state. RTK init --uninstall above only removes
+# the integration it owns.
 
 step "Removing LazyDev workspace artifacts"
 rm -rf "$ARTIFACT_DIR"
@@ -212,10 +224,10 @@ esac
 
 step "Checking cleanup"
 rm -rf "$LAZYDEV_STATE_HOME" 2>/dev/null || true
-for path in "$LAZYDEV_HOME" "$LAZYDEV_CONFIG_DIR" "$LAZYDEV_STATE_HOME" "$KIMI_NATIVE_HOME" "$KIMI_LEGACY_HOME" "$CODEX_HOME" "$ANTIGRAVITY_HOME" "$RTK_CONFIG_DIR" "$RTK_DATA_DIR" "$RTK_CACHE_DIR" "$LAZYDEV_BIN_DIR/lazydev" "$HOME/.local/bin/lazydev" "$LAZYDEV_BIN_DIR/rtk" "$ARTIFACT_DIR"; do
+for path in "$LAZYDEV_HOME" "$LAZYDEV_CONFIG_DIR" "$LAZYDEV_STATE_HOME" "$LAZYDEV_BIN_DIR/lazydev" "$HOME/.local/bin/lazydev" "$LAZYDEV_BIN_DIR/rtk" "$ARTIFACT_DIR"; do
   [ ! -e "$path" ] || fatal "Cleanup incomplete: $path still exists."
 done
 
 say ""
-say "Lazy Developer, Kimi Code, RTK, their managed configuration, sessions, caches, and LazyDev artifacts have been removed."
+say "Lazy Developer managed files, launchers, integrations, state, and LazyDev artifacts have been removed. Native Kimi Code, Codex, Antigravity, and RTK user data were preserved."
 say "Project folders outside these managed locations were left untouched."

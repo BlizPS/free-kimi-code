@@ -53,6 +53,10 @@ INSTALL_STATE_FILE = Path(os.environ.get(
     "LAZYDEV_INSTALL_STATE_FILE",
     str(Path(os.environ.get("XDG_STATE_HOME", str(HOME / ".local" / "state"))) / "lazydev" / "install-state"),
 ))
+CLI_REGISTRY_FILE = Path(os.environ.get(
+    "LAZYDEV_CLI_REGISTRY_FILE",
+    str(INSTALL_STATE_FILE.with_name("cli-paths")),
+))
 UI_RUNTIME_DIR = Path(os.environ.get("LAZYDEV_UI_RUNTIME", str(CONFIG_DIR / "ui-runtime")))
 UI_PACKAGE = "@poppinss/cliui"
 UI_PACKAGE_VERSION = "6.8.1"
@@ -637,36 +641,67 @@ def setup() -> int:
 
 
 def _load_install_state() -> dict[str, str]:
-    """Load installer-owned state, but never require it for discovery."""
-    try:
-        if not INSTALL_STATE_FILE.is_file():
+    """Load installer state plus an independent last-known-good CLI path registry."""
+    files = [
+        CLI_REGISTRY_FILE.with_name(CLI_REGISTRY_FILE.name + ".bak"),
+        CLI_REGISTRY_FILE,
+        INSTALL_STATE_FILE.with_name(INSTALL_STATE_FILE.name + ".bak"),
+        INSTALL_STATE_FILE,
+    ]
+
+    def read_file(path: Path) -> dict[str, str]:
+        if not path.is_file():
             return {}
-        raw = INSTALL_STATE_FILE.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return {}
-
-    stripped = raw.lstrip()
-    if stripped.startswith("{"):
         try:
-            data = json.loads(stripped)
-            if isinstance(data, dict):
-                return {
-                    str(k): str(v)
-                    for k, v in data.items()
-                    if v is not None and str(v).strip()
-                }
-        except (ValueError, TypeError):
-            pass
+            raw = path.read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            return {}
+        current: dict[str, str] = {}
+        stripped = raw.lstrip()
+        if stripped.startswith("{"):
+            try:
+                data = json.loads(stripped)
+                if isinstance(data, dict):
+                    current = {str(k): str(v) for k, v in data.items() if v is not None and str(v).strip()}
+            except (ValueError, TypeError):
+                current = {}
+        if not current:
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if value.strip():
+                    current[key.strip()] = value.strip()
+        return current
 
+    loaded = [read_file(path) for path in files]
     state: dict[str, str] = {}
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        value = value.strip()
-        if value:
-            state[key.strip()] = value
+    for item in loaded:
+        state.update(item)
+
+    # Prefer an actually existing command path. A stale old state entry should
+    # never hide a valid path preserved by the independent CLI registry.
+    command_keys = ("kimi_command", "codex_command", "antigravity_command", "rtk_command", "lazydev_command")
+    for key in command_keys:
+        chosen = state.get(key, "")
+        if chosen:
+            path = Path(chosen).expanduser()
+            valid = path.is_file() or (path.is_dir() and key == "rtk_command" and (path / ("rtk.exe" if IS_WINDOWS else "rtk")).is_file())
+            if valid:
+                continue
+        for item in reversed(loaded):
+            candidate = str(item.get(key, "")).strip()
+            if not candidate:
+                continue
+            path = Path(candidate).expanduser()
+            valid = path.is_file() or (path.is_dir() and key == "rtk_command" and (path / ("rtk.exe" if IS_WINDOWS else "rtk")).is_file())
+            if valid:
+                state[key] = candidate
+                break
+        else:
+            if not chosen:
+                state.pop(key, None)
     return state
 
 
@@ -680,6 +715,7 @@ def _state_command(state: dict[str, str], key: str) -> str | None:
             "kimi_command": "kimi.exe" if IS_WINDOWS else "kimi",
             "codex_command": "codex.exe" if IS_WINDOWS else "codex",
             "antigravity_command": "agy.exe" if IS_WINDOWS else "agy",
+            "rtk_command": "rtk.exe" if IS_WINDOWS else "rtk",
         }.get(key)
         if basename:
             candidate = path / basename
@@ -748,11 +784,36 @@ def _tooling_bin_dirs() -> list[Path]:
     _append_unique_path(dirs, HOME / ".config" / "yarn" / "global" / "node_modules" / ".bin")
     _append_unique_path(dirs, HOME / ".codex" / "packages" / "standalone" / "current" / "bin")
     _append_unique_path(dirs, HOME / ".kimi-code" / "bin")
+    _append_unique_path(dirs, HOME / ".local" / "share" / "lazydev-tools")
+    _append_unique_path(dirs, HOME / ".local" / "share" / "lazydev-tools" / "bin")
+    if IS_WINDOWS:
+        local_appdata = Path(os.environ.get("LOCALAPPDATA", str(HOME / "AppData" / "Local")))
+        appdata = Path(os.environ.get("APPDATA", str(HOME / "AppData" / "Roaming")))
+        program_files = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        program_files_x86 = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+        _append_unique_path(dirs, local_appdata / "agy" / "bin")
+        _append_unique_path(dirs, local_appdata / "Programs" / "OpenAI" / "Codex" / "bin")
+        _append_unique_path(dirs, local_appdata / "Programs" / "Kimi Code" / "bin")
+        _append_unique_path(dirs, local_appdata / "Microsoft" / "WinGet" / "Links")
+        _append_unique_path(dirs, local_appdata / "pnpm")
+        _append_unique_path(dirs, appdata / "npm")
+        _append_unique_path(dirs, appdata / "npm-global" / "bin")
+        _append_unique_path(dirs, HOME / "scoop" / "shims")
+        _append_unique_path(dirs, program_files / "nodejs")
+        _append_unique_path(dirs, program_files_x86 / "nodejs")
+    _append_unique_path(dirs, HOME / ".local" / "bin")
+    _append_unique_path(dirs, HOME / ".cargo" / "bin")
     _append_unique_path(dirs, HOME / ".kimi" / "bin")
     _append_unique_path(dirs, HOME / ".local" / "opt" / "codex")
     _append_unique_path(dirs, HOME / ".local" / "lib" / "node_modules" / ".bin")
     _append_unique_path(dirs, HOME / ".npm-global" / "lib" / "node_modules" / ".bin")
     _append_unique_path(dirs, HOME / ".config" / "npm" / "bin")
+    _append_unique_path(dirs, HOME / ".volta" / "bin")
+    _append_unique_path(dirs, HOME / ".asdf" / "shims")
+    _append_unique_path(dirs, HOME / ".local" / "share" / "mise" / "shims")
+    _append_unique_path(dirs, HOME / ".config" / "mise" / "shims")
+    _append_unique_path(dirs, HOME / ".local" / "share" / "uv")
+    _append_unique_path(dirs, HOME / ".nvm" / "versions" / "node")
     _append_unique_path(dirs, HOME / ".local" / "share" / "lazydev")
     _append_unique_path(dirs, HOME / ".local" / "share" / "lazydev" / "rtk")
 
@@ -820,9 +881,10 @@ def _resolve_from_dirs(names: tuple[str, ...], dirs: list[Path]) -> str | None:
     return None
 
 
-def _recursive_cli_scan(names: tuple[str, ...], roots: list[Path], max_depth: int = 6) -> str | None:
-    """Recover manually-installed CLIs from known tool roots, without scanning all of HOME."""
+def _recursive_cli_scan(names: tuple[str, ...], roots: list[Path], max_depth: int = 8) -> str | None:
+    """Recover manually-installed CLIs from bounded roots, pruning data-heavy trees."""
     wanted = set(names)
+    pruned = {".git", "node_modules", ".cache", "Cache", "sessions", "logs", "target", ".pnpm-store", "__pycache__", ".venv", "venv"}
     for root in roots:
         if not root.is_dir():
             continue
@@ -832,7 +894,7 @@ def _recursive_cli_scan(names: tuple[str, ...], roots: list[Path], max_depth: in
                 depth = len(Path(current).parts) - base_depth
                 if depth >= max_depth:
                     dirs[:] = []
-                dirs[:] = [d for d in dirs if d not in {".git", "cache", "Cache", "__pycache__"}]
+                dirs[:] = [d for d in dirs if d not in pruned]
                 for filename in files:
                     if filename not in wanted:
                         continue
@@ -845,23 +907,51 @@ def _recursive_cli_scan(names: tuple[str, ...], roots: list[Path], max_depth: in
 
 
 def _persist_detected_command(key: str, path: str) -> None:
-    """Self-heal installer state after discovering a real external CLI."""
+    """Persist an exact external CLI path without depending on PATH or LazyDev runtime."""
     if not path:
         return
     state = _load_install_state()
     if state.get(key) == path:
         return
     state[key] = path
-    state.setdefault("version", "3")
+    state.setdefault("version", "5")
     state["last_detected"] = str(int(time.time()))
     try:
         INSTALL_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = INSTALL_STATE_FILE.with_name(INSTALL_STATE_FILE.name + f".{os.getpid()}.tmp")
+        if INSTALL_STATE_FILE.is_file():
+            backup = INSTALL_STATE_FILE.with_name(INSTALL_STATE_FILE.name + ".bak")
+            try:
+                shutil.copy2(INSTALL_STATE_FILE, backup)
+            except OSError:
+                pass
         lines = [f"{k}={v}" for k, v in state.items() if str(v).strip()]
         tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
         os.replace(tmp, INSTALL_STATE_FILE)
     except OSError:
-        pass
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+    try:
+        CLI_REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        registry = _load_install_state()
+        registry[key] = path
+        rtmp = CLI_REGISTRY_FILE.with_name(CLI_REGISTRY_FILE.name + f".{os.getpid()}.tmp")
+        if CLI_REGISTRY_FILE.is_file():
+            try:
+                shutil.copy2(CLI_REGISTRY_FILE, CLI_REGISTRY_FILE.with_name(CLI_REGISTRY_FILE.name + ".bak"))
+            except OSError:
+                pass
+        ordered = ["rtk_command", "codex_command", "kimi_command", "antigravity_command"]
+        lines = ["version=1"] + [f"{k}={registry[k]}" for k in ordered if registry.get(k)]
+        rtmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.replace(rtmp, CLI_REGISTRY_FILE)
+    except OSError:
+        try:
+            rtmp.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def _apply_persisted_ui_runtime() -> None:
@@ -932,7 +1022,7 @@ def find_kimi() -> str | None:
         state_key="kimi_command",
         aliases=("kimi.exe", "kimi.cmd") if IS_WINDOWS else (),
         extra_dirs=(HOME / ".kimi-code" / "bin", HOME / ".kimi" / "bin"),
-        scan_roots=(HOME / ".kimi-code", HOME / ".kimi", HOME / ".local", HOME / ".local" / "share"),
+        scan_roots=(HOME / ".kimi-code", HOME / ".kimi", HOME / ".local", HOME / ".local" / "share", HOME / ".nvm", HOME / ".volta", HOME / ".asdf", HOME),
     )
 
 
@@ -944,8 +1034,9 @@ def find_codex() -> str | None:
         extra_dirs=(
             HOME / ".local" / "bin",
             HOME / ".codex" / "packages" / "standalone" / "current" / "bin",
+            HOME / ".codex" / "packages" / "standalone" / "current",
         ),
-        scan_roots=(HOME / ".codex", HOME / ".local", HOME / ".npm-global", HOME / ".config"),
+        scan_roots=(HOME / ".codex", HOME / ".local", HOME / ".npm-global", HOME / ".config", HOME / ".nvm", HOME / ".volta", HOME / ".asdf", HOME),
     )
 
 
@@ -955,7 +1046,7 @@ def find_antigravity() -> str | None:
         state_key="antigravity_command",
         aliases=("agy.exe", "agy.cmd") if IS_WINDOWS else (),
         extra_dirs=(HOME / ".local" / "bin",),
-        scan_roots=(HOME / ".local", HOME / ".config", HOME / ".antigravity"),
+        scan_roots=(HOME / ".local", HOME / ".config", HOME / ".antigravity", HOME / ".nvm", HOME / ".volta", HOME / ".asdf", HOME),
     )
 
 def toml_quote(value: str) -> str:
