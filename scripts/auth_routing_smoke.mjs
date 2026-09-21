@@ -14,6 +14,13 @@ const capture = path.join(tmp, 'capture.json');
 fs.mkdirSync(bin, { recursive: true });
 fs.mkdirSync(home, { recursive: true });
 fs.mkdirSync(path.join(xdg, 'lazydev'), { recursive: true });
+const pythonProbe = spawnSync(
+  process.platform === 'win32' ? 'where.exe' : 'which',
+  ['python3'],
+  { encoding: 'utf8' }
+);
+const python3 = (pythonProbe.stdout || '').split(/\r?\n/).find(Boolean);
+if (!python3) throw new Error('python3 is required for auth routing smoke');
 
 // Emulate a provider/account config mutation inside the child UI. The important
 // invariant is that the LazyDev-selected model and loopback provider remain intact.
@@ -37,12 +44,18 @@ NODE
 exit 0
 `;
 fs.writeFileSync(fake, fakeScript, { mode: 0o700 });
+const nodeShim = path.join(bin, process.platform === 'win32' ? 'node.exe' : 'node');
+const pythonShim = path.join(bin, process.platform === 'win32' ? 'python3.exe' : 'python3');
+fs.symlinkSync(process.execPath, nodeShim);
+fs.symlinkSync(python3, pythonShim);
 
 fs.writeFileSync(path.join(xdg, 'lazydev', 'config.json'), JSON.stringify({
-  activeProvider: 'nvidia',
+  // Use the local provider route so the smoke test is deterministic and never
+  // depends on a live external provider catalog.
+  activeProvider: 'ollama',
   providers: {
-    nvidia: {
-      apiKey: 'provider-secret',
+    ollama: {
+      apiKey: '',
       model: 'nvidia/test-model',
       modelInfo: { contextLimit: 131072, inputLimit: 131072, outputLimit: 8192 }
     }
@@ -57,7 +70,7 @@ try {
       ...process.env,
       HOME: home,
       XDG_CONFIG_HOME: xdg,
-      PATH: `${bin}:${process.env.PATH || ''}`,
+      PATH: `${bin}`,
       LAZYDEV_AUTH_CAPTURE: capture,
     },
     timeout: 20000,

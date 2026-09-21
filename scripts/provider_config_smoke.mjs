@@ -15,11 +15,29 @@ const kimiBin = path.join(home, '.local', 'bin');
 const configDir = path.join(xdg, 'lazydev');
 fs.mkdirSync(kimiBin, { recursive: true });
 fs.mkdirSync(configDir, { recursive: true });
+const pythonProbe = spawnSync(
+  process.platform === 'win32' ? 'where.exe' : 'which',
+  ['python3'],
+  { encoding: 'utf8' }
+);
+const python3 = (pythonProbe.stdout || '').split(/\r?\n/).find(Boolean);
+if (!python3) throw new Error('python3 is required for provider config smoke');
 const captured = path.join(temp, 'captured-config.toml');
 const capturedEnv = path.join(temp, 'captured-env.json');
 const fakeKimi = path.join(kimiBin, 'kimi');
-fs.writeFileSync(fakeKimi, `#!/bin/sh\ncp "$KIMI_CODE_HOME/config.toml" "${captured}"\nprintf '%s' "$OPENAI_BASE_URL" > "${capturedEnv}"\nexit 0\n`);
+fs.writeFileSync(fakeKimi, `#!/bin/sh
+node - <<'NODE'
+const fs = require('fs');
+fs.copyFileSync(process.env.KIMI_CODE_HOME + '/config.toml', ${JSON.stringify(captured)});
+fs.writeFileSync(${JSON.stringify(capturedEnv)}, process.env.OPENAI_BASE_URL || '');
+NODE
+exit 0
+`);
 fs.chmodSync(fakeKimi, 0o755);
+const nodeShim = path.join(kimiBin, process.platform === 'win32' ? 'node.exe' : 'node');
+const pythonShim = path.join(kimiBin, process.platform === 'win32' ? 'python3.exe' : 'python3');
+fs.symlinkSync(process.execPath, nodeShim);
+fs.symlinkSync(python3, pythonShim);
 fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
   activeProvider: 'openai',
   providers: { openai: { apiKey: 'test-key', model: 'gpt-test', modelInfo: { contextLimit: 128000, outputLimit: 8192 } } },
@@ -30,7 +48,7 @@ const env = {
   HOME: home,
   USERPROFILE: home,
   XDG_CONFIG_HOME: xdg,
-  PATH: `${kimiBin}${path.delimiter}${process.env.PATH || ''}`,
+  PATH: `${kimiBin}`,
   OPENAI_BASE_URL: 'not-a-url',
   OPENAI_API_KEY: 'stale-key',
   TERMUX_VERSION: '',

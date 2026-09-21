@@ -14,6 +14,9 @@ for p in ROOT.rglob("*"):
     if p.name in {"install.sh", "install.ps1", "gemini_compat_smoke.mjs"}: continue
     if p.suffix.lower() not in {".md",".json",".yml",".yaml",".py",".toml",".mjs",".js"}: continue
     t=p.read_text(encoding="utf-8",errors="ignore").lower()
+    # Ignore ordinary Python/JavaScript member calls such as dict.update(...);
+    # the hygiene check targets release-facing wording, not language APIs.
+    t = re.sub(r'\.update\b', '', t)
     forbidden = ["up" + "date", "updat" + "ed", "updat" + "ing"]
     if any(re.search(rf"\b{re.escape(word)}\b", t) for word in forbidden): errors.append(f"release-word leakage: {p.relative_to(ROOT)}")
 if errors:

@@ -18,8 +18,29 @@ const captured = path.join(temp, 'config.toml');
 const capturedModelEnv = path.join(temp, 'model-env.txt');
 fs.mkdirSync(bin, { recursive: true });
 fs.mkdirSync(xdg, { recursive: true });
-fs.writeFileSync(fakeKimi, `#!/bin/sh\ncp "$KIMI_CODE_HOME/config.toml" "${captured}"\nprintf '%s' "\${KIMI_MODEL_NAME-}" > "${capturedModelEnv}"\nexit 0\n`);
+
+const pythonProbe = spawnSync(
+  process.platform === 'win32' ? 'where.exe' : 'which',
+  ['python3'],
+  { encoding: 'utf8' }
+);
+const python3 = (pythonProbe.stdout || '').split(/\r?\n/).find(Boolean);
+if (!python3) throw new Error('python3 is required for 9Router thinking smoke');
+
+fs.writeFileSync(fakeKimi, `#!/bin/sh
+node - <<'NODE'
+const fs = require('fs');
+fs.copyFileSync(process.env.KIMI_CODE_HOME + '/config.toml', ${JSON.stringify(captured)});
+fs.writeFileSync(${JSON.stringify(capturedModelEnv)}, process.env.KIMI_MODEL_NAME || '');
+NODE
+exit 0
+`);
 fs.chmodSync(fakeKimi, 0o755);
+
+const nodeShim = path.join(bin, process.platform === 'win32' ? 'node.exe' : 'node');
+const pythonShim = path.join(bin, process.platform === 'win32' ? 'python3.exe' : 'python3');
+fs.symlinkSync(process.execPath, nodeShim);
+fs.symlinkSync(python3, pythonShim);
 
 const server = path.join(temp, 'server.mjs');
 fs.writeFileSync(server, `import http from 'node:http';\nconst port = Number(process.argv[2]);\nconst server = http.createServer((req,res)=>{\n  if (req.url === '/v1/models' && req.headers.authorization === 'Bearer key') {\n    res.writeHead(200, {'content-type':'application/json'});\n    res.end(JSON.stringify({object:'list',data:[\n      {id:'ag/claude-opus-4-6-thinking',object:'model',capabilities:{reasoning:true,thinkingCanDisable:true,tools:true,contextWindow:200000,maxOutput:8192}},\n      {id:'always-thinking-test',object:'model',capabilities:{reasoning:true,thinkingCanDisable:false,tools:true,contextWindow:200000,maxOutput:8192}}\n    ]}));\n    return;\n  }\n  res.writeHead(401, {'content-type':'application/json'});\n  res.end(JSON.stringify({error:{message:'unauthorized'}}));\n});\nserver.listen(port,'127.0.0.1',()=>process.stdout.write('READY\\n'));\n`);
@@ -38,7 +59,7 @@ await new Promise((resolve, reject) => {
   proc.once('error', reject);
 });
 
-const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: xdg, PATH: `${bin}${path.delimiter}${process.env.PATH || ''}` };
+const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: xdg, PATH: `${bin}` };
 const base = `http://127.0.0.1:${port}/v1`;
 const setup = spawnSync('python3', [py, 'setup'], { env, input: `11\n${base}\nkey\n1\n`, encoding: 'utf8', timeout: 20000 });
 assert.equal(setup.status, 0, setup.stderr || setup.stdout);

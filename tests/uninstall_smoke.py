@@ -57,9 +57,13 @@ with tempfile.TemporaryDirectory(prefix='lazydev-uninstall-smoke-') as td:
         print(result.stdout)
         print(result.stderr)
         raise SystemExit('FAIL: uninstall.sh smoke test returned non-zero')
-    leftovers = [p for p in [config, native_kimi, legacy_kimi, rtk_cfg, rtk_data, rtk_cache, artifact, canonical, old_link, kimi_shim, rtk_shim] if p.exists() or p.is_symlink()]
+    leftovers = [p for p in [config, artifact, canonical, old_link, kimi_shim, rtk_shim] if p.exists() or p.is_symlink()]
     if leftovers:
         print(result.stdout)
         raise SystemExit('FAIL: uninstall left managed paths: ' + ', '.join(map(str,leftovers)))
+    preserved = [p for p in [native_kimi, legacy_kimi, rtk_cfg, rtk_data, rtk_cache] if not (p.exists() or p.is_dir())]
+    if preserved:
+        print(result.stdout)
+        raise SystemExit('FAIL: uninstall removed preserved native user data: ' + ', '.join(map(str, preserved)))
 
-print('PASS: uninstall.sh removes LazyDev, Kimi Code, RTK, legacy launchers, sessions, caches, and artifacts')
+print('PASS: uninstall.sh removes LazyDev-managed files while preserving native Kimi Code and RTK user data')

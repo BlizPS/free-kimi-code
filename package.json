@@ -1,7 +1,7 @@
 {
   "name": "@blizps/lazy-developer",
   "version": "1.0.2",
-  "description": "Lazy Developer: universal agent skills, plugin adapters, strict artifact routing, and a token-efficient coding workflow.",
+  "description": "Free Kimi Code is a portable Lazy Developer layer for Kimi Code, Codex, and Antigravity with AI coding skills, model routing, MCP, context optimization, and safe developer tooling.",
   "keywords": [
     "agent-skills",
     "ai-coding",
@@ -13,7 +13,13 @@
     "provider-routing",
     "kimi-code",
     "lazy-developer",
-    "terminal-ai"
+    "terminal-ai",
+    "free-kimi-code",
+    "kimi-code-cli",
+    "codex-cli",
+    "antigravity-cli",
+    "ai-coding-assistant",
+    "mcp"
   ],
   "license": "MIT",
   "author": {

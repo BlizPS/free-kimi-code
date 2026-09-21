@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest a useful improvement for Free Kimi Code
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to improve?
+      description: Explain the feature and the problem it would solve.
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: Show how you would use the feature in a real coding workflow.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Mention any current workaround or alternative you tried.
+    validations:
+      required: false
