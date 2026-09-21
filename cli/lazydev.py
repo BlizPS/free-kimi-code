@@ -675,6 +675,17 @@ def _state_command(state: dict[str, str], key: str) -> str | None:
     if not value:
         return None
     path = Path(value).expanduser()
+    if path.is_dir():
+        basename = {
+            "kimi_command": "kimi.exe" if IS_WINDOWS else "kimi",
+            "codex_command": "codex.exe" if IS_WINDOWS else "codex",
+            "antigravity_command": "agy.exe" if IS_WINDOWS else "agy",
+        }.get(key)
+        if basename:
+            candidate = path / basename
+            if candidate.is_file() and (IS_WINDOWS or os.access(candidate, os.X_OK)):
+                _persist_detected_command(key, str(candidate))
+                return str(candidate)
     if path.is_file() and (IS_WINDOWS or os.access(path, os.X_OK)):
         return str(path)
     return None
@@ -739,6 +750,11 @@ def _tooling_bin_dirs() -> list[Path]:
     _append_unique_path(dirs, HOME / ".kimi-code" / "bin")
     _append_unique_path(dirs, HOME / ".kimi" / "bin")
     _append_unique_path(dirs, HOME / ".local" / "opt" / "codex")
+    _append_unique_path(dirs, HOME / ".local" / "lib" / "node_modules" / ".bin")
+    _append_unique_path(dirs, HOME / ".npm-global" / "lib" / "node_modules" / ".bin")
+    _append_unique_path(dirs, HOME / ".config" / "npm" / "bin")
+    _append_unique_path(dirs, HOME / ".local" / "share" / "lazydev")
+    _append_unique_path(dirs, HOME / ".local" / "share" / "lazydev" / "rtk")
 
     if IS_MAC:
         _append_unique_path(dirs, "/opt/homebrew/bin")
@@ -916,7 +932,7 @@ def find_kimi() -> str | None:
         state_key="kimi_command",
         aliases=("kimi.exe", "kimi.cmd") if IS_WINDOWS else (),
         extra_dirs=(HOME / ".kimi-code" / "bin", HOME / ".kimi" / "bin"),
-        scan_roots=(HOME / ".kimi-code", HOME / ".kimi", HOME / ".local"),
+        scan_roots=(HOME / ".kimi-code", HOME / ".kimi", HOME / ".local", HOME / ".local" / "share"),
     )
 
 
@@ -929,7 +945,7 @@ def find_codex() -> str | None:
             HOME / ".local" / "bin",
             HOME / ".codex" / "packages" / "standalone" / "current" / "bin",
         ),
-        scan_roots=(HOME / ".codex", HOME / ".local", HOME / ".npm-global"),
+        scan_roots=(HOME / ".codex", HOME / ".local", HOME / ".npm-global", HOME / ".config"),
     )
 
 
@@ -939,7 +955,7 @@ def find_antigravity() -> str | None:
         state_key="antigravity_command",
         aliases=("agy.exe", "agy.cmd") if IS_WINDOWS else (),
         extra_dirs=(HOME / ".local" / "bin",),
-        scan_roots=(HOME / ".local", HOME / ".config"),
+        scan_roots=(HOME / ".local", HOME / ".config", HOME / ".antigravity"),
     )
 
 def toml_quote(value: str) -> str:
