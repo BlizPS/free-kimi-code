@@ -140,12 +140,6 @@ tiktok1.html
 tiktok2.html
 ```
 
-### 🖥️ Codex on Android / Termux
-
-LazyDev keeps the official Codex executable at its normal `codex` path. It no longer replaces `codex` with a tmux wrapper, so running `codex` directly invokes the real upstream binary. Older LazyDev installations that used `codex.bin` plus a tmux shadow launcher are automatically repaired during reinstall/update.
-
-LazyDev does not wrap Codex in tmux. On Android/Termux, `lazydev chat` launches the official Codex executable directly so behavior matches `codex` as closely as possible. If a particular upstream Codex release has a foreground-terminal issue on Android/Termux, that is an upstream compatibility limitation rather than a LazyDev wrapper.
-
 ### 🌐 Search & Browser Resilience
 
 Search, browser, and file operations include validation and recovery checks for common malformed tool arguments.

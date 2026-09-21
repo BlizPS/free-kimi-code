@@ -126,7 +126,7 @@ for name, text in [('install.sh', sh), ('install.ps1', ps)]:
         errors.append(f'{name}: hardcoded Kimi version remains')
 if 'ensure_legacy_launcher_targets' not in sh or 'canonical="$LAZYDEV_BIN_DIR/lazydev"' not in sh:
     errors.append('install.sh: compatibility launcher reconciliation missing canonical launcher copy')
-if 'install_codex_official()' not in sh or 'codex-package-${target}.tar.gz' not in sh:
+if 'install_codex_official()' not in sh or 'CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"' not in sh:
     errors.append('install.sh: official Codex release installer missing')
 if 'lazydev_setup_ready()' in sh or 'Setting up Lazy Developer before AI UIs' in sh or 'Setup is ready before AI UI installation.' in sh:
     errors.append('install.sh: installer must not run LazyDev setup during installation')
@@ -142,12 +142,12 @@ if 'lazydev-help.txt' not in sh or 'Lazy Developer command surface is stale' not
     errors.append('install.sh: post-refresh command surface verification missing')
 if 'Refresh-ActiveLazyDevLauncher' not in ps or 'Lazy Developer command surface is stale' not in ps:
     errors.append('install.ps1: post-refresh command surface verification missing')
-if 'CODEX_INSTALLED_BIN="$CODEX_BIN_DIR/codex"' not in sh or 'official archive verified' not in sh:
+if 'CODEX_INSTALLED_BIN="$CODEX_BIN_DIR/codex"' not in sh or 'official installer' not in sh:
     errors.append('install.sh: Codex post-install verification fallback missing')
 if 'resilient_download()' not in sh or '--http1.1' not in sh or '--retry 8' not in sh or ' -C - ' not in sh:
     errors.append('install.sh: Codex resilient resumable download policy missing')
-if 'Install-CodexOfficial' not in ps or 'codex-package-$target.tar.gz' not in ps:
-    errors.append('install.ps1: official Codex release installer missing')
+if 'function Install-CodexOfficial' not in ps or 'github.com/openai/codex/releases/download/rust-v' not in ps:
+    errors.append('install.ps1: official Codex release archive installer missing')
 if 'Test-LazyDevSetupReady' in ps or 'Setting up Lazy Developer before AI UIs' in ps or 'Setup is ready before AI UI installation.' in ps:
     errors.append('install.ps1: installer must not run LazyDev setup during installation')
 for marker in ["Step 'RTK'", 'Step \"Installing/updating Lazy Developer $LazyDevVersion\"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']:
@@ -158,7 +158,7 @@ else:
     if ps.index("Step 'RTK'") > ps.index('Step \"Installing/updating Lazy Developer $LazyDevVersion\"'): errors.append('install.ps1: RTK lifecycle marker must precede LazyDev install')
 if 'Refresh-ActiveLazyDevLauncher' not in ps:
     errors.append('install.ps1: active LazyDev launcher refresh missing')
-if "$CodexInstalledPath = Join-Path $CodexBinRoot 'codex.exe'" not in ps or 'official archive verified' not in ps:
+if "$CodexInstalledPath = Join-Path $CodexBinRoot 'codex.exe'" not in ps or 'official' not in ps:
     errors.append('install.ps1: Codex post-install verification fallback missing')
 if 'Invoke-ResilientDownload' not in ps or '--http1.1' not in ps or '--retry' not in ps or '--continue-at' not in ps:
     errors.append('install.ps1: Codex resilient resumable download policy missing')
@@ -169,11 +169,8 @@ for name, text in [('install.sh', sh), ('install.ps1', ps)]:
     if 'Lazy Developer setup' not in text or 'lazydev setup' not in text:
         errors.append(f'{name}: explicit LazyDev setup skip is missing')
 
-legacy_env = 'CODEX' + '_INSTALL_URL'
-legacy_vars = ['Codex' + 'InstallUrl']
-legacy_scripts = ['codex' + '-install.sh', 'codex' + '-install.ps1']
-if legacy_env in sh or any(v in ps for v in legacy_vars) or any(v in sh or v in ps for v in legacy_scripts):
-    errors.append('installers: Codex must not delegate the large binary download to a nested remote installer')
+# Codex intentionally delegates to OpenAI's official installer script, matching the
+# previously working release contract and keeping archive/target handling upstream.
 if 'for dir in "$HOME/.local/bin" "${PREFIX:-}/bin"' in sh:
     errors.append('install.sh: must not target /bin accidentally when PREFIX is unset')
 

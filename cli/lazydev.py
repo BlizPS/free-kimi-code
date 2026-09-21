@@ -3624,9 +3624,8 @@ def _launch_codex(codex: str, proxy: _ProviderProxy, pc: dict[str, Any], workspa
         # native picker exactly as the official CLI expects.
         args = ['resume'] if resume else []
         command = [codex, *args]
-        # Always launch the resolved official Codex executable directly.
-        # LazyDev must never wrap Codex in tmux or replace the canonical
-        # `codex` command with a compatibility launcher.
+        # Always launch the resolved Codex executable directly. LazyDev must not
+        # add a tmux layer or alter the public Codex TUI behavior.
         try:
             return subprocess.call(command, cwd=str(ARTIFACT_DIR), env=env)
         except KeyboardInterrupt:

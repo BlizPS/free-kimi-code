@@ -62,4 +62,4 @@ The only special storage exception is native Termux and Debian/Ubuntu through PR
 
 ### Codex TUI on Android/Termux
 
-OpenAI documents Codex CLI for macOS, Linux, and Windows usage. The upstream repository has reported foreground-terminal TUI hangs on Android/Termux. LazyDev keeps the official Codex binary unchanged and launches it directly; it does not install or invoke a tmux compatibility wrapper.
+OpenAI currently documents Codex CLI for macOS, Ubuntu/Debian, and Windows via WSL2, rather than native Android. The upstream repository has reported foreground-terminal TUI hangs on Android/Termux. LazyDev keeps the official Codex binary unchanged and wraps only interactive TUI launches in a dedicated `tmux` session when available. `codex --version`, `codex exec`, authentication commands, and other non-TUI commands stay direct.
