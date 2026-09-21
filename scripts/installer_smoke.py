@@ -81,24 +81,34 @@ if 'ensure_legacy_launcher_targets' not in sh or 'canonical="$LAZYDEV_BIN_DIR/la
     errors.append('install.sh: compatibility launcher reconciliation missing canonical launcher copy')
 if 'install_codex_official()' not in sh or 'codex-package-${target}.tar.gz' not in sh:
     errors.append('install.sh: official Codex release installer missing')
-if 'lazydev_setup_ready()' not in sh or 'Setting up Lazy Developer before AI UIs' not in sh:
-    errors.append('install.sh: setup-first bootstrap missing')
-if not ('lazydev_setup_ready()' in sh and sh.index('lazydev_setup_ready()') < sh.index('Installing/updating official Codex CLI') and sh.index('lazydev_setup_ready()') < sh.index('Installing/updating official Antigravity CLI')):
-    errors.append('install.sh: LazyDev setup must happen before AI UI installation')
-if not ('# RTK first; its Kimi integration is reconciled after Kimi is available.' in sh and sh.index('# RTK first; its Kimi integration is reconciled after Kimi is available.') < sh.index('Installing/updating official Codex CLI')):
-    errors.append('install.sh: RTK must be prepared before Codex installation')
+if 'lazydev_setup_ready()' in sh or 'Setting up Lazy Developer before AI UIs' in sh or 'Setup is ready before AI UI installation.' in sh:
+    errors.append('install.sh: installer must not run LazyDev setup during installation')
+for marker in ['Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI', 'Installing/updating RTK', 'Installing/updating Lazy Developer $LAZYDEV_VERSION']:
+    if marker not in sh: errors.append(f'install.sh: missing lifecycle step: {marker}')
+else:
+    order = [sh.index(x) for x in ['Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI', 'Installing/updating RTK', 'Installing/updating Lazy Developer $LAZYDEV_VERSION']]
+    if order != sorted(order): errors.append('install.sh: lifecycle order must be Kimi → Codex → Antigravity → RTK → LazyDev')
+if 'refresh_active_lazydev_launcher' not in sh:
+    errors.append('install.sh: active LazyDev launcher refresh missing')
+if 'lazydev-help.txt' not in sh or 'Lazy Developer command surface is stale' not in sh:
+    errors.append('install.sh: post-refresh command surface verification missing')
+if 'Refresh-ActiveLazyDevLauncher' not in ps or 'Lazy Developer command surface is stale' not in ps:
+    errors.append('install.ps1: post-refresh command surface verification missing')
 if 'CODEX_INSTALLED_BIN="$LAZYDEV_BIN_DIR/codex"' not in sh or 'official archive verified' not in sh:
     errors.append('install.sh: Codex post-install verification fallback missing')
 if 'resilient_download()' not in sh or '--http1.1' not in sh or '--retry 8' not in sh or ' -C - ' not in sh:
     errors.append('install.sh: Codex resilient resumable download policy missing')
 if 'Install-CodexOfficial' not in ps or 'codex-package-$target.tar.gz' not in ps:
     errors.append('install.ps1: official Codex release installer missing')
-if 'Test-LazyDevSetupReady' not in ps or 'Setting up Lazy Developer before AI UIs' not in ps:
-    errors.append('install.ps1: setup-first bootstrap missing')
-if not ('Setting up Lazy Developer before AI UIs' in ps and ps.index('Setting up Lazy Developer before AI UIs') < ps.index('Installing/updating official Codex CLI') and ps.index('Setting up Lazy Developer before AI UIs') < ps.index('Installing/updating official Antigravity CLI')):
-    errors.append('install.ps1: LazyDev setup must happen before AI UI installation')
-if not ('# RTK first; its Kimi integration is reconciled after Kimi is available.' in ps and ps.index('# RTK first; its Kimi integration is reconciled after Kimi is available.') < ps.index('Installing/updating official Codex CLI')):
-    errors.append('install.ps1: RTK must be prepared before Codex installation')
+if 'Test-LazyDevSetupReady' in ps or 'Setting up Lazy Developer before AI UIs' in ps or 'Setup is ready before AI UI installation.' in ps:
+    errors.append('install.ps1: installer must not run LazyDev setup during installation')
+for marker in ['Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI', 'Installing/updating RTK', 'Installing/updating Lazy Developer $LazyDevVersion']:
+    if marker not in ps: errors.append(f'install.ps1: missing lifecycle step: {marker}')
+else:
+    order = [ps.index(x) for x in ['Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI', 'Installing/updating RTK', 'Installing/updating Lazy Developer $LazyDevVersion']]
+    if order != sorted(order): errors.append('install.ps1: lifecycle order must be Kimi → Codex → Antigravity → RTK → LazyDev')
+if 'Refresh-ActiveLazyDevLauncher' not in ps:
+    errors.append('install.ps1: active LazyDev launcher refresh missing')
 if "$CodexInstalledPath = Join-Path $BinRoot 'codex.exe'" not in ps or 'official archive verified' not in ps:
     errors.append('install.ps1: Codex post-install verification fallback missing')
 if 'Invoke-ResilientDownload' not in ps or '--http1.1' not in ps or '--retry' not in ps or '--continue-at' not in ps:
