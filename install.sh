@@ -4904,6 +4904,12 @@ TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t lazydev)"
 # Component-specific paths are persisted so update/reinstall checks are not
 # coupled to the current shell PATH. The state also records exact executable
 # paths so fresh shells can launch the same files directly.
+# External CLI roots are initialized before state loading because the installer
+# runs with `set -u`; legacy state migration may inspect these variables immediately.
+DEFAULT_EXTERNAL_BIN_DIR="${LAZYDEV_EXTERNAL_BIN_DIR:-$HOME/.local/bin}"
+RTK_BIN_DIR="${RTK_BIN_DIR:-$DEFAULT_EXTERNAL_BIN_DIR}"
+CODEX_BIN_DIR="${CODEX_BIN_DIR:-$DEFAULT_EXTERNAL_BIN_DIR}"
+
 SAVED_RTK_COMMAND=""
 SAVED_CODEX_COMMAND=""
 SAVED_KIMI_COMMAND=""
@@ -5050,7 +5056,6 @@ fi
 
 # External CLIs must never live inside LAZYDEV_HOME: LazyDev upgrades replace
 # that directory atomically. Keep RTK/Codex in a durable user bin instead.
-DEFAULT_EXTERNAL_BIN_DIR="${LAZYDEV_EXTERNAL_BIN_DIR:-$HOME/.local/bin}"
 case "${LAZYDEV_BIN_DIR:-}" in
   "$LAZYDEV_HOME"|"$LAZYDEV_HOME"/*) LAZYDEV_BIN_DIR="$DEFAULT_EXTERNAL_BIN_DIR" ;;
 esac

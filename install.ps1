@@ -6126,7 +6126,7 @@ function Write-InstallState {
     try {
         New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
         $payload = [ordered]@{
-            version = 5
+            version = 6
             bin_dir = $BinRoot
             lazydev_command = Join-Path $BinRoot 'lazydev.cmd'
             kimi_bin_dir = $KimiBinRoot
@@ -6852,8 +6852,6 @@ if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Con
     $LazyDevStatusMessage = if ($LazyDevStatusMessage) { $LazyDevStatusMessage + ' ' } else { '' }
     $LazyDevStatusMessage += 'Legacy private Node.js runtime detected — it will be removed during the Lazy Developer update.'
 }
-
-Write-InstallState
 
 # Installation order: collect all Y/n choices first, then RTK → Lazy Developer → selected UI(s).
 # Provider/model setup is intentionally skipped; use `lazydev setup` after installation.
