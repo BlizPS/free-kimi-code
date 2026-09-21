@@ -731,6 +731,7 @@ if [ -f "$LAZYDEV_HOME/.lazydev-revision" ]; then
   CURRENT_LAZY_REVISION="$(tr -d '[:space:]' < "$LAZYDEV_HOME/.lazydev-revision")"
 fi
 LAZYDEV_INSTALL_COMPLETE=0
+LAZYDEV_STATUS_MESSAGE=""
 if [ -f "$LAZYDEV_HOME/package.json" ] && \
    [ -f "$LAZYDEV_HOME/cli/lazydev.py" ] && \
    [ -f "$LAZYDEV_HOME/skills/lazy-developer/SKILL.md" ] && \
@@ -742,19 +743,114 @@ if [ -f "$LAZYDEV_HOME/package.json" ] && \
 fi
 if [ -n "$LAZYDEV_LOCAL_SOURCE_DIR" ]; then
   LAZYDEV_NEEDS_UPDATE=1
-  say "Using local Lazy Developer source: $LAZYDEV_LOCAL_SOURCE_DIR"
+  LAZYDEV_STATUS_MESSAGE="Using local Lazy Developer source: $LAZYDEV_LOCAL_SOURCE_DIR"
 elif [ "$LAZYDEV_FEATURE_REFRESH" -eq 1 ]; then
   LAZYDEV_NEEDS_UPDATE=1
-  say "Installed Lazy Developer is missing the current command surface — refreshing Lazy Developer only."
+  LAZYDEV_STATUS_MESSAGE="Installed Lazy Developer is missing the current command surface — refreshing Lazy Developer only."
 elif [ -n "$CURRENT_LAZY_VERSION" ] && [ "$CURRENT_LAZY_VERSION" != "$LAZYDEV_VERSION" ]; then
-  say "Lazy Developer version $CURRENT_LAZY_VERSION differs from $LAZYDEV_VERSION — update required."
+  LAZYDEV_STATUS_MESSAGE="Lazy Developer version $CURRENT_LAZY_VERSION differs from $LAZYDEV_VERSION — update required."
 elif [ "$LAZYDEV_INSTALL_COMPLETE" -eq 1 ] && [ -n "$CURRENT_LAZY_REVISION" ] && [ "$CURRENT_LAZY_REVISION" = "$REMOTE_REVISION" ]; then
   LAZYDEV_NEEDS_UPDATE=0
-  say "Lazy Developer $LAZYDEV_VERSION is already current — skipped."
+  LAZYDEV_STATUS_MESSAGE="Lazy Developer $LAZYDEV_VERSION is already current — skipped."
 elif [ -n "$CURRENT_LAZY_REVISION" ]; then
-  say "Lazy Developer changed on GitHub — updating Lazy Developer only."
+  LAZYDEV_STATUS_MESSAGE="Lazy Developer changed on GitHub — updating Lazy Developer only."
 else
-  say "Lazy Developer is not installed cleanly — installing/repairing."
+  LAZYDEV_STATUS_MESSAGE="Lazy Developer is not installed cleanly — installing/repairing."
+fi
+
+# Installation order: the Kimi/Codex/Antigravity Y/n choices are collected first; actual installation is RTK → Lazy Developer → selected UI(s) (Kimi → Codex → Antigravity).
+
+# RTK is installed before the selected AI UIs; its Kimi integration is reconciled after Kimi is available.
+if [ "$RTK_NEEDS_UPDATE" -eq 1 ]; then
+  step "Installing/updating RTK"
+  mkdir -p "$LAZYDEV_BIN_DIR"
+  curl -fsSL "$RTK_INSTALL_URL" | RTK_INSTALL_DIR="$LAZYDEV_BIN_DIR" RTK_TELEMETRY_DISABLED=1 sh
+  PATH="$LAZYDEV_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
+  export PATH
+  RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
+  [ -n "$RTK_COMMAND" ] || fatal "RTK did not install a usable launcher."
+  RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
+  [ -n "$RTK_CURRENT_VERSION" ] || fatal "Could not read the installed RTK version."
+  say "✓ RTK $RTK_CURRENT_VERSION ready"
+fi
+
+# Lazy Developer runtime is refreshed before the selected AI UIs.
+if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
+  [ -n "$LAZYDEV_STATUS_MESSAGE" ] && say "$LAZYDEV_STATUS_MESSAGE"
+  SOURCE_ARCHIVE="$TMP_DIR/lazydev.tar.gz"
+  SOURCE_EXTRACT="$TMP_DIR/source"
+  INSTALL_STAGE="$TMP_DIR/lazydev-stage"
+  mkdir -p "$SOURCE_EXTRACT" "$INSTALL_STAGE"
+  step "Installing/updating Lazy Developer $LAZYDEV_VERSION"
+  if [ -n "$LAZYDEV_LOCAL_SOURCE_DIR" ]; then
+    SOURCE_DIR="$LAZYDEV_LOCAL_SOURCE_DIR"
+  else
+    curl -fsSL "$REPO_ARCHIVE_URL" -o "$SOURCE_ARCHIVE"
+    tar -xzf "$SOURCE_ARCHIVE" -C "$SOURCE_EXTRACT"
+    SOURCE_DIR="$(find "$SOURCE_EXTRACT" -type f -name package.json -print | head -n 1 | sed 's#/package.json$##')"
+  fi
+  [ -n "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/package.json" ] || fatal "Lazy Developer source could not be located."
+  SOURCE_VERSION="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"\]*\)".*/\1/p' "$SOURCE_DIR/package.json" | head -n 1)"
+  [ "$SOURCE_VERSION" = "$LAZYDEV_VERSION" ] || fatal "Repository version is $SOURCE_VERSION; expected $LAZYDEV_VERSION."
+  cp -R "$SOURCE_DIR/." "$INSTALL_STAGE/"
+  # Local source may come from a developer checkout; never install its VCS
+  # metadata, dependency trees, or Python bytecode into the managed runtime.
+  rm -rf "$INSTALL_STAGE/.git" "$INSTALL_STAGE/node_modules" 2>/dev/null || true
+  find "$INSTALL_STAGE" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
+  find "$INSTALL_STAGE" -type f -name '*.pyc' -delete 2>/dev/null || true
+  printf '%s\n' "$REMOTE_REVISION" > "$INSTALL_STAGE/.lazydev-revision"
+
+  mkdir -p "$LAZYDEV_BIN_DIR"
+  if [ -e "$LAZYDEV_HOME" ]; then
+    rm -rf "$LAZYDEV_HOME.previous" 2>/dev/null || true
+    mv "$LAZYDEV_HOME" "$LAZYDEV_HOME.previous"
+  fi
+  mkdir -p "$(dirname "$LAZYDEV_HOME")"
+  mv "$INSTALL_STAGE" "$LAZYDEV_HOME"
+  rm -rf "$LAZYDEV_HOME.previous" 2>/dev/null || true
+
+  LAZYDEV_LAUNCHER="$LAZYDEV_BIN_DIR/lazydev"
+  if [ -L "$LAZYDEV_LAUNCHER" ]; then rm -f "$LAZYDEV_LAUNCHER"; fi
+  cat > "$LAZYDEV_LAUNCHER" <<EOF
+#!/bin/sh
+# Lazy Developer managed launcher (native Python CLI)
+set -eu
+LAZYDEV_ROOT="$(printf '%s' "$LAZYDEV_HOME" | sed 's/[\&]/\&/g')"
+PYTHON_BIN="\$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+if [ -n "\$PYTHON_BIN" ]; then
+  exec "\$PYTHON_BIN" "\$LAZYDEV_ROOT/cli/lazydev.py" "\$@"
+fi
+UV_BIN="\$(command -v uv 2>/dev/null || true)"
+if [ -n "\$UV_BIN" ]; then
+  exec "\$UV_BIN" run --no-project --python 3.13 "\$LAZYDEV_ROOT/cli/lazydev.py" "\$@"
+fi
+echo "LazyDev requires Python 3.10+ or uv. No Node.js runtime is used by the native CLI." >&2
+exit 1
+EOF
+  chmod 755 "$LAZYDEV_LAUNCHER"
+
+  PATH="$LAZYDEV_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
+  export PATH
+
+  say "✓ Lazy Developer $LAZYDEV_VERSION ready"
+else
+  [ -n "$LAZYDEV_STATUS_MESSAGE" ] && say "$LAZYDEV_STATUS_MESSAGE"
+fi
+
+# The managed launcher is installed last so the command surface cannot stay stale.
+ensure_legacy_launcher_targets
+replace_legacy_lazydev_launchers
+refresh_active_lazydev_launcher
+hash -r 2>/dev/null || true
+PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$HOME/.kimi-code/bin:$PATH"; export PATH
+LAZYDEV_HELP_OUTPUT="$TMP_DIR/lazydev-help.txt"
+if ! "$LAZYDEV_BIN_DIR/lazydev" help >"$LAZYDEV_HELP_OUTPUT" 2>&1; then
+  cat "$LAZYDEV_HELP_OUTPUT" >&2 || true
+  fatal "Lazy Developer launcher did not execute after refresh."
+fi
+if ! grep -q 'lazydev resume' "$LAZYDEV_HELP_OUTPUT" || grep -q 'lazydev sessions' "$LAZYDEV_HELP_OUTPUT"; then
+  cat "$LAZYDEV_HELP_OUTPUT" >&2 || true
+  fatal "Lazy Developer command surface is stale: expected lazydev resume and no lazydev sessions."
 fi
 
 # Actual UI installation order: Kimi Code → Codex → Antigravity.
@@ -822,96 +918,6 @@ if [ "$INSTALL_ANTIGRAVITY" -eq 1 ] && [ "$AGY_NEEDS_UPDATE" -eq 1 ]; then
   AGY_COMMAND="$(find_antigravity 2>/dev/null || true)"
   [ -n "$AGY_COMMAND" ] || fatal "Antigravity did not install a usable launcher."
   say "✓ Antigravity ready: $AGY_COMMAND"
-fi
-
-# RTK after the selected AI UIs; its Kimi integration is reconciled after Kimi is available.
-if [ "$RTK_NEEDS_UPDATE" -eq 1 ]; then
-  step "Installing/updating RTK"
-  mkdir -p "$LAZYDEV_BIN_DIR"
-  curl -fsSL "$RTK_INSTALL_URL" | RTK_INSTALL_DIR="$LAZYDEV_BIN_DIR" RTK_TELEMETRY_DISABLED=1 sh
-  PATH="$LAZYDEV_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
-  export PATH
-  RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
-  [ -n "$RTK_COMMAND" ] || fatal "RTK did not install a usable launcher."
-  RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
-  [ -n "$RTK_CURRENT_VERSION" ] || fatal "Could not read the installed RTK version."
-  say "✓ RTK $RTK_CURRENT_VERSION ready"
-fi
-
-# Lazy Developer runtime is refreshed after the selected AI UIs and RTK.
-if [ "$LAZYDEV_NEEDS_UPDATE" -ne 0 ]; then
-  SOURCE_ARCHIVE="$TMP_DIR/lazydev.tar.gz"
-  SOURCE_EXTRACT="$TMP_DIR/source"
-  INSTALL_STAGE="$TMP_DIR/lazydev-stage"
-  mkdir -p "$SOURCE_EXTRACT" "$INSTALL_STAGE"
-  step "Installing/updating Lazy Developer $LAZYDEV_VERSION"
-  if [ -n "$LAZYDEV_LOCAL_SOURCE_DIR" ]; then
-    SOURCE_DIR="$LAZYDEV_LOCAL_SOURCE_DIR"
-  else
-    curl -fsSL "$REPO_ARCHIVE_URL" -o "$SOURCE_ARCHIVE"
-    tar -xzf "$SOURCE_ARCHIVE" -C "$SOURCE_EXTRACT"
-    SOURCE_DIR="$(find "$SOURCE_EXTRACT" -type f -name package.json -print | head -n 1 | sed 's#/package.json$##')"
-  fi
-  [ -n "$SOURCE_DIR" ] && [ -f "$SOURCE_DIR/package.json" ] || fatal "Lazy Developer source could not be located."
-  SOURCE_VERSION="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"\]*\)".*/\1/p' "$SOURCE_DIR/package.json" | head -n 1)"
-  [ "$SOURCE_VERSION" = "$LAZYDEV_VERSION" ] || fatal "Repository version is $SOURCE_VERSION; expected $LAZYDEV_VERSION."
-  cp -R "$SOURCE_DIR/." "$INSTALL_STAGE/"
-  # Local source may come from a developer checkout; never install its VCS
-  # metadata, dependency trees, or Python bytecode into the managed runtime.
-  rm -rf "$INSTALL_STAGE/.git" "$INSTALL_STAGE/node_modules" 2>/dev/null || true
-  find "$INSTALL_STAGE" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
-  find "$INSTALL_STAGE" -type f -name '*.pyc' -delete 2>/dev/null || true
-  printf '%s\n' "$REMOTE_REVISION" > "$INSTALL_STAGE/.lazydev-revision"
-
-  mkdir -p "$LAZYDEV_BIN_DIR"
-  if [ -e "$LAZYDEV_HOME" ]; then
-    rm -rf "$LAZYDEV_HOME.previous" 2>/dev/null || true
-    mv "$LAZYDEV_HOME" "$LAZYDEV_HOME.previous"
-  fi
-  mkdir -p "$(dirname "$LAZYDEV_HOME")"
-  mv "$INSTALL_STAGE" "$LAZYDEV_HOME"
-  rm -rf "$LAZYDEV_HOME.previous" 2>/dev/null || true
-
-  LAZYDEV_LAUNCHER="$LAZYDEV_BIN_DIR/lazydev"
-  if [ -L "$LAZYDEV_LAUNCHER" ]; then rm -f "$LAZYDEV_LAUNCHER"; fi
-  cat > "$LAZYDEV_LAUNCHER" <<EOF
-#!/bin/sh
-# Lazy Developer managed launcher (native Python CLI)
-set -eu
-LAZYDEV_ROOT="$(printf '%s' "$LAZYDEV_HOME" | sed 's/[\&]/\&/g')"
-PYTHON_BIN="\$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
-if [ -n "\$PYTHON_BIN" ]; then
-  exec "\$PYTHON_BIN" "\$LAZYDEV_ROOT/cli/lazydev.py" "\$@"
-fi
-UV_BIN="\$(command -v uv 2>/dev/null || true)"
-if [ -n "\$UV_BIN" ]; then
-  exec "\$UV_BIN" run --no-project --python 3.13 "\$LAZYDEV_ROOT/cli/lazydev.py" "\$@"
-fi
-echo "LazyDev requires Python 3.10+ or uv. No Node.js runtime is used by the native CLI." >&2
-exit 1
-EOF
-  chmod 755 "$LAZYDEV_LAUNCHER"
-
-  PATH="$LAZYDEV_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
-  export PATH
-
-  say "✓ Lazy Developer $LAZYDEV_VERSION ready"
-fi
-
-# The managed launcher is installed last so the command surface cannot stay stale.
-ensure_legacy_launcher_targets
-replace_legacy_lazydev_launchers
-refresh_active_lazydev_launcher
-hash -r 2>/dev/null || true
-PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$HOME/.kimi-code/bin:$PATH"; export PATH
-LAZYDEV_HELP_OUTPUT="$TMP_DIR/lazydev-help.txt"
-if ! "$LAZYDEV_BIN_DIR/lazydev" help >"$LAZYDEV_HELP_OUTPUT" 2>&1; then
-  cat "$LAZYDEV_HELP_OUTPUT" >&2 || true
-  fatal "Lazy Developer launcher did not execute after refresh."
-fi
-if ! grep -q 'lazydev resume' "$LAZYDEV_HELP_OUTPUT" || grep -q 'lazydev sessions' "$LAZYDEV_HELP_OUTPUT"; then
-  cat "$LAZYDEV_HELP_OUTPUT" >&2 || true
-  fatal "Lazy Developer command surface is stale: expected lazydev resume and no lazydev sessions."
 fi
 
 # Make RTK available to Kimi without touching the user's project files.

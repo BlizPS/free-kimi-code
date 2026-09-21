@@ -152,7 +152,7 @@ Large outputs are handled without blindly filling the active context.
 
 ### macOS / Linux
 
-During installation, the selected official **Kimi Code**, **Codex**, and **Antigravity** CLIs are installed or updated first. RTK follows, then Lazy Developer is installed or refreshed. The installer never opens `lazydev setup`; provider/model configuration remains a separate runtime step. Existing AI UI configurations and sessions are left in place, while LazyDev keeps the provider/model, proxy/routing, context optimization, and shared skills layer common across the UIs.
+During installation, the installer first collects the **Kimi Code**, **Codex**, and **Antigravity** install/update choices. After those choices, it installs **RTK**, then **Lazy Developer**, then only the selected AI UI(s) in **Kimi Code → Codex → Antigravity** order. The UI choices are remembered while the shared layer is installed; no provider/model setup runs here. The installer never opens `lazydev setup`; provider/model configuration remains a separate runtime step. Existing AI UI configurations and sessions are left in place, while LazyDev keeps the provider/model, proxy/routing, context optimization, and shared skills layer common across the UIs.
 Codex downloads use the official release archive directly with resumable retries and checksum verification, so a transient CDN reset does not force a full restart. Partial downloads are cached outside the workspace and can be resumed by rerunning the installer.
 
 ```sh
@@ -184,7 +184,7 @@ npx skills add BlizPS/free-kimi-code --all
 
 ## 🚀 Quick Start
 
-The installer updates the selected official AI UIs first (Kimi Code → Codex → Antigravity), then RTK, then refreshes Lazy Developer. It never runs `lazydev setup` during installation. After installation, run `lazydev setup` when you are ready to choose a provider, API key, and live model.
+The installer collects the Kimi Code → Codex → Antigravity choices first, then installs **RTK**, refreshes **Lazy Developer**, and only after that installs/updates the selected AI UI(s). The selected choices are carried forward; there is no provider/model setup step in the installer. It never runs `lazydev setup` during installation. After installation, run `lazydev setup` when you are ready to choose a provider, API key, and live model.
 
 **1. Set up** and inspect the available providers and models:
 

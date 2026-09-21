@@ -486,25 +486,134 @@ $LazyInstallComplete = (Test-Path -LiteralPath (Join-Path $InstallRoot 'package.
     (Test-Path -LiteralPath (Join-Path $InstallRoot 'cli\lazydev.py') -PathType Leaf) -and
     (Test-Path -LiteralPath $Launcher -PathType Leaf)
 $LazyDevNeedsUpdate = $true
+$LazyDevStatusMessage = ""
 if ($LocalSourceDir) {
     $LazyDevNeedsUpdate = $true
-    Write-Host "Using local Lazy Developer source: $LocalSourceDir"
+    $LazyDevStatusMessage = "Using local Lazy Developer source: $LocalSourceDir"
 } elseif ($LazyDevFeatureRefresh) {
     $LazyDevNeedsUpdate = $true
-    Write-Host 'Installed Lazy Developer is missing the current command surface — refreshing Lazy Developer only.'
+    $LazyDevStatusMessage = 'Installed Lazy Developer is missing the current command surface — refreshing Lazy Developer only.'
 } elseif ($InstalledLazyVersion -and $InstalledLazyVersion -ne $LazyDevVersion) {
-    Write-Host "Lazy Developer version $InstalledLazyVersion differs from $LazyDevVersion — update required."
+    $LazyDevStatusMessage = "Lazy Developer version $InstalledLazyVersion differs from $LazyDevVersion — update required."
 } elseif ($LazyInstallComplete -and $InstalledLazyRevision -and $InstalledLazyRevision -eq $RemoteRevision) {
     $LazyDevNeedsUpdate = $false
-    Write-Host "Lazy Developer $LazyDevVersion is already current — skipped."
+    $LazyDevStatusMessage = "Lazy Developer $LazyDevVersion is already current — skipped."
 } else {
-    Write-Host "Lazy Developer changed or is missing — update required."
+    $LazyDevStatusMessage = "Lazy Developer changed or is missing — update required."
 }
 
 if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Container) {
     $LazyDevNeedsUpdate = $true
-    Write-Host 'Legacy private Node.js runtime detected — it will be removed during the Lazy Developer update.'
+    $LazyDevStatusMessage = if ($LazyDevStatusMessage) { $LazyDevStatusMessage + ' ' } else { '' }
+    $LazyDevStatusMessage += 'Legacy private Node.js runtime detected — it will be removed during the Lazy Developer update.'
 }
+
+# Installation order: the Kimi/Codex/Antigravity Y/n choices are collected first; actual installation is RTK → Lazy Developer → selected UI(s) (Kimi → Codex → Antigravity).
+
+if ($InstallRtk -and $RtkNeedsUpdate) {
+    Step 'Installing/updating RTK'
+    Install-Rtk
+    $env:Path = "$BinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
+    $RtkExe = Find-Rtk
+    if (-not $RtkExe) { Fail 'RTK did not install a usable launcher.' }
+    $RtkCurrentVersion = Get-RtkVersion $RtkExe
+    Write-Host "✓ RTK $RtkCurrentVersion ready"
+}
+
+# Lazy Developer runtime is refreshed before the selected AI UIs.
+if ($LazyDevNeedsUpdate) {
+    if ($LazyDevStatusMessage) { Write-Host $LazyDevStatusMessage }
+    Step "Installing/updating Lazy Developer $LazyDevVersion"
+    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-" + [guid]::NewGuid().ToString('N'))
+    $archive = Join-Path $tempRoot 'lazydev.zip'
+    $extract = Join-Path $tempRoot 'extract'
+    $stage = Join-Path $tempRoot 'stage'
+    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $stage -Force | Out-Null
+    try {
+        if ($LocalSourceDir) {
+            $sourceDirPath = $LocalSourceDir
+        } else {
+            Invoke-WebRequest -UseBasicParsing -Uri $ArchiveUrl -OutFile $archive
+            Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+            $sourceDir = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
+            if (-not $sourceDir) { Fail 'Downloaded Lazy Developer source could not be unpacked.' }
+            $sourceDirPath = $sourceDir.FullName
+        }
+        $packageJson = Join-Path $sourceDirPath 'package.json'
+        if (-not (Test-Path -LiteralPath $packageJson -PathType Leaf)) { Fail 'Lazy Developer package.json was not found.' }
+        $sourceVersion = ((Get-Content -Raw -LiteralPath $packageJson) | ConvertFrom-Json).version
+        if ($sourceVersion -ne $LazyDevVersion) { Fail "Repository version is $sourceVersion; expected $LazyDevVersion." }
+        Get-ChildItem -LiteralPath $sourceDirPath -Force | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse -Force }
+        Remove-Item -LiteralPath (Join-Path $stage '.git') -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $stage 'node_modules') -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -LiteralPath $stage -Directory -Recurse -Force -Filter '__pycache__' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -LiteralPath $stage -File -Recurse -Force -Filter '*.pyc' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+        Set-Content -LiteralPath (Join-Path $stage '.lazydev-revision') -Value $RemoteRevision -Encoding ASCII
+        if (Test-Path -LiteralPath $InstallRoot) {
+            Remove-Item -LiteralPath "$InstallRoot.previous" -Recurse -Force -ErrorAction SilentlyContinue
+            Move-Item -LiteralPath $InstallRoot -Destination "$InstallRoot.previous" -Force
+        }
+        New-Item -ItemType Directory -Path (Split-Path $InstallRoot -Parent) -Force | Out-Null
+        Move-Item -LiteralPath $stage -Destination $InstallRoot -Force
+        Remove-Item -LiteralPath "$InstallRoot.previous" -Recurse -Force -ErrorAction SilentlyContinue
+
+        New-Item -ItemType Directory -Path $BinRoot -Force | Out-Null
+        $launcherContent = @"
+@echo off
+setlocal
+set "LAZYDEV_ROOT=$InstallRoot"
+set "PATH=$BinRoot;$(Join-Path $HOME '.kimi-code\bin');%PATH%"
+where py.exe >nul 2>&1
+if not errorlevel 1 (
+  py.exe -3 "%LAZYDEV_ROOT%\cli\lazydev.py" %*
+  set "EXIT_CODE=%ERRORLEVEL%"
+  endlocal & exit /b %EXIT_CODE%
+)
+where python.exe >nul 2>&1
+if not errorlevel 1 (
+  python.exe "%LAZYDEV_ROOT%\cli\lazydev.py" %*
+  set "EXIT_CODE=%ERRORLEVEL%"
+  endlocal & exit /b %EXIT_CODE%
+)
+where uv.exe >nul 2>&1
+if not errorlevel 1 (
+  uv.exe run --no-project --python 3.13 "%LAZYDEV_ROOT%\cli\lazydev.py" %*
+  set "EXIT_CODE=%ERRORLEVEL%"
+  endlocal & exit /b %EXIT_CODE%
+)
+echo LazyDev requires Python 3.10+ or uv. The installer does not install Node.js. 1>&2
+endlocal & exit /b 1
+"@
+        Set-Content -LiteralPath $Launcher -Value $launcherContent -Encoding ASCII
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $parts = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
+        foreach ($entry in @($BinRoot, (Join-Path $HOME '.kimi-code\bin'))) {
+            if ($parts -notcontains $entry) { $parts += $entry }
+        }
+        [Environment]::SetEnvironmentVariable('Path', (($parts | Select-Object -Unique) -join ';'), 'User')
+        $env:Path = "$BinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
+        Write-Host "✓ Lazy Developer $LazyDevVersion ready"
+    } finally { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
+} else {
+    if ($LazyDevStatusMessage) { Write-Host $LazyDevStatusMessage }
+}
+
+Refresh-ExistingLazyDevLaunchers
+Ensure-CompatibilityLazyDevLauncher
+Refresh-ActiveLazyDevLauncher
+$LazyDevHelp = & $Launcher help 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0) { Write-Host $LazyDevHelp; Fail 'Lazy Developer launcher did not execute after refresh.' }
+if (($LazyDevHelp -notmatch 'lazydev resume') -or ($LazyDevHelp -match 'lazydev sessions')) { Write-Host $LazyDevHelp; Fail 'Lazy Developer command surface is stale: expected lazydev resume and no lazydev sessions.' }
+# Prefer the managed bin directory in new and current PowerShell sessions.
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$entries = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
+$entries = @($entries | Where-Object { $_ -notin @($BinRoot, (Join-Path $HOME '.kimi-code\bin')) })
+$entries = @($BinRoot, (Join-Path $HOME '.kimi-code\bin')) + $entries
+[Environment]::SetEnvironmentVariable('Path', ($entries | Select-Object -Unique) -join ';', 'User')
+$env:Path = (($entries | Select-Object -Unique) -join ';')
+
+if ($RtkExe) { Connect-RtkToKimi $RtkExe }
 
 # Actual UI installation order: Kimi Code → Codex → Antigravity.
 # RTK is installed after the selected AI UIs. Lazy Developer is refreshed after RTK.
@@ -579,108 +688,6 @@ if ($InstallAntigravity -and $AgyNeedsUpdate) {
     if ($AgyLatestVersion -and -not (Test-VersionAtLeast $AgyCurrentVersion $AgyLatestVersion)) { Fail "Installed Antigravity is $AgyCurrentVersion; latest detected release is $AgyLatestVersion." }
     Write-Host "✓ Antigravity CLI $AgyCurrentVersion ready"
 }
-
-if ($InstallRtk -and $RtkNeedsUpdate) {
-    Step 'Installing/updating RTK'
-    Install-Rtk
-    $env:Path = "$BinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
-    $RtkExe = Find-Rtk
-    if (-not $RtkExe) { Fail 'RTK did not install a usable launcher.' }
-    $RtkCurrentVersion = Get-RtkVersion $RtkExe
-    Write-Host "✓ RTK $RtkCurrentVersion ready"
-}
-
-# Lazy Developer runtime is refreshed after the selected AI UIs and RTK.
-if ($LazyDevNeedsUpdate) {
-    Step "Installing/updating Lazy Developer $LazyDevVersion"
-    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-" + [guid]::NewGuid().ToString('N'))
-    $archive = Join-Path $tempRoot 'lazydev.zip'
-    $extract = Join-Path $tempRoot 'extract'
-    $stage = Join-Path $tempRoot 'stage'
-    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-    New-Item -ItemType Directory -Path $stage -Force | Out-Null
-    try {
-        if ($LocalSourceDir) {
-            $sourceDirPath = $LocalSourceDir
-        } else {
-            Invoke-WebRequest -UseBasicParsing -Uri $ArchiveUrl -OutFile $archive
-            Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
-            $sourceDir = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
-            if (-not $sourceDir) { Fail 'Downloaded Lazy Developer source could not be unpacked.' }
-            $sourceDirPath = $sourceDir.FullName
-        }
-        $packageJson = Join-Path $sourceDirPath 'package.json'
-        if (-not (Test-Path -LiteralPath $packageJson -PathType Leaf)) { Fail 'Lazy Developer package.json was not found.' }
-        $sourceVersion = ((Get-Content -Raw -LiteralPath $packageJson) | ConvertFrom-Json).version
-        if ($sourceVersion -ne $LazyDevVersion) { Fail "Repository version is $sourceVersion; expected $LazyDevVersion." }
-        Get-ChildItem -LiteralPath $sourceDirPath -Force | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse -Force }
-        Remove-Item -LiteralPath (Join-Path $stage '.git') -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath (Join-Path $stage 'node_modules') -Recurse -Force -ErrorAction SilentlyContinue
-        Get-ChildItem -LiteralPath $stage -Directory -Recurse -Force -Filter '__pycache__' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-        Get-ChildItem -LiteralPath $stage -File -Recurse -Force -Filter '*.pyc' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-        Set-Content -LiteralPath (Join-Path $stage '.lazydev-revision') -Value $RemoteRevision -Encoding ASCII
-        if (Test-Path -LiteralPath $InstallRoot) {
-            Remove-Item -LiteralPath "$InstallRoot.previous" -Recurse -Force -ErrorAction SilentlyContinue
-            Move-Item -LiteralPath $InstallRoot -Destination "$InstallRoot.previous" -Force
-        }
-        New-Item -ItemType Directory -Path (Split-Path $InstallRoot -Parent) -Force | Out-Null
-        Move-Item -LiteralPath $stage -Destination $InstallRoot -Force
-        Remove-Item -LiteralPath "$InstallRoot.previous" -Recurse -Force -ErrorAction SilentlyContinue
-
-        New-Item -ItemType Directory -Path $BinRoot -Force | Out-Null
-        $launcherContent = @"
-@echo off
-setlocal
-set "LAZYDEV_ROOT=$InstallRoot"
-set "PATH=$BinRoot;$(Join-Path $HOME '.kimi-code\bin');%PATH%"
-where py.exe >nul 2>&1
-if not errorlevel 1 (
-  py.exe -3 "%LAZYDEV_ROOT%\cli\lazydev.py" %*
-  set "EXIT_CODE=%ERRORLEVEL%"
-  endlocal & exit /b %EXIT_CODE%
-)
-where python.exe >nul 2>&1
-if not errorlevel 1 (
-  python.exe "%LAZYDEV_ROOT%\cli\lazydev.py" %*
-  set "EXIT_CODE=%ERRORLEVEL%"
-  endlocal & exit /b %EXIT_CODE%
-)
-where uv.exe >nul 2>&1
-if not errorlevel 1 (
-  uv.exe run --no-project --python 3.13 "%LAZYDEV_ROOT%\cli\lazydev.py" %*
-  set "EXIT_CODE=%ERRORLEVEL%"
-  endlocal & exit /b %EXIT_CODE%
-)
-echo LazyDev requires Python 3.10+ or uv. The installer does not install Node.js. 1>&2
-endlocal & exit /b 1
-"@
-        Set-Content -LiteralPath $Launcher -Value $launcherContent -Encoding ASCII
-        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-        $parts = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
-        foreach ($entry in @($BinRoot, (Join-Path $HOME '.kimi-code\bin'))) {
-            if ($parts -notcontains $entry) { $parts += $entry }
-        }
-        [Environment]::SetEnvironmentVariable('Path', (($parts | Select-Object -Unique) -join ';'), 'User')
-        $env:Path = "$BinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
-        Write-Host "✓ Lazy Developer $LazyDevVersion ready"
-    } finally { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
-}
-
-Refresh-ExistingLazyDevLaunchers
-Ensure-CompatibilityLazyDevLauncher
-Refresh-ActiveLazyDevLauncher
-$LazyDevHelp = & $Launcher help 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0) { Write-Host $LazyDevHelp; Fail 'Lazy Developer launcher did not execute after refresh.' }
-if (($LazyDevHelp -notmatch 'lazydev resume') -or ($LazyDevHelp -match 'lazydev sessions')) { Write-Host $LazyDevHelp; Fail 'Lazy Developer command surface is stale: expected lazydev resume and no lazydev sessions.' }
-# Prefer the managed bin directory in new and current PowerShell sessions.
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-$entries = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
-$entries = @($entries | Where-Object { $_ -notin @($BinRoot, (Join-Path $HOME '.kimi-code\bin')) })
-$entries = @($BinRoot, (Join-Path $HOME '.kimi-code\bin')) + $entries
-[Environment]::SetEnvironmentVariable('Path', ($entries | Select-Object -Unique) -join ';', 'User')
-$env:Path = (($entries | Select-Object -Unique) -join ';')
-
-if ($RtkExe) { Connect-RtkToKimi $RtkExe }
 
 function Refresh-ActiveLazyDevLauncher {
     $canonical = Join-Path $BinRoot 'lazydev.cmd'
