@@ -6301,35 +6301,23 @@ resilient_download() {
   return 1
 }
 
-write_codex_android_wrapper() {
-  real="$1"
-  [ -x "$real" ] || return 1
+restore_codex_from_legacy_wrapper() {
+  # Older LazyDev releases replaced the public `codex` command with a tmux
+  # wrapper and kept the official binary as `codex.bin`. Never keep doing that:
+  # `codex` must remain the real upstream executable so direct launches behave
+  # exactly like an official Codex install.
   wrapper="$CODEX_BIN_DIR/codex"
-  cat > "$wrapper" <<EOF
-#!/bin/sh
-set -eu
-REAL="$real"
-[ -x "\$REAL" ] || { echo "error: Codex real binary is missing: \$REAL" >&2; exit 127; }
-case "\${1:-}" in
-  --version|-V|--help|-h|exec|app-server|mcp-server|completion|login|logout|doctor)
-    exec "\$REAL" "\$@"
-    ;;
-esac
-if [ -t 0 ] && [ -t 1 ] && [ -z "\${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
-  exec tmux -f /dev/null new-session -A -s codex-lazydev "\$REAL" "\$@"
-fi
-echo "Codex TUI compatibility: tmux is not installed; launching directly." >&2
-exec "\$REAL" "\$@"
-EOF
-  chmod 755 "$wrapper"
-}
-
-install_codex_android_wrapper() {
-  [ "$ANDROID_TERMUX" -eq 1 ] || return 0
   real="$CODEX_BIN_DIR/codex.bin"
+  [ -f "$wrapper" ] || [ -L "$wrapper" ] || return 0
   [ -x "$real" ] || return 0
-  write_codex_android_wrapper "$real"
-  say "✓ Android/Termux Codex TUI compatibility launcher enabled (tmux)"
+  if grep -q 'Codex TUI compatibility: tmux\|codex-lazydev' "$wrapper" 2>/dev/null; then
+    version_output="$($real --version 2>/dev/null || true)"
+    version="$(extract_semver "$version_output")"
+    [ -n "$version" ] || return 0
+    mv -f "$real" "$wrapper"
+    chmod 755 "$wrapper"
+    say "✓ Restored the official Codex binary at $wrapper (removed legacy tmux shadow launcher)"
+  fi
 }
 
 install_codex_official() {
@@ -6365,13 +6353,9 @@ install_codex_official() {
   temp_binary="$CODEX_BIN_DIR/.codex.new.$$"
   cp "$codex_binary" "$temp_binary"
   chmod 0755 "$temp_binary"
-  if [ "$ANDROID_TERMUX" -eq 1 ]; then
-    mv -f "$temp_binary" "$CODEX_BIN_DIR/codex.bin"
-    install_codex_android_wrapper
-  else
-    mv -f "$temp_binary" "$CODEX_BIN_DIR/codex"
-    rm -f "$CODEX_BIN_DIR/codex.bin" 2>/dev/null || true
-  fi
+  # Keep the official executable at the canonical `codex` path on every
+  # platform. Do not shadow it with a tmux launcher.
+  mv -f "$temp_binary" "$CODEX_BIN_DIR/codex"
   rm -f "$archive" "$sums"
   rmdir "$cache_root" 2>/dev/null || true
   say "✓ Codex $version installed from the official release archive"
@@ -6792,8 +6776,9 @@ find_kimi() {
 
 find_codex() {
   add_external_cli_bin_directories
-  for candidate in "${CODEX_COMMAND:-}" "$SAVED_CODEX_COMMAND" \
+  for candidate in "${CODEX_COMMAND:-}" \
     "$CODEX_BIN_DIR/codex" "$CODEX_BIN_DIR/codex.bin" \
+    "$SAVED_CODEX_COMMAND" \
     "$LAZYDEV_BIN_DIR/codex" "$LAZYDEV_BIN_DIR/codex.bin" \
     "$HOME/.local/share/lazydev/codex" "$HOME/.local/share/lazydev/codex.bin" \
     "$HOME/.codex/packages/standalone/current/bin/codex" \
@@ -7133,21 +7118,8 @@ else
   say "Kimi Code not found — installation available."
 fi
 
+restore_codex_from_legacy_wrapper
 CODEX_COMMAND="$(find_codex 2>/dev/null || true)"
-if [ "$ANDROID_TERMUX" -eq 1 ] && [ -n "$CODEX_COMMAND" ]; then
-  case "$CODEX_COMMAND" in
-    "$CODEX_BIN_DIR/codex"|"$CODEX_BIN_DIR/codex.bin") ;;
-    *)
-      if [ -x "$CODEX_COMMAND" ] || [ -f "$CODEX_COMMAND" ]; then
-        write_codex_android_wrapper "$CODEX_COMMAND" || true
-        CODEX_COMMAND="$CODEX_BIN_DIR/codex"
-      fi
-      ;;
-  esac
-fi
-if [ "$ANDROID_TERMUX" -eq 1 ] && [ -x "$CODEX_BIN_DIR/codex.bin" ]; then
-  write_codex_android_wrapper "$CODEX_BIN_DIR/codex.bin" || true
-fi
 CODEX_CURRENT_VERSION=""
 CODEX_LATEST_VERSION=""
 CODEX_NEEDS_UPDATE=1
@@ -7679,12 +7651,7 @@ if [ "$INSTALL_CODEX" -eq 1 ] && [ "$CODEX_NEEDS_UPDATE" -eq 1 ]; then
   install_codex_official "$CODEX_TARGET_VERSION"
   PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$KIMI_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
   hash -r 2>/dev/null || true
-  if [ "$ANDROID_TERMUX" -eq 1 ] && [ -x "$CODEX_BIN_DIR/codex.bin" ]; then
-    CODEX_INSTALLED_BIN="$CODEX_BIN_DIR/codex.bin"
-    write_codex_android_wrapper "$CODEX_INSTALLED_BIN" || true
-  else
-    CODEX_INSTALLED_BIN="$CODEX_BIN_DIR/codex"
-  fi
+  CODEX_INSTALLED_BIN="$CODEX_BIN_DIR/codex"
   if [ -x "$CODEX_INSTALLED_BIN" ]; then CODEX_COMMAND="$CODEX_INSTALLED_BIN"; else CODEX_COMMAND="$(find_codex 2>/dev/null || true)"; fi
   [ -n "$CODEX_COMMAND" ] || fatal "Codex did not install a usable launcher."
   CODEX_VERSION_OUTPUT="$($CODEX_COMMAND --version 2>/dev/null || true)"
@@ -7696,6 +7663,11 @@ if [ "$INSTALL_CODEX" -eq 1 ] && [ "$CODEX_NEEDS_UPDATE" -eq 1 ]; then
     fatal "Installed Codex reports $CODEX_CURRENT_VERSION but the verified package was $CODEX_TARGET_VERSION."
   else
     say "✓ Codex $CODEX_CURRENT_VERSION ready: $CODEX_COMMAND"
+  fi
+  # Remove only the known legacy shadow binary after the real `codex` has
+  # successfully verified. This prevents old wrapper state from lingering.
+  if [ -f "$CODEX_BIN_DIR/codex.bin" ] && [ "$CODEX_COMMAND" = "$CODEX_BIN_DIR/codex" ]; then
+    rm -f "$CODEX_BIN_DIR/codex.bin" 2>/dev/null || true
   fi
   write_install_state
 fi
