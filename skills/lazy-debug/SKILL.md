@@ -2,7 +2,7 @@
 name: lazy-debug
 description: Use for crashes, wrong output, hangs, regressions, or unclear root causes.
 metadata:
-  version: "1.0.2"
+  version: "1.0.3"
 ---
 # Lazy Debug
 

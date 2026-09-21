@@ -24,7 +24,7 @@ def run(args):
     return rc, out.getvalue(), err.getvalue()
 
 
-for args, expected in [(["version"], "1.0.2"), (["--version"], "1.0.2")]:
+for args, expected in [(["version"], "1.0.3"), (["--version"], "1.0.3")]:
     rc, stdout, stderr = run(args)
     assert rc == 0, stderr
     assert stdout.strip() == expected, stdout

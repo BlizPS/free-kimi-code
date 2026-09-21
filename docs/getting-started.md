@@ -1,6 +1,6 @@
 # Free Kimi Code — Getting Started
 
-Free Kimi Code is a free, open-source developer layer for Kimi Code, Codex CLI, and Antigravity CLI. It keeps the native terminal interfaces and adds shared Lazy Developer skills, model routing, context optimization, MCP tooling, safe artifacts, and developer workflow controls.
+Free Kimi Code is a free, open-source developer layer for Kimi Code, Codex CLI, Antigravity CLI, and Claude Code. It keeps the native terminal interfaces and adds shared Lazy Developer skills, model routing, context optimization, MCP tooling, safe artifacts, and developer workflow controls.
 
 ## Install
 
@@ -28,7 +28,7 @@ lazydev doctor
 
 ## Native CLI model
 
-Free Kimi Code does not replace Kimi Code, Codex, or Antigravity with a custom terminal UI. `lazydev chat` discovers installed native clients and opens the selected workflow.
+Free Kimi Code does not replace Kimi Code, Codex, Antigravity, or Claude Code with a custom terminal UI. `lazydev chat` discovers installed native clients and opens the selected workflow.
 
 ## Universal skills
 

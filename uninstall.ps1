@@ -32,7 +32,7 @@ if ($Help) {
 Lazy Developer uninstaller
 
 This removes LazyDev-managed files, launchers, integrations, state, and artifacts.
-Native Kimi Code, Codex, Antigravity, and RTK user data and session history are preserved.
+Native Kimi Code, Codex, Antigravity, Claude Code, and RTK user data and session history are preserved.
 Project directories outside those managed locations are left untouched.
 
 To reinstall later, run the Lazy Developer installer again.

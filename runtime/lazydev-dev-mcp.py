@@ -2,7 +2,7 @@
 """LazyDev project MCP server.
 
 Dependency-free, read-only developer tools intended to start instantly under
-Codex/Kimi/Antigravity. No npm package or network dependency is required.
+Codex/Kimi/Antigravity/Claude Code. No package-install or network dependency is required.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 MAX_TEXT = 120_000
 MAX_RESULTS = 80
 IGNORE_DIRS = {

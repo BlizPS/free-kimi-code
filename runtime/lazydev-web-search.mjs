@@ -2,7 +2,7 @@
 import readline from 'node:readline';
 import https from 'node:https';
 
-const USER_AGENT = process.env.LAZYDEV_SEARCH_USER_AGENT || 'LazyDev/1.0.2';
+const USER_AGENT = process.env.LAZYDEV_SEARCH_USER_AGENT || 'LazyDev/1.0.3';
 const REQUEST_TIMEOUT_MS = 9000;
 const MAX_RESULTS = 8;
 const CACHE_TTL_MS = 2 * 60 * 1000;
@@ -221,7 +221,7 @@ rl.on('line', async (line) => {
   const { id, method, params = {} } = request;
   try {
     if (method === 'initialize') {
-      process.stdout.write(`${reply(id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'lazydev-search', version: '1.0.2' } })}\n`);
+      process.stdout.write(`${reply(id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'lazydev-search', version: '1.0.3' } })}\n`);
     } else if (method === 'notifications/initialized') {
       return;
     } else if (method === 'ping') {

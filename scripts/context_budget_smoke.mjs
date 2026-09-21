@@ -24,7 +24,7 @@ import { buildLanguageFrame, getLanguageReport } from '../systems/languages/inde
 import { buildGeminiRetryRequest, chunkFinishReason, chunkHasVisibleOutput, geminiOpenAIEndpoint, parseSseEvent, prepareGeminiRequest, responseHasUsableOutput, streamNeedsGeminiRetry } from '../runtime/gemini-resilience.mjs';
 import { compressAgenticMessages, FOVEANCE_DEFAULTS } from '../systems/token/foveance.mjs';
 
-const version = '1.0.2';
+const version = '1.0.3';
 const CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768;
 const TOKEN_SAVINGS_FLOOR = 0.75;
 const TOKEN_SAVINGS_TARGET = 0.80;
@@ -1609,9 +1609,9 @@ async function help() {
   line(`${ansi('1;36','◆')} Command center`);
   line(`${dim('Build · debug · review · test · ship')}`);
   line();
-  line(`  ${ansi('36','lazydev chat'.padEnd(24))} Open the installed Kimi Code, Codex, or Antigravity UI`);
+  line(`  ${ansi('36','lazydev chat'.padEnd(24))} Open the installed Kimi Code, Codex, Antigravity, or Claude Code UI`);
   line(`  ${ansi('36','lazydev setup'.padEnd(24))} Choose your provider, API key, and model`);
-  line(`  ${ansi('36','lazydev resume'.padEnd(24))} Resume a saved Kimi, Codex, or Antigravity chat`);
+  line(`  ${ansi('36','lazydev resume'.padEnd(24))} Resume a saved Kimi, Codex, Antigravity, or Claude Code chat`);
   line(`  ${ansi('36','lazydev skills'.padEnd(24))} Browse bundled LazyDev skills`);
   line(`  ${ansi('36','lazydev artifact'.padEnd(24))} Work with a standalone artifact path`);
   line(`  ${ansi('36','lazydev env'.padEnd(24))} Inspect the current runtime environment`);

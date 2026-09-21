@@ -17,6 +17,9 @@ checks=[
     ('install.sh', 'LAZYDEV_FEATURE_REFRESH=0', sh),
     ('install.sh', 'LAZYDEV_LOCAL_SOURCE_DIR', sh),
     ('install.sh', 'Existing Kimi sessions and configuration were left in place.', sh),
+    ('install.sh', 'CLAUDE_INSTALL_URL="https://claude.ai/install.sh"', sh),
+    ('install.sh', 'claude_command=%s', sh),
+    ('install.sh', 'Install/update Claude Code?', sh),
     ('install.ps1', "$KimiReleasesApiUrl = 'https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest'", ps),
     ('install.ps1', "https://code.kimi.com/kimi-code/install.ps1", ps),
     ('install.ps1', "$GitHubApiUrl =", ps),
@@ -26,6 +29,8 @@ checks=[
     ('install.ps1', '$LazyDevFeatureRefresh = $false', ps),
     ('install.ps1', '$LocalSourceDir', ps),
     ('install.ps1', 'Existing Kimi sessions and configuration were left in place.', ps),
+    ('install.ps1', "$ClaudeInstallUrl = 'https://claude.ai/install.ps1'", ps),
+    ('install.ps1', 'Install/update Claude Code?', ps),
     ('install.ps1', 'Refresh-ExistingLazyDevLaunchers', ps),
     ('install.ps1', '$LazyInstallComplete', ps),
     ('install.ps1', 'Invoke-WebRequest -UseBasicParsing -Uri $KimiInstallUrl -OutFile $kimiInstallerPath', ps),
@@ -57,7 +62,7 @@ checks += [
     ('install.ps1', '$RtkApiUrl =', ps),
     ('install.ps1', '$RtkNeedsUpdate = $false', ps),
     ('install.ps1', 'init --agent kimi', ps),
-    ('uninstall.sh', 'Native Kimi Code, Codex, Antigravity, and RTK user data were preserved.', (ROOT/'uninstall.sh').read_text(encoding='utf-8')),
+    ('uninstall.sh', 'Native Kimi Code, Codex, Antigravity, Claude Code, and RTK user data were preserved.', (ROOT/'uninstall.sh').read_text(encoding='utf-8')),
     ('uninstall.ps1', 'Native AI CLI and RTK user data were preserved', (ROOT/'uninstall.ps1').read_text(encoding='utf-8')),
 ]
 
@@ -130,11 +135,11 @@ if 'install_codex_official()' not in sh or 'CODEX_INSTALL_URL="https://chatgpt.c
     errors.append('install.sh: official Codex release installer missing')
 if 'lazydev_setup_ready()' in sh or 'Setting up Lazy Developer before AI UIs' in sh or 'Setup is ready before AI UI installation.' in sh:
     errors.append('install.sh: installer must not run LazyDev setup during installation')
-for marker in ['step "RTK"', 'step "Installing/updating Lazy Developer $LAZYDEV_VERSION"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']:
+for marker in ['step "RTK"', 'step "Installing/updating Lazy Developer $LAZYDEV_VERSION"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI', 'step "Installing/updating official Claude Code"']:
     if marker not in sh: errors.append(f'install.sh: missing lifecycle step: {marker}')
 else:
-    order = [sh.index(x) for x in ['step "RTK"', 'step "Installing/updating Lazy Developer $LAZYDEV_VERSION"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']]
-    if order != sorted(order): errors.append('install.sh: lifecycle order must be RTK → LazyDev → Kimi → Codex → Antigravity')
+    order = [sh.index(x) for x in ['step "RTK"', 'step "Installing/updating Lazy Developer $LAZYDEV_VERSION"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI', 'step "Installing/updating official Claude Code"']]
+    if order != sorted(order): errors.append('install.sh: lifecycle order must be RTK → LazyDev → Kimi → Codex → Antigravity → Claude Code')
     if sh.index('step "RTK"') > sh.index('step "Installing/updating Lazy Developer $LAZYDEV_VERSION"'): errors.append('install.sh: RTK lifecycle marker must precede LazyDev install')
 if 'refresh_active_lazydev_launcher' not in sh:
     errors.append('install.sh: active LazyDev launcher refresh missing')
@@ -144,17 +149,21 @@ if 'Refresh-ActiveLazyDevLauncher' not in ps or 'Lazy Developer command surface 
     errors.append('install.ps1: post-refresh command surface verification missing')
 if 'CODEX_INSTALLED_BIN="$CODEX_BIN_DIR/codex"' not in sh or 'official installer' not in sh:
     errors.append('install.sh: Codex post-install verification fallback missing')
+if 'claude_command=%s' not in sh or 'CLAUDE_INSTALL_URL="https://claude.ai/install.sh"' not in sh or 'find_claude()' not in sh:
+    errors.append('install.sh: Claude Code discovery/persistence/install contract missing')
+if "$ClaudeInstallUrl = 'https://claude.ai/install.ps1'" not in ps or 'Find-Claude' not in ps:
+    errors.append('install.ps1: Claude Code discovery/install contract missing')
 if 'resilient_download()' not in sh or '--http1.1' not in sh or '--retry 8' not in sh or ' -C - ' not in sh:
     errors.append('install.sh: Codex resilient resumable download policy missing')
 if 'function Install-CodexOfficial' not in ps or 'github.com/openai/codex/releases/download/rust-v' not in ps:
     errors.append('install.ps1: official Codex release archive installer missing')
 if 'Test-LazyDevSetupReady' in ps or 'Setting up Lazy Developer before AI UIs' in ps or 'Setup is ready before AI UI installation.' in ps:
     errors.append('install.ps1: installer must not run LazyDev setup during installation')
-for marker in ["Step 'RTK'", 'Step \"Installing/updating Lazy Developer $LazyDevVersion\"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']:
+for marker in ["Step 'RTK'", 'Step \"Installing/updating Lazy Developer $LazyDevVersion\"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI', "Step 'Installing/updating official Claude Code'"]:
     if marker not in ps: errors.append(f'install.ps1: missing lifecycle step: {marker}')
 else:
-    order = [ps.index(x) for x in ["Step 'RTK'", 'Step "Installing/updating Lazy Developer $LazyDevVersion"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']]
-    if order != sorted(order): errors.append('install.ps1: lifecycle order must be RTK → LazyDev → Kimi → Codex → Antigravity')
+    order = [ps.index(x) for x in ["Step 'RTK'", 'Step \"Installing/updating Lazy Developer $LazyDevVersion\"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI', "Step 'Installing/updating official Claude Code'"]]
+    if order != sorted(order): errors.append('install.ps1: lifecycle order must be RTK → LazyDev → Kimi → Codex → Antigravity → Claude Code')
     if ps.index("Step 'RTK'") > ps.index('Step \"Installing/updating Lazy Developer $LazyDevVersion\"'): errors.append('install.ps1: RTK lifecycle marker must precede LazyDev install')
 if 'Refresh-ActiveLazyDevLauncher' not in ps:
     errors.append('install.ps1: active LazyDev launcher refresh missing')
@@ -210,7 +219,7 @@ if 'scripts/lazydev.mjs' in sh or 'scripts\\lazydev.mjs' in ps:
     # The source remains bundled for plugin/development hosts, but installers must never invoke it.
     pass
 
-if pkg.get('version') != '1.0.2': errors.append('package version is not 1.0.2')
+if pkg.get('version') != '1.0.3': errors.append('package version is not 1.0.3')
 if pkg.get('homepage') != 'https://github.com/BlizPS/free-kimi-code': errors.append('package homepage mismatch')
 if pkg.get('repository',{}).get('url') != 'git+https://github.com/BlizPS/free-kimi-code.git': errors.append('package repository URL mismatch')
 for p in ROOT.rglob('*'):
@@ -233,7 +242,7 @@ if errors:
     print('FAIL')
     print('\n'.join('ERROR: '+e for e in errors))
     raise SystemExit(1)
-print('PASS: installers, selective update logic, repository URLs, and provider naming are consistent')
+print('PASS: installers, selective update logic, repository URLs, provider naming, and Claude Code integration are consistent')
 
 
 # Regression checks for the persistent optional CLI UI runtime.

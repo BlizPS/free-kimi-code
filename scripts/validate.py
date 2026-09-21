@@ -37,7 +37,7 @@ if rp:
         errors.append("root plugin.json schema mismatch")
     if rp.get("name") != "lazy-developer":
         errors.append("root plugin.json name mismatch")
-    if rp.get("version") != "1.0.2":
+    if rp.get("version") != "1.0.3":
         errors.append("root plugin.json version mismatch")
     extra = set(rp) - allowed
     if extra:
@@ -51,11 +51,11 @@ for rel in [
     d = load(rel)
     if d:
         if d.get("name") != "lazy-developer": errors.append(f"{rel}: name mismatch")
-        if d.get("version") != "1.0.2": errors.append(f"{rel}: version mismatch")
+        if d.get("version") != "1.0.3": errors.append(f"{rel}: version mismatch")
 
 for rel in ["gemini-extension.json", "openclaw.plugin.json"]:
     d = load(rel)
-    if d and d.get("version") != "1.0.2": errors.append(f"{rel}: version mismatch")
+    if d and d.get("version") != "1.0.3": errors.append(f"{rel}: version mismatch")
 
 for rel in [
     ".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json",
@@ -100,7 +100,7 @@ for p in ROOT.rglob("*.json"):
     if ".git" in p.parts or p.name == "marketplace.json": continue
     try: d = json.loads(p.read_text(encoding="utf-8"))
     except Exception: continue
-    if isinstance(d, dict) and "version" in d and d["version"] != "1.0.2":
+    if isinstance(d, dict) and "version" in d and d["version"] != "1.0.3":
         errors.append(f"{p.relative_to(ROOT)}: version drift {d['version']!r}")
 
 readme = (ROOT / "README.md").read_text(encoding="utf-8")

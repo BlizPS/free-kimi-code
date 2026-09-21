@@ -14,9 +14,10 @@ if [ -z "$LAZYDEV_LOCAL_SOURCE_DIR" ] && [ -n "${0:-}" ] && [ -f "${0:-}" ]; the
     LAZYDEV_LOCAL_SOURCE_DIR="$LAZYDEV_SCRIPT_DIR"
   fi
 fi
-LAZYDEV_VERSION="1.0.2"
+LAZYDEV_VERSION="1.0.3"
 KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"
 ANTIGRAVITY_INSTALL_URL="https://antigravity.google/cli/install.sh"
+CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
 KIMI_RELEASE_API_URL="https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest"
 CODEX_RELEASE_API_URL="https://api.github.com/repos/openai/codex/releases/latest"
 CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
@@ -164,7 +165,7 @@ get_kimi_latest_version() {
   response="$TMP_DIR/kimi-release.json"
   if curl -fsSL \
     -H 'Accept: application/vnd.github+json' \
-    -H 'User-Agent: lazy-developer-installer/1.0.2' \
+    -H 'User-Agent: lazy-developer-installer/1.0.3' \
     "$KIMI_RELEASE_API_URL" -o "$response" 2>/dev/null; then
     tag_line="$(grep -m1 -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' "$response" 2>/dev/null || true)"
     version="$(printf '%s\n' "$tag_line" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | tail -n 1 || true)"
@@ -183,7 +184,7 @@ get_github_release_version() {
   if curl -fsSL --http1.1 --connect-timeout 10 --max-time 30 --retry 4 --retry-delay 1 \
     -H 'Accept: application/vnd.github+json' \
     -H 'X-GitHub-Api-Version: 2022-11-28' \
-    -H 'User-Agent: lazy-developer-installer/1.0.2' \
+    -H 'User-Agent: lazy-developer-installer/1.0.3' \
     "$api_url" -o "$response_file" 2>/dev/null; then
     tag_line="$(grep -m1 -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' "$response_file" 2>/dev/null || true)"
     printf '%s\n' "$tag_line" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | tail -n 1
@@ -241,6 +242,7 @@ lazydev_source_is_current() {
   grep -Fq 'def find_kimi(' "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
   grep -Fq 'def find_codex(' "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
   grep -Fq 'def find_antigravity(' "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
+  grep -Fq 'def find_claude(' "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
   grep -Fq 'response.output_item.done' "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
   grep -Fq '_lazydev_dev_mcp_entry' "$source_dir/cli/lazydev.py" 2>/dev/null || return 1
   [ -f "$source_dir/runtime/lazydev-dev-mcp.py" ] || return 1
@@ -6301,7 +6303,7 @@ get_remote_revision() {
   if curl -fsSL \
     -H 'Accept: application/vnd.github+json' \
     -H 'X-GitHub-Api-Version: 2022-11-28' \
-    -H 'User-Agent: lazy-developer-installer/1.0.2' \
+    -H 'User-Agent: lazy-developer-installer/1.0.3' \
     "$GITHUB_API_URL" -o "$response_file" 2>/dev/null; then
     grep -m1 -o '"sha"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]\{40\}"' "$response_file" 2>/dev/null | \
       sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F]\{40\}\)".*/\1/p' | head -n 1
@@ -6322,6 +6324,7 @@ SAVED_RTK_COMMAND=""
 SAVED_CODEX_COMMAND=""
 SAVED_KIMI_COMMAND=""
 SAVED_AGY_COMMAND=""
+SAVED_CLAUDE_COMMAND=""
 SAVED_UI_RUNTIME_DIR=""
 SAVED_LAZYDEV_COMMAND=""
 load_install_state() {
@@ -6329,6 +6332,7 @@ load_install_state() {
   SAVED_CODEX_COMMAND=""
   SAVED_KIMI_COMMAND=""
   SAVED_AGY_COMMAND=""
+  SAVED_CLAUDE_COMMAND=""
   SAVED_UI_RUNTIME_DIR=""
   SAVED_LAZYDEV_COMMAND=""
 
@@ -6355,6 +6359,10 @@ load_install_state() {
   backup_agy="$(read_state_value "$LAZYDEV_STATE_BACKUP_FILE" antigravity_command)"
   registry_agy="$(read_state_value "$LAZYDEV_CLI_REGISTRY_FILE" antigravity_command)"
   registry_backup_agy="$(read_state_value "$LAZYDEV_CLI_REGISTRY_BACKUP_FILE" antigravity_command)"
+  primary_claude="$(read_state_value "$LAZYDEV_STATE_FILE" claude_command)"
+  backup_claude="$(read_state_value "$LAZYDEV_STATE_BACKUP_FILE" claude_command)"
+  registry_claude="$(read_state_value "$LAZYDEV_CLI_REGISTRY_FILE" claude_command)"
+  registry_backup_claude="$(read_state_value "$LAZYDEV_CLI_REGISTRY_BACKUP_FILE" claude_command)"
 
   # Priority: current state -> state backup -> independent CLI registry -> registry backup.
   # Empty command fields are intentionally ignored so a transient detector miss
@@ -6363,6 +6371,7 @@ load_install_state() {
   SAVED_CODEX_COMMAND="${primary_codex:-${backup_codex:-${registry_codex:-$registry_backup_codex}}}"
   SAVED_KIMI_COMMAND="${primary_kimi:-${backup_kimi:-${registry_kimi:-$registry_backup_kimi}}}"
   SAVED_AGY_COMMAND="${primary_agy:-${backup_agy:-${registry_agy:-$registry_backup_agy}}}"
+  SAVED_CLAUDE_COMMAND="${primary_claude:-${backup_claude:-${registry_claude:-$registry_backup_claude}}}"
 
   SAVED_UI_RUNTIME_DIR="$(read_state_value "$LAZYDEV_STATE_FILE" ui_runtime_dir)"
   [ -n "$SAVED_UI_RUNTIME_DIR" ] || SAVED_UI_RUNTIME_DIR="$(read_state_value "$LAZYDEV_STATE_BACKUP_FILE" ui_runtime_dir)"
@@ -6396,6 +6405,7 @@ write_cli_registry() {
   codex="$2"
   kimi="$3"
   agy="$4"
+  claude="$5"
   mkdir -p "$LAZYDEV_STATE_HOME" 2>/dev/null || return 0
   tmp="$LAZYDEV_CLI_REGISTRY_FILE.$$"
   {
@@ -6404,6 +6414,7 @@ write_cli_registry() {
     printf 'codex_command=%s\n' "$codex"
     printf 'kimi_command=%s\n' "$kimi"
     printf 'antigravity_command=%s\n' "$agy"
+    printf 'claude_command=%s\n' "$claude"
   } > "$tmp" || { rm -f "$tmp" 2>/dev/null || true; return 0; }
   if [ -s "$LAZYDEV_CLI_REGISTRY_FILE" ]; then
     cp -f "$LAZYDEV_CLI_REGISTRY_FILE" "$LAZYDEV_CLI_REGISTRY_BACKUP_FILE" 2>/dev/null || true
@@ -6418,6 +6429,7 @@ write_install_state() {
   state_kimi_command="${KIMI_COMMAND:-$SAVED_KIMI_COMMAND}"
   state_codex_command="${CODEX_COMMAND:-$SAVED_CODEX_COMMAND}"
   state_agy_command="${AGY_COMMAND:-$SAVED_AGY_COMMAND}"
+  state_claude_command="${CLAUDE_COMMAND:-$SAVED_CLAUDE_COMMAND}"
   state_rtk_command="${RTK_COMMAND:-$SAVED_RTK_COMMAND}"
 
   # Old RTK state sometimes stored its containing directory rather than the file.
@@ -6446,6 +6458,7 @@ write_install_state() {
     printf 'kimi_command=%s\n' "$state_kimi_command"
     printf 'codex_command=%s\n' "$state_codex_command"
     printf 'antigravity_command=%s\n' "$state_agy_command"
+    printf 'claude_command=%s\n' "$state_claude_command"
     printf 'rtk_command=%s\n' "$state_rtk_command"
     printf 'ui_runtime_dir=%s\n' "${LAZYDEV_UI_HOME:-}"
   } > "$tmp" || { rm -f "$tmp" 2>/dev/null || true; return 0; }
@@ -6453,7 +6466,7 @@ write_install_state() {
     cp -f "$LAZYDEV_STATE_FILE" "$LAZYDEV_STATE_BACKUP_FILE" 2>/dev/null || true
   fi
   mv -f "$tmp" "$LAZYDEV_STATE_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
-  write_cli_registry "$state_rtk_command" "$state_codex_command" "$state_kimi_command" "$state_agy_command"
+  write_cli_registry "$state_rtk_command" "$state_codex_command" "$state_kimi_command" "$state_agy_command" "$state_claude_command"
 }
 
 load_install_state
@@ -6853,6 +6866,28 @@ ask_install_ui() {
   case "$answer" in y|Y|yes|YES|Yes) return 0;; *) return 1;; esac
 }
 
+find_claude() {
+  add_external_cli_bin_directories
+  for candidate in "${CLAUDE_COMMAND:-}" "$SAVED_CLAUDE_COMMAND" "$HOME/.local/bin/claude" "$HOME/.local/share/claude/bin/claude" "$HOME/.claude/bin/claude"; do
+    if [ -n "$candidate" ] && { [ -x "$candidate" ] || [ -f "$candidate" ]; } && [ ! -d "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  if command -v claude >/dev/null 2>&1; then
+    command -v claude
+    return 0
+  fi
+  for root in "$HOME/.local/bin" "$HOME/.local/share/claude" "$HOME/.claude" "$HOME/.nvm" "$HOME/.volta" "$HOME/.asdf"; do
+    [ -d "$root" ] || continue
+    found="$(find "$root" -maxdepth 6 -type f \( -name claude -o -name claude.cmd \) -perm -111 -print 2>/dev/null | head -n 1 || true)"
+    if [ -n "$found" ]; then printf '%s\n' "$found"; return 0; fi
+  done
+  found="$(find_cli_in_home claude 2>/dev/null || true)"
+  [ -n "$found" ] && { printf '%s\n' "$found"; return 0; }
+  return 1
+}
+
 find_rtk() {
   add_external_cli_bin_directories
   # The official RTK installer installs <RTK_INSTALL_DIR>/rtk. Keep legacy
@@ -7154,6 +7189,25 @@ else
   say "Antigravity CLI not found — installation available."
 fi
 
+CLAUDE_COMMAND="$(find_claude 2>/dev/null || true)"
+CLAUDE_CURRENT_VERSION=""
+CLAUDE_NEEDS_UPDATE=0
+CLAUDE_UPDATE_AVAILABLE=0
+if [ -n "$CLAUDE_COMMAND" ]; then
+  CLAUDE_CURRENT_VERSION="$(extract_semver "$($CLAUDE_COMMAND --version 2>/dev/null || true)")"
+  CLAUDE_NEEDS_UPDATE=1
+  CLAUDE_UPDATE_AVAILABLE=1
+  if [ -n "$CLAUDE_CURRENT_VERSION" ]; then
+    say "Claude Code $CLAUDE_CURRENT_VERSION is installed — install/update available."
+  else
+    say "Claude Code is installed — install/update available."
+  fi
+else
+  CLAUDE_NEEDS_UPDATE=1
+  CLAUDE_UPDATE_AVAILABLE=1
+  say "Claude Code not found — installation available."
+fi
+
 RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
 RTK_CURRENT_VERSION=""
 RTK_LATEST_VERSION=""
@@ -7318,6 +7372,7 @@ if [ -f "$LAZYDEV_HOME/cli/lazydev.py" ]; then
      ! grep -Fq 'def find_kimi(' "$LAZYDEV_HOME/cli/lazydev.py" || \
      ! grep -Fq 'def find_codex(' "$LAZYDEV_HOME/cli/lazydev.py" || \
      ! grep -Fq 'def find_antigravity(' "$LAZYDEV_HOME/cli/lazydev.py" || \
+     ! grep -Fq 'def find_claude(' "$LAZYDEV_HOME/cli/lazydev.py" || \
      grep -Eq "[\"'"'"']--config[\"'"'"']" "$LAZYDEV_HOME/cli/lazydev.py"; then
     LAZYDEV_FEATURE_REFRESH=1
   fi
@@ -7379,6 +7434,7 @@ fi
 INSTALL_KIMI=0
 INSTALL_CODEX=0
 INSTALL_ANTIGRAVITY=0
+INSTALL_CLAUDE=0
 if [ "$KIMI_UPDATE_AVAILABLE" -eq 1 ]; then
   if ask_install_ui "Install/update Kimi Code?"; then INSTALL_KIMI=1; else KIMI_NEEDS_UPDATE=0; say "Kimi Code update/install declined — skipped."; fi
 fi
@@ -7387,6 +7443,9 @@ if [ "$CODEX_UPDATE_AVAILABLE" -eq 1 ]; then
 fi
 if [ "$AGY_UPDATE_AVAILABLE" -eq 1 ]; then
   if ask_install_ui "Install/update Antigravity?"; then INSTALL_ANTIGRAVITY=1; else AGY_NEEDS_UPDATE=0; say "Antigravity update/install declined — skipped."; fi
+fi
+if [ "$CLAUDE_UPDATE_AVAILABLE" -eq 1 ]; then
+  if ask_install_ui "Install/update Claude Code?"; then INSTALL_CLAUDE=1; else CLAUDE_NEEDS_UPDATE=0; say "Claude Code update/install declined — skipped."; fi
 fi
 
 # RTK was already checked in parallel above. The state set by the
@@ -7401,8 +7460,8 @@ clear 2>/dev/null || true
 # with empty command fields used to erase a valid installation record. State is
 # persisted only after a component has been verified or at the final commit.
 
-# Actual installation order: RTK → Lazy Developer → selected AI UIs (Kimi → Codex → Antigravity).
-# The Kimi/Codex/Antigravity Y/n choices were collected above and are applied only after
+# Actual installation order: RTK → Lazy Developer → selected AI UIs (Kimi → Codex → Antigravity → Claude Code).
+# The Kimi/Codex/Antigravity/Claude Code Y/n choices were collected above and are applied only after
 # RTK and the Lazy Developer runtime are ready. Provider/model setup is intentionally skipped.
 
 # Always render an RTK lifecycle line before Lazy Developer. On a reinstall this is an
@@ -7681,7 +7740,28 @@ fi
 
 
 
-# Installation order: collect all Y/n choices first, then RTK → Lazy Developer → selected AI UIs (Kimi → Codex → Antigravity).
+if [ "$INSTALL_CLAUDE" -eq 1 ] && [ "$CLAUDE_NEEDS_UPDATE" -eq 1 ]; then
+  step "Installing/updating official Claude Code"
+  CLAUDE_INSTALL_SCRIPT="$TMP_DIR/claude-install.sh"
+  CLAUDE_LOG="$TMP_DIR/claude-install.log"
+  if ! curl -fsSL "$CLAUDE_INSTALL_URL" -o "$CLAUDE_INSTALL_SCRIPT"; then
+    fatal "Could not download the official Claude Code installer."
+  fi
+  if ! bash "$CLAUDE_INSTALL_SCRIPT" >"$CLAUDE_LOG" 2>&1; then
+    cat "$CLAUDE_LOG" >&2 || true
+    fatal "Claude Code installer failed."
+  fi
+  cat "$CLAUDE_LOG"
+  PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$HOME/.local/bin:$HOME/.kimi-code/bin:$PATH"; export PATH
+  hash -r 2>/dev/null || true
+  CLAUDE_COMMAND="$(find_claude 2>/dev/null || true)"
+  [ -n "$CLAUDE_COMMAND" ] || fatal "Claude Code did not install a usable launcher."
+  CLAUDE_CURRENT_VERSION="$(extract_semver "$($CLAUDE_COMMAND --version 2>/dev/null || true)")"
+  say "✓ Claude Code ${CLAUDE_CURRENT_VERSION:-installed} ready"
+  write_install_state
+fi
+
+# Installation order: collect all Y/n choices first, then RTK → Lazy Developer → selected AI UIs (Kimi → Codex → Antigravity → Claude Code).
 
 # RTK/Kimi integration is reconciled after the native UIs are available.
 # Keep the integration step after the UI installs so it can initialize against the actual Kimi command.
@@ -7723,6 +7803,7 @@ say "Lazy Developer: $LAZYDEV_VERSION"
 say "Existing Kimi sessions and configuration were left in place."
 say ""
 say "Provider setup is intentionally separate and was not run by the installer."
+say "Claude Code uses the configured LazyDev Anthropic-compatible proxy when launched from lazydev chat."
 say "Next:"
 say "  lazydev setup"
 say "  lazydev chat"

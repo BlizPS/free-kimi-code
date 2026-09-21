@@ -23,13 +23,18 @@ for (const [id, spec] of Object.entries(providers)) {
   assert.ok(src.includes(`id: '${id}'`), `${id} provider missing`);
   for (const value of Object.values(spec).filter((v) => v.startsWith?.('http'))) assert.ok(src.includes(value), `${id}: missing ${value}`);
 }
-assert.ok(py.includes("if provider[\"id\"] not in {\"anthropic\", \"gemini\"} or ui in {\"codex\", \"antigravity\"}:"), 'Python UI routing must create the shared proxy for Codex/Antigravity');
+assert.ok(py.includes("if provider[\"id\"] not in {\"anthropic\", \"gemini\"} or ui in {\"codex\", \"antigravity\", \"claude\"}:"), 'Python UI routing must create the shared proxy for Codex/Antigravity/Claude Code');
 assert.ok(src.includes("provider.id === 'anthropic' ? '/v1/messages' : '/v1/chat/completions'"), 'protocol split missing');
 assert.ok(src.includes("const providerType = provider.id === 'gemini' && !geminiProxy ? 'google-genai'"), 'Gemini native provider type missing');
 assert.ok(src.includes("base_url = ${tomlQuote('https://generativelanguage.googleapis.com')}"), 'Gemini native base URL missing');
 assert.ok(src.includes("'authorization': `Bearer ${pc.apiKey}`"), 'bearer auth missing');
 assert.ok(src.includes("'x-api-key': pc.apiKey"), 'Anthropic auth missing');
 assert.ok(py.includes('def _openai_to_anthropic'), 'Python Anthropic adapter missing');
+assert.ok(py.includes('def _anthropic_request_to_openai'), 'Claude Code request adapter missing');
+assert.ok(py.includes('def _openai_sse_to_anthropic'), 'Claude Code streaming adapter missing');
+assert.ok(py.includes('def _launch_claude'), 'Claude Code launcher missing');
+assert.ok(py.includes('ANTHROPIC_BASE_URL'), 'Claude Code proxy environment missing');
+assert.ok(py.includes('CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY'), 'Claude Code gateway model discovery missing');
 assert.ok(py.includes('def _anthropic_to_openai'), 'Python Anthropic response adapter missing');
 assert.ok(py.includes('def _anthropic_sse_to_openai'), 'Python Anthropic streaming adapter missing');
 assert.ok(py.includes('headers["x-api-key"] = key'), 'Python Anthropic API key header missing');
@@ -51,4 +56,4 @@ assert.ok(src.includes("function providerRequiresApiKey(provider)"), 'generic pr
 assert.ok(src.includes("integrate.api.nvidia.com/v1/chat/completions"), 'NVIDIA chat route missing');
 assert.ok(src.includes("function runNativeCommand(subcommand = 'chat')"), 'Node wrapper must delegate chat to native Python runtime');
 assert.ok(src.includes('cli/lazydev.py'), 'Node wrapper must delegate to shared Python runtime');
-console.log('PASS: provider matrix routes/protocols/auth are statically wired for 11 providers with 9Router at #11');
+console.log('PASS: provider matrix routes/protocols/auth and Claude Code native UI proxy are statically wired');

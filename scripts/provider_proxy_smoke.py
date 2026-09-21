@@ -97,6 +97,59 @@ try:
     stream_out = mod._anthropic_sse_to_openai(stream_sample, "claude-test").decode()
     assert "chat.completion.chunk" in stream_out and '"content":"hi"' in stream_out and "[DONE]" in stream_out, stream_out
 
+    # Claude Code wire contract: Anthropic Messages -> unified OpenAI -> upstream -> Anthropic Messages.
+    claude_calls: list[dict] = []
+    class ClaudeUpstream(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        def log_message(self, *args): pass
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length).decode())
+            claude_calls.append(body)
+            if body.get("stream"):
+                data = b'data: {"id":"chatcmpl-claude","model":"route-model","choices":[{"delta":{"content":"hello"}}]}\n\ndata: {"id":"chatcmpl-claude","model":"route-model","choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+                self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data); return
+            payload = {"id":"chatcmpl-claude","object":"chat.completion","created":1,"model":body.get("model"),"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}
+            data = json.dumps(payload).encode()
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+
+    claude_upstream = ThreadingHTTPServer(("127.0.0.1", 0), ClaudeUpstream)
+    threading.Thread(target=claude_upstream.serve_forever, daemon=True).start()
+    try:
+        claude_provider = {"id":"openrouter","label":"OpenRouter","kind":"openai","base":f"http://127.0.0.1:{claude_upstream.server_address[1]}","chat":f"http://127.0.0.1:{claude_upstream.server_address[1]}/v1/chat/completions"}
+        claude_pc = {"apiKey":"route-key","model":"route-model","modelInfo":{"context":32768,"output":4096}}
+        claude_proxy = mod._ProviderProxy(claude_provider, claude_pc)
+        try:
+            model_req = Request(f"http://127.0.0.1:{claude_proxy.port}/v1/models", headers={"x-api-key":claude_proxy.token}, method="GET")
+            with urlopen(model_req, timeout=10) as response:
+                models = json.loads(response.read().decode())
+                assert response.status == 200 and models["data"][0]["id"] == "route-model", models
+            message_body = {"model":"sonnet","max_tokens":128,"system":"You are LazyDev.","messages":[{"role":"user","content":"hello"}],"stream":False}
+            req = Request(f"http://127.0.0.1:{claude_proxy.port}/v1/messages", data=json.dumps(message_body).encode(), headers={"x-api-key":claude_proxy.token,"Content-Type":"application/json"}, method="POST")
+            with urlopen(req, timeout=10) as response:
+                payload = json.loads(response.read().decode())
+                assert response.status == 200 and payload["type"] == "message" and payload["content"][0]["text"] == "hello", payload
+            stream_body = {**message_body, "stream":True}
+            req_stream = Request(f"http://127.0.0.1:{claude_proxy.port}/v1/messages", data=json.dumps(stream_body).encode(), headers={"Authorization":f"Bearer {claude_proxy.token}","Content-Type":"application/json"}, method="POST")
+            with urlopen(req_stream, timeout=10) as response:
+                stream_payload = response.read().decode()
+                assert response.status == 200 and "message_start" in stream_payload and "text_delta" in stream_payload and "message_stop" in stream_payload, stream_payload
+            assert len(claude_calls) >= 2 and all(call["model"] == "route-model" for call in claude_calls), claude_calls
+        finally:
+            claude_proxy.close()
+        # When all native clients exist, Claude Code must be the fourth/last chooser item.
+        saved = (mod.find_kimi, mod.find_codex, mod.find_antigravity, mod.find_claude)
+        try:
+            mod.find_kimi = lambda: "/fake/kimi"
+            mod.find_codex = lambda: "/fake/codex"
+            mod.find_antigravity = lambda: "/fake/agy"
+            mod.find_claude = lambda: "/fake/claude"
+            assert [x[:2] for x in mod.installed_chat_uis()] == [("kimi","Kimi Code"),("codex","Codex"),("antigravity","Antigravity"),("claude","Claude Code")]
+        finally:
+            mod.find_kimi, mod.find_codex, mod.find_antigravity, mod.find_claude = saved
+    finally:
+        claude_upstream.shutdown(); claude_upstream.server_close()
+
     no_native_pc = {"apiKey": "test-key", "model": "same-model", "modelInfo": {"context": 32768, "output": 4096, "toolUse": False}}
 
     # Verify Kimi config keeps tool_use enabled because the loopback proxy provides the bridge.
@@ -153,6 +206,6 @@ try:
         nt.shutdown(); nt.server_close()
 
     assert all("prompt_cache_key" not in body for body in seen), seen
-    print("PASS: native capability detection, same-model synthetic tool bridge, tool-result adaptation, and request repair")
+    print("PASS: native capability detection, Claude Code Anthropic proxy bridge, same-model synthetic tools, tool-result adaptation, and request repair")
 finally:
     upstream.shutdown(); upstream.server_close()

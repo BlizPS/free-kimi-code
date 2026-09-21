@@ -229,5 +229,5 @@ for path in "$LAZYDEV_HOME" "$LAZYDEV_CONFIG_DIR" "$LAZYDEV_STATE_HOME" "$LAZYDE
 done
 
 say ""
-say "Lazy Developer managed files, launchers, integrations, state, and LazyDev artifacts have been removed. Native Kimi Code, Codex, Antigravity, and RTK user data were preserved."
+say "Lazy Developer managed files, launchers, integrations, state, and LazyDev artifacts have been removed. Native Kimi Code, Codex, Antigravity, Claude Code, and RTK user data were preserved."
 say "Project folders outside these managed locations were left untouched."
