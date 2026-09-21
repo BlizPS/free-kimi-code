@@ -86,8 +86,8 @@ if 'lazydev_setup_ready()' in sh or 'Setting up Lazy Developer before AI UIs' in
 for marker in ['Installing/updating RTK', 'Installing/updating Lazy Developer $LAZYDEV_VERSION', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']:
     if marker not in sh: errors.append(f'install.sh: missing lifecycle step: {marker}')
 else:
-    order = [sh.index(x) for x in ['Installing/updating RTK', 'Installing/updating Lazy Developer $LAZYDEV_VERSION', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']]
-    if order != sorted(order): errors.append('install.sh: lifecycle order must be RTK → LazyDev → Kimi → Codex → Antigravity')
+    order = [sh.index(x) for x in ['Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI', 'Installing/updating RTK', 'Installing/updating Lazy Developer $LAZYDEV_VERSION']]
+    if order != sorted(order): errors.append('install.sh: lifecycle order must be Kimi → Codex → Antigravity → RTK → LazyDev')
 if 'refresh_active_lazydev_launcher' not in sh:
     errors.append('install.sh: active LazyDev launcher refresh missing')
 if 'lazydev-help.txt' not in sh or 'Lazy Developer command surface is stale' not in sh:
@@ -105,14 +105,21 @@ if 'Test-LazyDevSetupReady' in ps or 'Setting up Lazy Developer before AI UIs' i
 for marker in ['Installing/updating RTK', 'Installing/updating Lazy Developer $LazyDevVersion', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']:
     if marker not in ps: errors.append(f'install.ps1: missing lifecycle step: {marker}')
 else:
-    order = [ps.index(x) for x in ['Installing/updating RTK', 'Installing/updating Lazy Developer $LazyDevVersion', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']]
-    if order != sorted(order): errors.append('install.ps1: lifecycle order must be RTK → LazyDev → Kimi → Codex → Antigravity')
+    order = [ps.index(x) for x in ['Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI', 'Installing/updating RTK', 'Installing/updating Lazy Developer $LazyDevVersion']]
+    if order != sorted(order): errors.append('install.ps1: lifecycle order must be Kimi → Codex → Antigravity → RTK → LazyDev')
 if 'Refresh-ActiveLazyDevLauncher' not in ps:
     errors.append('install.ps1: active LazyDev launcher refresh missing')
 if "$CodexInstalledPath = Join-Path $BinRoot 'codex.exe'" not in ps or 'official archive verified' not in ps:
     errors.append('install.ps1: Codex post-install verification fallback missing')
 if 'Invoke-ResilientDownload' not in ps or '--http1.1' not in ps or '--retry' not in ps or '--continue-at' not in ps:
     errors.append('install.ps1: Codex resilient resumable download policy missing')
+
+for name, text in [('install.sh', sh), ('install.ps1', ps)]:
+    if 'embedded current source' not in text and 'embedded-current' not in text:
+        errors.append(f'{name}: embedded current LazyDev source fallback missing')
+    if 'Lazy Developer setup' not in text or 'lazydev setup' not in text:
+        errors.append(f'{name}: explicit LazyDev setup skip is missing')
+
 legacy_env = 'CODEX' + '_INSTALL_URL'
 legacy_vars = ['Codex' + 'InstallUrl']
 legacy_scripts = ['codex' + '-install.sh', 'codex' + '-install.ps1']
