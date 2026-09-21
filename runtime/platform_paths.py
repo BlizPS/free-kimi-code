@@ -17,6 +17,10 @@ def _exists(path: str) -> bool:
 def is_termux_environment(env: Mapping[str, str] | None = None, exists: Callable[[str], bool] = _exists) -> bool:
     """Detect native Termux and Debian/Ubuntu launched through proot-distro."""
     env = env or os.environ
+    try:
+        android_kernel = "android" in os.uname().release.lower() or "android" in os.uname().version.lower()
+    except OSError:
+        android_kernel = False
     marker = bool(
         env.get("TERMUX_VERSION")
         or env.get("TERMUX_APP__VERSION_NAME")
@@ -33,7 +37,7 @@ def is_termux_environment(env: Mapping[str, str] | None = None, exists: Callable
             "/data/data/com.termux/files/usr",
         ) if item
     )
-    return marker or (android and termux_prefix)
+    return marker or (android and termux_prefix) or (android_kernel and termux_prefix)
 
 
 def platform_paths(

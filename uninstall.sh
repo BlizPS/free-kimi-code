@@ -169,7 +169,7 @@ if isinstance(servers,dict) and 'lazydev-search' in servers:
 PY
   fi
 fi
-rm -f "$LAZYDEV_BIN_DIR/codex" "$LAZYDEV_BIN_DIR/codex.exe" "$LAZYDEV_BIN_DIR/codex.cmd" "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.exe" "$HOME/.local/bin/codex.cmd" 2>/dev/null || true
+rm -f "$LAZYDEV_BIN_DIR/codex" "$LAZYDEV_BIN_DIR/codex.bin" "$LAZYDEV_BIN_DIR/codex.exe" "$LAZYDEV_BIN_DIR/codex.cmd" "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.exe" "$HOME/.local/bin/codex.cmd" 2>/dev/null || true
 rm -f "$LAZYDEV_BIN_DIR/agy" "$LAZYDEV_BIN_DIR/agy.exe" "$LAZYDEV_BIN_DIR/agy.cmd" "$HOME/.local/bin/agy" "$HOME/.local/bin/agy.exe" "$HOME/.local/bin/agy.cmd" 2>/dev/null || true
 
 step "Removing RTK"

@@ -91,11 +91,12 @@ if 'install_codex_official()' not in sh or 'codex-package-${target}.tar.gz' not 
     errors.append('install.sh: official Codex release installer missing')
 if 'lazydev_setup_ready()' in sh or 'Setting up Lazy Developer before AI UIs' in sh or 'Setup is ready before AI UI installation.' in sh:
     errors.append('install.sh: installer must not run LazyDev setup during installation')
-for marker in ['Installing/updating RTK', 'Installing/updating Lazy Developer $LAZYDEV_VERSION', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']:
+for marker in ['step "RTK"', 'step "Installing/updating Lazy Developer $LAZYDEV_VERSION"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']:
     if marker not in sh: errors.append(f'install.sh: missing lifecycle step: {marker}')
 else:
-    order = [sh.index(x) for x in ['Installing/updating RTK', 'Installing/updating Lazy Developer $LAZYDEV_VERSION', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']]
+    order = [sh.index(x) for x in ['step "RTK"', 'step "Installing/updating Lazy Developer $LAZYDEV_VERSION"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']]
     if order != sorted(order): errors.append('install.sh: lifecycle order must be RTK → LazyDev → Kimi → Codex → Antigravity')
+    if sh.index('step "RTK"') > sh.index('step "Installing/updating Lazy Developer $LAZYDEV_VERSION"'): errors.append('install.sh: RTK lifecycle marker must precede LazyDev install')
 if 'refresh_active_lazydev_launcher' not in sh:
     errors.append('install.sh: active LazyDev launcher refresh missing')
 if 'lazydev-help.txt' not in sh or 'Lazy Developer command surface is stale' not in sh:
@@ -110,11 +111,12 @@ if 'Install-CodexOfficial' not in ps or 'codex-package-$target.tar.gz' not in ps
     errors.append('install.ps1: official Codex release installer missing')
 if 'Test-LazyDevSetupReady' in ps or 'Setting up Lazy Developer before AI UIs' in ps or 'Setup is ready before AI UI installation.' in ps:
     errors.append('install.ps1: installer must not run LazyDev setup during installation')
-for marker in ['Installing/updating RTK', 'Installing/updating Lazy Developer $LazyDevVersion', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']:
+for marker in ["Step 'RTK'", 'Step \"Installing/updating Lazy Developer $LazyDevVersion\"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']:
     if marker not in ps: errors.append(f'install.ps1: missing lifecycle step: {marker}')
 else:
-    order = [ps.index(x) for x in ['Installing/updating RTK', 'Installing/updating Lazy Developer $LazyDevVersion', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']]
+    order = [ps.index(x) for x in ["Step 'RTK'", 'Step "Installing/updating Lazy Developer $LazyDevVersion"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI']]
     if order != sorted(order): errors.append('install.ps1: lifecycle order must be RTK → LazyDev → Kimi → Codex → Antigravity')
+    if ps.index("Step 'RTK'") > ps.index('Step \"Installing/updating Lazy Developer $LazyDevVersion\"'): errors.append('install.ps1: RTK lifecycle marker must precede LazyDev install')
 if 'Refresh-ActiveLazyDevLauncher' not in ps:
     errors.append('install.ps1: active LazyDev launcher refresh missing')
 if "$CodexInstalledPath = Join-Path $BinRoot 'codex.exe'" not in ps or 'official archive verified' not in ps:

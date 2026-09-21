@@ -5903,6 +5903,10 @@ function Get-RtkVersion([string]$Exe) {
     if (-not $Exe) { return '' }
     try { return Get-VersionFromText ((& $Exe --version 2>$null) -join "`n") } catch { return '' }
 }
+function Test-RtkTokenKiller([string]$Exe) {
+    if (-not $Exe) { return $false }
+    try { & $Exe gain *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
+}
 function Get-PythonCommand {
     foreach ($name in @('py.exe', 'python.exe', 'python3.exe')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -6329,12 +6333,13 @@ if ($AgyExe) {
 }
 
 $RtkExe = Find-Rtk
-$RtkCurrentVersion = Get-RtkVersion $RtkExe
+$RtkCurrentVersion = ''
 $RtkLatestVersion = ''
 $RtkNeedsUpdate = $true
 $RtkUpdateAvailable = $false
 if ($RtkExe) {
-    if ($RtkCurrentVersion) {
+    $RtkCurrentVersion = Get-RtkVersion $RtkExe
+    if ($RtkCurrentVersion -and (Test-RtkTokenKiller $RtkExe)) {
         $RtkLatestVersion = Get-RtkLatestVersion
         if ($RtkLatestVersion) {
             if (Test-VersionAtLeast $RtkCurrentVersion $RtkLatestVersion) {
@@ -6352,6 +6357,10 @@ if ($RtkExe) {
             $RtkNeedsUpdate = $false
             Write-Host "RTK $RtkCurrentVersion is installed; latest release could not be checked — skipped."
         }
+    } elseif ($RtkCurrentVersion) {
+        $RtkCurrentVersion = ''
+        $RtkUpdateAvailable = $true
+        Write-Host 'A different RTK package is installed — the Rust Token Killer will be installed by LazyDev.'
     } else {
         $RtkNeedsUpdate = $false
         $RtkUpdateAvailable = $false
@@ -6378,10 +6387,9 @@ if ($AgyUpdateAvailable) {
     $InstallAntigravity = Ask-InstallUi 'Install/update Antigravity?'
     if (-not $InstallAntigravity) { $AgyNeedsUpdate = $false; Write-Host 'Antigravity update/install declined — skipped.' }
 }
-if ($RtkUpdateAvailable) {
-    $InstallRtk = Ask-InstallUi 'Install/update RTK?'
-    if (-not $InstallRtk) { $RtkNeedsUpdate = $false; Write-Host 'RTK update/install declined — skipped.' }
-}
+# RTK is a required dependency for the Lazy Developer install lifecycle.
+# Keep the decision automatic: install it when missing/outdated/wrong, otherwise skip.
+if (-not $RtkNeedsUpdate) { $InstallRtk = $false } else { $InstallRtk = $true }
 
 # Clear the question screen before the actual install/update work.
 Clear-Host
@@ -6450,14 +6458,22 @@ if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Con
 # Installation order: collect all Y/n choices first, then RTK → Lazy Developer → selected UI(s).
 # Provider/model setup is intentionally skipped; use `lazydev setup` after installation.
 
-if ($InstallRtk -and $RtkNeedsUpdate) {
-    Step 'Installing/updating RTK'
+# Always render RTK first. A reinstall shows an explicit skipped state; a fresh or invalid
+# install repairs RTK before Lazy Developer starts.
+Step 'RTK'
+if ($RtkNeedsUpdate) {
+    Write-Host 'RTK is missing, outdated, or not the Rust Token Killer — installing the official RTK first.'
     Install-Rtk
     $env:Path = "$BinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
     $RtkExe = Find-Rtk
     if (-not $RtkExe) { Fail 'RTK did not install a usable launcher.' }
+    if (-not (Test-RtkTokenKiller $RtkExe)) { Fail 'Installed RTK is not the Rust Token Killer.' }
     $RtkCurrentVersion = Get-RtkVersion $RtkExe
+    if (-not $RtkCurrentVersion) { Fail 'Could not read the installed RTK version.' }
     Write-Host "✓ RTK $RtkCurrentVersion ready"
+} else {
+    $rtkDisplayVersion = if ($RtkCurrentVersion) { $RtkCurrentVersion } else { 'installed' }
+    Write-Host "✓ RTK $rtkDisplayVersion already current — skipped."
 }
 
 # Lazy Developer runtime is refreshed before the selected AI UIs.

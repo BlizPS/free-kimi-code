@@ -3245,8 +3245,14 @@ def _launch_codex(codex: str, proxy: _ProviderProxy, pc: dict[str, Any], workspa
         # fully supported. Keeping invocation minimal also makes resume use the
         # native picker exactly as the official CLI expects.
         args = ['resume'] if resume else []
+        command = [codex, *args]
+        # OpenAI's Codex repository has documented foreground-TTY TUI hangs on
+        # Android/Termux. Keep exec/version/login paths direct; only wrap the
+        # interactive LazyDev TUI in a stable tmux pseudo-terminal.
+        if IS_TERMUX and not os.environ.get('TMUX') and shutil.which('tmux') and sys.stdin.isatty() and sys.stdout.isatty():
+            command = ['tmux', '-f', '/dev/null', 'new-session', '-A', '-s', 'codex-lazydev', *command]
         try:
-            return subprocess.call([codex, *args], cwd=str(ARTIFACT_DIR), env=env)
+            return subprocess.call(command, cwd=str(ARTIFACT_DIR), env=env)
         except KeyboardInterrupt:
             return 130
     finally:

@@ -58,3 +58,8 @@ Kimi Code's current native installation flow does not provide a dedicated Androi
 LazyDev does not relocate official CLI application data into `lazydevfile` on desktop operating systems. Windows, Linux, and macOS keep Kimi, Codex, and Antigravity data in their normal user-home locations. The `lazydevfile` directory is for the shared visible workspace/artifacts.
 
 The only special storage exception is native Termux and Debian/Ubuntu through PRoot: visible artifacts use `/storage/emulated/0/lazydevfile`, while Codex keeps `CODEX_HOME` on the native Linux filesystem when needed for app-server locks, sockets, and related OS primitives.
+
+
+### Codex TUI on Android/Termux
+
+OpenAI currently documents Codex CLI for macOS, Ubuntu/Debian, and Windows via WSL2, rather than native Android. The upstream repository has reported foreground-terminal TUI hangs on Android/Termux. LazyDev keeps the official Codex binary unchanged and wraps only interactive TUI launches in a dedicated `tmux` session when available. `codex --version`, `codex exec`, authentication commands, and other non-TUI commands stay direct.
