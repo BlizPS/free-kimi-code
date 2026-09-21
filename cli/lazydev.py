@@ -46,6 +46,13 @@ KIMI_HOME = Path(_PLATFORM_PATHS["kimiHome"])
 # intentionally owns this path rather than inheriting stale environment values
 # from older LazyDev releases.
 ARTIFACT_DIR = Path(_PLATFORM_PATHS["artifactDirectory"])
+# The CLI UI helper is deliberately stored outside LAZYDEV_HOME. LazyDev updates
+# replace that managed source tree, so keeping node_modules there would make a
+# normal reinstall erase the working UI runtime.
+UI_RUNTIME_DIR = Path(os.environ.get("LAZYDEV_UI_RUNTIME", str(CONFIG_DIR / "ui-runtime")))
+UI_PACKAGE = "@poppinss/cliui"
+UI_PACKAGE_VERSION = "6.8.1"
+UI_HELPER = ROOT / "runtime" / "lazydev-ui.mjs"
 
 PROVIDERS: list[dict[str, Any]] = [
     {"id": "openrouter", "label": "OpenRouter", "kind": "openai", "models": "https://openrouter.ai/api/v1/models", "base": "https://openrouter.ai/api/v1", "env": "OPENROUTER_API_KEY"},
@@ -2586,6 +2593,121 @@ def find_antigravity() -> str | None:
     return None
 
 
+
+def _node_command() -> str | None:
+    for name in ("node", "nodejs") if not IS_WINDOWS else ("node.exe", "node"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def _npm_command() -> str | None:
+    names = ("npm.cmd", "npm") if IS_WINDOWS else ("npm",)
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def _ui_package_version() -> str:
+    pkg = UI_RUNTIME_DIR / "node_modules" / "@poppinss" / "cliui" / "package.json"
+    try:
+        data = json.loads(pkg.read_text(encoding="utf-8"))
+        return str(data.get("version") or "")
+    except (OSError, ValueError, TypeError):
+        return ""
+
+
+def _ui_package_healthy() -> bool:
+    if _ui_package_version() != UI_PACKAGE_VERSION:
+        return False
+    node = _node_command()
+    if not node:
+        return False
+    try:
+        probe = subprocess.run(
+            [node, "--input-type=module", "-e", "import('@poppinss/cliui').then(m=>{if(typeof m.cliui!=='function')process.exit(2)}).catch(()=>process.exit(3))"],
+            cwd=str(UI_RUNTIME_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        return probe.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _ui_runtime_healthy() -> bool:
+    return _ui_package_healthy() and (UI_RUNTIME_DIR / "lazydev-ui.mjs").is_file()
+
+
+def _copy_ui_helper() -> bool:
+    try:
+        UI_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        if UI_HELPER.is_file():
+            shutil.copy2(UI_HELPER, UI_RUNTIME_DIR / "lazydev-ui.mjs")
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def _ensure_ui_runtime(auto_install: bool = True, quiet: bool = False) -> bool:
+    """Ensure the optional CLI UI helper exists without making native chat depend on it."""
+    if _ui_package_healthy():
+        _copy_ui_helper()
+        return _ui_runtime_healthy()
+    if not auto_install:
+        return False
+    npm = _npm_command()
+    if not npm:
+        return False
+    try:
+        UI_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        package_json = UI_RUNTIME_DIR / "package.json"
+        package_json.write_text(json.dumps({
+            "name": "@blizps/lazydev-ui-runtime",
+            "private": True,
+            "dependencies": {UI_PACKAGE: UI_PACKAGE_VERSION},
+        }, indent=2) + "\n", encoding="utf-8")
+        proc = subprocess.run(
+            [npm, "install", "--no-package-lock", "--ignore-scripts", "--omit=dev"],
+            cwd=str(UI_RUNTIME_DIR),
+            stdout=subprocess.DEVNULL if quiet else None,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+        if proc.returncode != 0:
+            return False
+        _copy_ui_helper()
+        return _ui_runtime_healthy()
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _run_ui_helper(*args: str) -> int:
+    if not _ensure_ui_runtime(auto_install=True):
+        print("LazyDev CLI UI helper is unavailable. Native chat UIs remain usable; install Node.js/npm to enable ui-demo.", file=sys.stderr)
+        return 1
+    node = _node_command()
+    runtime_helper = UI_RUNTIME_DIR / "lazydev-ui.mjs"
+    if not node or not runtime_helper.is_file():
+        print("LazyDev CLI UI helper is unavailable.", file=sys.stderr)
+        return 1
+    env = dict(os.environ)
+    env["LAZYDEV_UI_RUNTIME"] = str(UI_RUNTIME_DIR)
+    try:
+        return subprocess.call([node, str(runtime_helper), *args], env=env, cwd=str(UI_RUNTIME_DIR))
+    except OSError as exc:
+        print(f"LazyDev CLI UI failed to start: {exc}", file=sys.stderr)
+        return 1
+
 def installed_chat_uis() -> list[tuple[str, str, str]]:
     items=[]
     if find_kimi(): items.append(("kimi", "Kimi Code", "kimi"))
@@ -3198,7 +3320,7 @@ def chat(sessions: bool = False, continue_session: bool = False, resume: bool = 
         return 1
     items=installed_chat_uis()
     if not items:
-        print("No AI UI is installed. Run the LazyDev installer and choose Kimi Code, Codex, or Antigravity.", file=sys.stderr)
+        print("No supported AI CLI was detected. Run the LazyDev installer and choose Kimi Code, Codex, or Antigravity. The optional CLI UI helper is separate from chat.", file=sys.stderr)
         return 1
     ui=choose_chat_ui(items)
     if not ui: return 1
@@ -3553,6 +3675,9 @@ def doctor() -> int:
             print(f"npm status    ERROR detected ({exc}) · native LazyDev does not require npm")
     else:
         print("npm           not installed · native LazyDev does not require npm")
+    ui_version = _ui_package_version()
+    ui_state = f"{ui_version} · ready" if _ui_runtime_healthy() else (f"{ui_version or 'missing'} · unavailable")
+    print(f"CLI UI        {ui_state}")
     return 0
 
 
@@ -3613,6 +3738,7 @@ def help_command() -> int:
         ("lazydev 3d <brief>", "Show the mandatory 3D reference/performance contract"),
         ("lazydev seo <brief>", "Show the SEO research and verification contract"),
         ("lazydev doctor", "Check installation and configuration"),
+        ("lazydev ui-demo", "Test the installed CLI UI runtime"),
         ("lazydev version", "Show installed version"),
     ]
     for command, description in rows:
@@ -3660,11 +3786,18 @@ def main(argv: list[str]) -> int:
     if cmd == "setup":
         return setup()
     if cmd == "chat":
+        # The optional @poppinss/cliui helper is preflighted and auto-healed when
+        # possible, but native Kimi/Codex/Antigravity chat never depends on it.
+        _ensure_ui_runtime(auto_install=True, quiet=True)
         return chat()
     if cmd == "resume":
+        _ensure_ui_runtime(auto_install=True, quiet=True)
         return chat(resume=True)
     if cmd == "continue":
+        _ensure_ui_runtime(auto_install=True, quiet=True)
         return chat(continue_session=True)
+    if cmd == "ui-demo":
+        return _run_ui_helper("demo")
     print(f"Unknown command: {cmd}", file=sys.stderr)
     return help_command() or 1
 

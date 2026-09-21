@@ -137,8 +137,11 @@ if 'for dir in "$HOME/.local/bin" "${PREFIX:-}/bin"' in sh:
     errors.append('install.sh: must not target /bin accidentally when PREFIX is unset')
 
 for name, text in [('install.sh', sh), ('install.ps1', ps)]:
-    if 'npm install' in text.lower() or 'npm.cmd install' in text.lower():
-        errors.append(f'{name}: installer must not install through npm')
+    lowered = text.lower()
+    if 'npm install' in lowered and '@poppinss/cliui' not in lowered:
+        errors.append(f'{name}: unexpected npm installation outside the isolated CLI UI runtime')
+    if 'npm.cmd install' in lowered and '@poppinss/cliui' not in lowered:
+        errors.append(f'{name}: unexpected npm.cmd installation outside the isolated CLI UI runtime')
     if 'Installing private Node.js' in text or 'install_private_node' in text or 'nodejs.org/dist' in text or 'NODE_BASE_URL' in text:
         errors.append(f'{name}: private Node.js installation/download must not be present')
     if 'NODE_BIN="$(command -v node' in text or 'node.exe "%LAZYDEV_ROOT%' in text:
@@ -164,7 +167,7 @@ if not cli.is_file(): errors.append('native Python CLI missing at cli/lazydev.py
 else:
     cli_text = cli.read_text(encoding='utf-8')
     if not cli_text.startswith('#!/usr/bin/env python3'): errors.append('native CLI must use Python shebang')
-    if 'process.versions' in cli_text or 'node.exe' in cli_text or 'node:child_process' in cli_text: errors.append('native CLI contains Node runtime logic')
+    if 'process.versions' in cli_text or 'node:child_process' in cli_text or 'child_process.exec' in cli_text: errors.append('native CLI contains Node runtime logic')
 if 'scripts/lazydev.mjs' in sh or 'scripts\\lazydev.mjs' in ps:
     # The source remains bundled for plugin/development hosts, but installers must never invoke it.
     pass
@@ -193,3 +196,14 @@ if errors:
     print('\n'.join('ERROR: '+e for e in errors))
     raise SystemExit(1)
 print('PASS: installers, selective update logic, repository URLs, and provider naming are consistent')
+
+
+# Regression checks for the persistent optional CLI UI runtime.
+repo = Path(__file__).resolve().parents[1]
+cli_text = (repo / 'cli' / 'lazydev.py').read_text(encoding='utf-8')
+assert '@poppinss/cliui' in cli_text
+assert 'UI_RUNTIME_DIR' in cli_text
+assert 'lazydev-ui.mjs' in cli_text
+assert (repo / 'runtime' / 'lazydev-ui.mjs').is_file()
+assert 'local-${' in (repo / 'install.sh').read_text(encoding='utf-8') or 'local-' in (repo / 'install.sh').read_text(encoding='utf-8')
+assert 'local-' in (repo / 'install.ps1').read_text(encoding='utf-8')
