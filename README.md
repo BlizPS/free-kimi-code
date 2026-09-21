@@ -186,13 +186,17 @@ npx skills add BlizPS/free-kimi-code --all
 
 To remove Lazy Developer and the CLIs managed by its installer, run the matching uninstaller. This removes LazyDev-managed configuration, sessions, caches, and launcher files; your project folders and unrelated files are left untouched.
 
-### macOS / Linux
+### macOS / Linux / Termux Linux
+
+Run directly from GitHub:
 
 ```sh
 curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/uninstall.sh" | sh
 ```
 
 ### Windows PowerShell
+
+Run directly from GitHub:
 
 ```powershell
 iwr "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/uninstall.ps1" -UseBasicParsing | iex

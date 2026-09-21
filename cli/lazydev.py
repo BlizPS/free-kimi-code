@@ -49,6 +49,10 @@ ARTIFACT_DIR = Path(_PLATFORM_PATHS["artifactDirectory"])
 # The CLI UI helper is deliberately stored outside LAZYDEV_HOME. LazyDev updates
 # replace that managed source tree, so keeping node_modules there would make a
 # normal reinstall erase the working UI runtime.
+INSTALL_STATE_FILE = Path(os.environ.get(
+    "LAZYDEV_INSTALL_STATE_FILE",
+    str(Path(os.environ.get("XDG_STATE_HOME", str(HOME / ".local" / "state"))) / "lazydev" / "install-state"),
+))
 UI_RUNTIME_DIR = Path(os.environ.get("LAZYDEV_UI_RUNTIME", str(CONFIG_DIR / "ui-runtime")))
 UI_PACKAGE = "@poppinss/cliui"
 UI_PACKAGE_VERSION = "6.8.1"
@@ -632,20 +636,171 @@ def setup() -> int:
     return 0
 
 
-def find_kimi() -> str | None:
-    candidates = []
-    if IS_WINDOWS:
-        candidates += [str(HOME / ".kimi-code/bin/kimi.exe"), str(HOME / ".local/bin/kimi.exe"), str(HOME / ".local/bin/kimi.cmd")]
+def _load_install_state() -> dict[str, str]:
+    """Read installer-owned component paths without requiring PATH setup.
+
+    Linux/macOS/Termux installers use a tiny key=value file; Windows uses JSON.
+    The detector accepts both so a CLI can resolve its real executable even in a
+    fresh shell where the install directory has not been exported to PATH.
+    """
+    try:
+        if not INSTALL_STATE_FILE.is_file():
+            return {}
+        raw = INSTALL_STATE_FILE.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return {}
+
+    stripped = raw.lstrip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+            if isinstance(data, dict):
+                return {str(k): str(v) for k, v in data.items() if v is not None and str(v).strip()}
+        except (ValueError, TypeError):
+            pass
+
+    state: dict[str, str] = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        value = value.strip()
+        if value:
+            state[key.strip()] = value
+    return state
+
+
+def _state_command(state: dict[str, str], key: str) -> str | None:
+    value = str(state.get(key, "")).strip()
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_file():
+        return None
+    if IS_WINDOWS or os.access(path, os.X_OK):
+        return str(path)
+    return None
+
+
+def _state_bin_dirs(state: dict[str, str]) -> list[Path]:
+    keys = ("bin_dir", "kimi_bin_dir", "codex_bin_dir", "rtk_bin_dir")
+    dirs: list[Path] = []
+    for key in keys:
+        raw = str(state.get(key, "")).strip()
+        if not raw:
+            continue
+        path = Path(raw).expanduser()
+        if path not in dirs:
+            dirs.append(path)
+    return dirs
+
+
+def _resolve_from_dirs(names: tuple[str, ...], dirs: list[Path]) -> str | None:
+    for directory in dirs:
+        for name in names:
+            candidate = directory / name
+            if candidate.is_file() and (IS_WINDOWS or os.access(candidate, os.X_OK)):
+                return str(candidate)
+    return None
+
+
+def _apply_persisted_ui_runtime() -> None:
+    """Honor the installer-persisted UI runtime directory across shell restarts."""
+    global UI_RUNTIME_DIR
+    if os.environ.get("LAZYDEV_UI_RUNTIME"):
+        return
+    state = _load_install_state()
+    saved = str(state.get("ui_runtime_dir", "")).strip()
+    if saved:
+        UI_RUNTIME_DIR = Path(saved).expanduser()
+
+
+_apply_persisted_ui_runtime()
+
+
+def _command_env_with_managed_bins() -> dict[str, str]:
+    """Build a child-process env whose PATH includes every persisted UI bin."""
+    state = _load_install_state()
+    dirs = _state_bin_dirs(state)
+    dirs.extend([HOME / ".local" / "bin", HOME / ".cargo" / "bin", HOME / ".kimi-code" / "bin"])
+    if IS_TERMUX:
+        prefix = os.environ.get("PREFIX")
+        if prefix:
+            dirs.append(Path(prefix) / "bin")
+    if not IS_WINDOWS:
+        existing = os.environ.get("PATH", "")
+        parts = [str(p) for p in dirs if p]
+        parts.extend(existing.split(os.pathsep) if existing else [])
+        deduped = list(dict.fromkeys(parts))
     else:
-        candidates += [str(HOME / ".kimi-code/bin/kimi"), str(HOME / ".local/bin/kimi")]
-    for candidate in candidates:
-        if Path(candidate).is_file():
-            return candidate
-    for name in ("kimi.exe", "kimi.cmd", "kimi") if IS_WINDOWS else ("kimi",):
-        found = shutil.which(name)
+        existing = os.environ.get("PATH", "")
+        parts = [str(p) for p in dirs if p]
+        parts.extend(existing.split(os.pathsep) if existing else [])
+        deduped = list(dict.fromkeys(parts))
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join(deduped)
+    return env
+
+
+def _managed_which(name: str) -> str | None:
+    state = _load_install_state()
+    env = _command_env_with_managed_bins()
+    found = shutil.which(name, path=env.get("PATH"))
+    if found:
+        return found
+    suffixes = (".exe", ".cmd") if IS_WINDOWS else ()
+    names = tuple(dict.fromkeys((name, *(f"{name}{s}" for s in suffixes))))
+    return _resolve_from_dirs(names, _state_bin_dirs(state))
+
+
+def find_kimi() -> str | None:
+    state = _load_install_state()
+    exact = _state_command(state, "kimi_command")
+    if exact:
+        return exact
+
+    names = ("kimi.exe", "kimi.cmd", "kimi") if IS_WINDOWS else ("kimi",)
+    managed = _resolve_from_dirs(names, [
+        *[Path(v).expanduser() for k, v in state.items() if k == "kimi_bin_dir" and v],
+        HOME / ".kimi-code" / "bin",
+        HOME / ".local" / "bin",
+        HOME / ".local" / "share" / "lazydev",
+    ])
+    if managed:
+        return managed
+    return _managed_which("kimi")
+
+
+def _find_managed_cli(command_name: str, state_key: str, extra_names: tuple[str, ...], extra_dirs: list[Path]) -> str | None:
+    state = _load_install_state()
+    exact = _state_command(state, state_key)
+    if exact:
+        return exact
+    names = tuple(dict.fromkeys((command_name, *extra_names)))
+    dirs = [*extra_dirs, *_state_bin_dirs(state), HOME / ".local" / "bin", HOME / ".local" / "share" / "lazydev"]
+    managed = _resolve_from_dirs(names, dirs)
+    if managed:
+        return managed
+    for name in names:
+        found = _managed_which(name)
         if found:
             return found
     return None
+
+
+def find_codex() -> str | None:
+    names = ("codex.exe", "codex.cmd", "codex") if IS_WINDOWS else ("codex",)
+    return _find_managed_cli("codex", "codex_command", names[1:], [
+        HOME / ".codex" / "bin",
+        HOME / ".local" / "bin",
+    ])
+
+
+def find_antigravity() -> str | None:
+    names = ("agy.exe", "agy.cmd", "agy") if IS_WINDOWS else ("agy",)
+    extra = [HOME / "AppData" / "Local" / "agy" / "bin"] if IS_WINDOWS else [HOME / ".local" / "bin"]
+    return _find_managed_cli("agy", "antigravity_command", names[1:], extra)
 
 
 def toml_quote(value: str) -> str:
@@ -2569,43 +2724,20 @@ def write_runtime_system(provider: dict[str, Any], model: str) -> None:
     (KIMI_HOME / "SYSTEM.md").write_text(base.rstrip() + "\n\n" + "\n".join(additions) + "\n", encoding="utf-8")
 
 
-def find_codex() -> str | None:
-    names = ("codex.exe", "codex.cmd", "codex") if IS_WINDOWS else ("codex",)
-    for name in names:
-        found = shutil.which(name)
-        if found:
-            return found
-    return None
-
-
-def find_antigravity() -> str | None:
-    names = ("agy.exe", "agy.cmd", "agy") if IS_WINDOWS else ("agy",)
-    candidates = []
-    for name in names:
-        found = shutil.which(name)
-        if found: return found
-    if IS_WINDOWS:
-        candidates += [str(HOME / "AppData/Local/agy/bin/agy.exe")]
-    else:
-        candidates += [str(HOME / ".local/bin/agy")]
-    for candidate in candidates:
-        if Path(candidate).is_file(): return candidate
-    return None
-
-
-
 def _node_command() -> str | None:
+    env = _command_env_with_managed_bins()
     for name in ("node", "nodejs") if not IS_WINDOWS else ("node.exe", "node"):
-        found = shutil.which(name)
+        found = shutil.which(name, path=env.get("PATH"))
         if found:
             return found
     return None
 
 
 def _npm_command() -> str | None:
+    env = _command_env_with_managed_bins()
     names = ("npm.cmd", "npm") if IS_WINDOWS else ("npm",)
     for name in names:
-        found = shutil.which(name)
+        found = shutil.which(name, path=env.get("PATH"))
         if found:
             return found
     return None
@@ -3378,6 +3510,7 @@ def chat(sessions: bool = False, continue_session: bool = False, resume: bool = 
     output_fraction = 0.20 if context <= 8192 else 0.25 if context <= 131072 else 0.20
     safe_output = max(256, min(output, max(256, int(context * output_fraction)), CONTEXT_ABSOLUTE_OUTPUT_CAP))
     env = _clean_ui_env()
+    env.update({k: v for k, v in _command_env_with_managed_bins().items() if k == "PATH"})
     env["KIMI_CODE_HOME"] = str(KIMI_HOME)
     env["KIMI_LOOP_MAX_STEPS_PER_TURN"] = "0"
     env["LAZYDEV_ARTIFACT_DIR"] = str(ARTIFACT_DIR)

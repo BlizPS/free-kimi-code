@@ -6333,24 +6333,45 @@ get_remote_revision() {
 
 TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t lazydev)"
 # Component-specific paths are persisted so update/reinstall checks are not
-# coupled to the current shell PATH. The files are tiny shell-compatible state.
+# coupled to the current shell PATH. The state also records exact executable
+# paths so fresh shells can launch the same files directly.
+SAVED_RTK_COMMAND=""
+SAVED_CODEX_COMMAND=""
+SAVED_KIMI_COMMAND=""
+SAVED_AGY_COMMAND=""
+SAVED_UI_RUNTIME_DIR=""
 load_install_state() {
   [ -f "$LAZYDEV_STATE_FILE" ] || return 0
   saved_rtk_bin="$(sed -n 's/^rtk_bin_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
   saved_codex_bin="$(sed -n 's/^codex_bin_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  saved_kimi_bin="$(sed -n 's/^kimi_bin_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  SAVED_RTK_COMMAND="$(sed -n 's/^rtk_command=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  SAVED_CODEX_COMMAND="$(sed -n 's/^codex_command=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  SAVED_KIMI_COMMAND="$(sed -n 's/^kimi_command=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  SAVED_AGY_COMMAND="$(sed -n 's/^antigravity_command=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  SAVED_UI_RUNTIME_DIR="$(sed -n 's/^ui_runtime_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
   case "$saved_rtk_bin" in /*) [ -n "$saved_rtk_bin" ] && RTK_BIN_DIR="$saved_rtk_bin";; esac
   case "$saved_codex_bin" in /*) [ -n "$saved_codex_bin" ] && CODEX_BIN_DIR="$saved_codex_bin";; esac
+  case "$saved_kimi_bin" in /*) [ -n "$saved_kimi_bin" ] && KIMI_BIN_DIR="$saved_kimi_bin";; esac
+  if [ -z "${LAZYDEV_UI_RUNTIME:-}" ] && [ -n "$SAVED_UI_RUNTIME_DIR" ]; then
+    LAZYDEV_UI_HOME="$SAVED_UI_RUNTIME_DIR"
+  fi
 }
 
 write_install_state() {
   mkdir -p "$LAZYDEV_STATE_HOME" 2>/dev/null || return 0
   tmp="$LAZYDEV_STATE_FILE.$$"
   {
-    printf 'version=1\n'
+    printf 'version=2\n'
     printf 'bin_dir=%s\n' "$LAZYDEV_BIN_DIR"
     printf 'kimi_bin_dir=%s\n' "${KIMI_BIN_DIR:-${KIMI_CODE_HOME:-$HOME/.kimi-code}/bin}"
     printf 'rtk_bin_dir=%s\n' "${RTK_BIN_DIR:-$LAZYDEV_BIN_DIR}"
     printf 'codex_bin_dir=%s\n' "${CODEX_BIN_DIR:-$LAZYDEV_BIN_DIR}"
+    printf 'kimi_command=%s\n' "${KIMI_COMMAND:-}"
+    printf 'codex_command=%s\n' "${CODEX_COMMAND:-}"
+    printf 'antigravity_command=%s\n' "${AGY_COMMAND:-}"
+    printf 'rtk_command=%s\n' "${RTK_COMMAND:-}"
+    printf 'ui_runtime_dir=%s\n' "${LAZYDEV_UI_HOME:-}"
   } > "$tmp"
   mv -f "$tmp" "$LAZYDEV_STATE_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
 }
@@ -6363,9 +6384,15 @@ cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT INT TERM HUP
 
 find_kimi() {
-  for candidate in     "${KIMI_BIN_DIR:-}/kimi"     "${KIMI_CODE_HOME:-$HOME/.kimi-code}/bin/kimi"     "$HOME/.kimi-code/bin/kimi"     "$LAZYDEV_BIN_DIR/kimi"     "$HOME/.local/share/lazydev/kimi"     "$HOME/.local/bin/kimi"; do
-    if [ -n "$candidate" ] && [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
+  # PATH is only a fallback. Persisted exact paths and known managed directories
+  # are authoritative so a fresh shell can launch the installed CLI directly.
+  for candidate in "${KIMI_COMMAND:-}" "$SAVED_KIMI_COMMAND" "${KIMI_BIN_DIR:-}/kimi" "${KIMI_CODE_HOME:-$HOME/.kimi-code}/bin/kimi" "$HOME/.kimi-code/bin/kimi" "$LAZYDEV_BIN_DIR/kimi" "$HOME/.local/share/lazydev/kimi" "$HOME/.local/bin/kimi"; do
+    if [ -n "$candidate" ] && { [ -x "$candidate" ] || [ -f "$candidate" ]; }; then printf '%s\n' "$candidate"; return 0; fi
   done
+  if [ -n "${PREFIX:-}" ] && { [ -x "$PREFIX/bin/kimi" ] || [ -f "$PREFIX/bin/kimi" ]; }; then
+    printf '%s\n' "$PREFIX/bin/kimi"
+    return 0
+  fi
   if command -v kimi >/dev/null 2>&1; then
     command -v kimi
     return 0
@@ -6374,26 +6401,31 @@ find_kimi() {
 }
 
 find_codex() {
-  # Resolve the managed location first, then common historical locations.
-  # PATH is deliberately not the sole source of truth.
-  for candidate in \
+  for candidate in "${CODEX_COMMAND:-}" "$SAVED_CODEX_COMMAND" \
     "$CODEX_BIN_DIR/codex" "$CODEX_BIN_DIR/codex.bin" \
     "$LAZYDEV_BIN_DIR/codex" "$LAZYDEV_BIN_DIR/codex.bin" \
     "$HOME/.local/share/lazydev/codex" "$HOME/.local/share/lazydev/codex.bin" \
-    "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.cmd" \
-    ${PREFIX:+"$PREFIX/bin/codex" "$PREFIX/bin/codex.bin"}; do
-    if [ -x "$candidate" ] || [ -f "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
+    "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.cmd"; do
+    if [ -n "$candidate" ] && { [ -x "$candidate" ] || [ -f "$candidate" ]; }; then printf '%s\n' "$candidate"; return 0; fi
   done
+  if [ -n "${PREFIX:-}" ]; then
+    for candidate in "$PREFIX/bin/codex" "$PREFIX/bin/codex.bin"; do
+      if [ -x "$candidate" ] || [ -f "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
+    done
+  fi
+  if command -v codex >/dev/null 2>&1; then command -v codex; return 0; fi
   return 1
 }
 
 find_antigravity() {
-  # Prefer the exact `agy` executable the current shell would run.
-  # This avoids a stale ~/.local/bin/agy shadowing a newer package-managed copy.
-  command -v agy 2>/dev/null && return 0
-  for candidate in "$HOME/.local/bin/agy"; do
-    if [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
+  for candidate in "${AGY_COMMAND:-}" "$SAVED_AGY_COMMAND" "$HOME/.local/bin/agy" "$HOME/.local/share/lazydev/agy"; do
+    if [ -n "$candidate" ] && { [ -x "$candidate" ] || [ -f "$candidate" ]; }; then printf '%s\n' "$candidate"; return 0; fi
   done
+  if [ -n "${PREFIX:-}" ] && { [ -x "$PREFIX/bin/agy" ] || [ -f "$PREFIX/bin/agy" ]; }; then
+    printf '%s\n' "$PREFIX/bin/agy"
+    return 0
+  fi
+  if command -v agy >/dev/null 2>&1; then command -v agy; return 0; fi
   return 1
 }
 
@@ -6414,21 +6446,25 @@ ask_install_ui() {
 }
 
 find_rtk() {
-  # Prefer LazyDev-managed locations so a stale/wrong global `rtk` cannot
-  # shadow the verified Rust Token Killer installation.
+  # Prefer the persisted exact Rust Token Killer path, then managed locations.
+  # This prevents PATH changes or a new terminal from triggering a reinstall.
   for candidate in \
+    "${RTK_COMMAND:-}" "$SAVED_RTK_COMMAND" \
     "${RTK_BIN_DIR:-}/rtk" \
     "${LAZYDEV_BIN_DIR:-}/rtk" \
     "$HOME/.local/share/lazydev/rtk" \
     "$HOME/.local/share/lazydev/bin/rtk" \
     "$HOME/.local/bin/rtk" \
-    ${PREFIX:+"$PREFIX/bin/rtk"} \
     "$HOME/.cargo/bin/rtk"; do
     if [ -n "$candidate" ] && [ -x "$candidate" ]; then
       printf '%s\n' "$candidate"
       return 0
     fi
   done
+  if [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/rtk" ]; then
+    printf '%s\n' "$PREFIX/bin/rtk"
+    return 0
+  fi
   if command -v rtk >/dev/null 2>&1; then
     command -v rtk
     return 0
@@ -6953,6 +6989,7 @@ if [ "$RTK_NEEDS_UPDATE" -eq 1 ]; then
   RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
   [ -n "$RTK_CURRENT_VERSION" ] || fatal "Could not read the installed RTK version."
   say "✓ RTK $RTK_CURRENT_VERSION ready"
+  write_install_state
 else
   say "✓ RTK ${RTK_CURRENT_VERSION:-installed} already current — skipped."
 fi
@@ -7145,6 +7182,7 @@ if [ "$INSTALL_KIMI" -eq 1 ] && [ "$KIMI_NEEDS_UPDATE" -eq 1 ]; then
   [ -n "$KIMI_CURRENT_VERSION" ] || fatal "Could not read the installed Kimi Code version."
   if [ -n "$KIMI_LATEST_VERSION" ] && ! version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_LATEST_VERSION"; then fatal "Installed Kimi Code is $KIMI_CURRENT_VERSION; latest detected release is $KIMI_LATEST_VERSION."; fi
   say "✓ Kimi Code $KIMI_CURRENT_VERSION ready"
+  write_install_state
 fi
 
 if [ "$INSTALL_CODEX" -eq 1 ] && [ "$CODEX_NEEDS_UPDATE" -eq 1 ]; then
@@ -7175,6 +7213,7 @@ if [ "$INSTALL_CODEX" -eq 1 ] && [ "$CODEX_NEEDS_UPDATE" -eq 1 ]; then
   else
     say "✓ Codex $CODEX_CURRENT_VERSION ready: $CODEX_COMMAND"
   fi
+  write_install_state
 fi
 
 if [ "$INSTALL_ANTIGRAVITY" -eq 1 ] && [ "$AGY_NEEDS_UPDATE" -eq 1 ]; then
@@ -7193,6 +7232,7 @@ if [ "$INSTALL_ANTIGRAVITY" -eq 1 ] && [ "$AGY_NEEDS_UPDATE" -eq 1 ]; then
   AGY_COMMAND="$(find_antigravity 2>/dev/null || true)"
   [ -n "$AGY_COMMAND" ] || fatal "Antigravity did not install a usable launcher."
   say "✓ Antigravity ready: $AGY_COMMAND"
+  write_install_state
 fi
 
 
@@ -7217,7 +7257,7 @@ if [ "$RTK_CONNECT_NEEDED" -ne 0 ]; then
 elif [ -n "$RTK_COMMAND" ]; then
   say "RTK Kimi integration already current — skipped."
 fi
-
+write_install_state
 
 
 # Keep the terminal summary last so setup/install ordering is unambiguous.

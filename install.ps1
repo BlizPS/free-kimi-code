@@ -41,6 +41,11 @@ if (-not $env:LAZYDEV_BIN_DIR -and -not (Test-Path -LiteralPath $StateFile -Path
         }
     }
 }
+$PersistedKimiCommand = ''
+$PersistedCodexCommand = ''
+$PersistedAntigravityCommand = ''
+$PersistedRtkCommand = ''
+$PersistedUiRuntimeDir = ''
 if (-not $env:LAZYDEV_BIN_DIR -and (Test-Path -LiteralPath $StateFile -PathType Leaf)) {
     try {
         $state = Get-Content -Raw -LiteralPath $StateFile | ConvertFrom-Json
@@ -48,10 +53,15 @@ if (-not $env:LAZYDEV_BIN_DIR -and (Test-Path -LiteralPath $StateFile -PathType 
         if ($state.kimi_bin_dir) { $KimiBinRoot = [string]$state.kimi_bin_dir }
         if ($state.rtk_bin_dir) { $RtkBinRoot = [string]$state.rtk_bin_dir }
         if ($state.codex_bin_dir) { $CodexBinRoot = [string]$state.codex_bin_dir }
+        if ($state.kimi_command) { $PersistedKimiCommand = [string]$state.kimi_command }
+        if ($state.codex_command) { $PersistedCodexCommand = [string]$state.codex_command }
+        if ($state.antigravity_command) { $PersistedAntigravityCommand = [string]$state.antigravity_command }
+        if ($state.rtk_command) { $PersistedRtkCommand = [string]$state.rtk_command }
+        if ($state.ui_runtime_dir) { $PersistedUiRuntimeDir = [string]$state.ui_runtime_dir }
     } catch {}
 }
 $KimiRuntimeHome = Join-Path $ConfigRoot 'kimi-code'
-$LazyDevUiHome = if ($env:LAZYDEV_UI_RUNTIME) { $env:LAZYDEV_UI_RUNTIME } else { Join-Path $ConfigRoot 'ui-runtime' }
+$LazyDevUiHome = if ($env:LAZYDEV_UI_RUNTIME) { $env:LAZYDEV_UI_RUNTIME } elseif ($PersistedUiRuntimeDir) { $PersistedUiRuntimeDir } else { Join-Path $ConfigRoot 'ui-runtime' }
 $LazyDevUiPackage = '@poppinss/cliui'
 $LazyDevUiVersion = '6.8.1'
 $EmbeddedLazyDevPayload = @'
@@ -5870,8 +5880,18 @@ function Fail([string]$Message) { throw $Message }
 function Write-InstallState {
     try {
         New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
-        [ordered]@{ version = 1; bin_dir = $BinRoot; kimi_bin_dir = $KimiBinRoot; rtk_bin_dir = $RtkBinRoot; codex_bin_dir = $CodexBinRoot } |
-            ConvertTo-Json | Set-Content -LiteralPath $StateFile -Encoding UTF8
+        [ordered]@{
+            version = 2
+            bin_dir = $BinRoot
+            kimi_bin_dir = $KimiBinRoot
+            rtk_bin_dir = $RtkBinRoot
+            codex_bin_dir = $CodexBinRoot
+            kimi_command = $PersistedKimiCommand
+            codex_command = $PersistedCodexCommand
+            antigravity_command = $PersistedAntigravityCommand
+            rtk_command = $PersistedRtkCommand
+            ui_runtime_dir = $LazyDevUiHome
+        } | ConvertTo-Json | Set-Content -LiteralPath $StateFile -Encoding UTF8
     } catch {}
 }
 function Get-VersionFromText([string]$Text) {
@@ -5884,6 +5904,9 @@ function Test-VersionAtLeast([string]$Current, [string]$Required) {
 }
 function Find-Kimi {
     foreach ($candidate in @(
+        $PersistedKimiCommand,
+        (Join-Path $KimiBinRoot 'kimi.exe'),
+        (Join-Path $KimiBinRoot 'kimi.cmd'),
         (Join-Path $HOME '.kimi-code\bin\kimi.exe'),
         (Join-Path $BinRoot 'kimi.exe'),
         (Join-Path $BinRoot 'kimi.cmd'),
@@ -5891,7 +5914,7 @@ function Find-Kimi {
         (Join-Path $HOME '.local\bin\kimi.exe'),
         (Join-Path $HOME '.local\bin\kimi.cmd')
     )) {
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $candidate }
     }
     foreach ($name in @('kimi.exe','kimi.cmd','kimi')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -5905,24 +5928,29 @@ function Get-KimiVersion([string]$Exe) {
 }
 function Find-Codex {
     foreach ($candidate in @(
+        $PersistedCodexCommand,
         (Join-Path $CodexBinRoot 'codex.exe'), (Join-Path $CodexBinRoot 'codex.cmd'),
         (Join-Path $HOME '.local\share\lazydev\codex.exe'), (Join-Path $HOME '.local\share\lazydev\codex.cmd'),
         (Join-Path $HOME '.local\bin\codex.exe'), (Join-Path $HOME '.local\bin\codex.cmd')
     )) {
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $candidate }
     }
     $cmd = Get-Command codex.exe,codex.cmd,codex -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($cmd) { return $cmd.Source }
     return $null
 }
 function Find-Antigravity {
-    # Prefer the exact `agy` command currently resolved by PowerShell so a
-    # stale local binary cannot trigger a false update prompt.
+    foreach ($candidate in @(
+        $PersistedAntigravityCommand,
+        (Join-Path $env:LOCALAPPDATA 'agy\bin\agy.exe'),
+        (Join-Path $HOME '.local\bin\agy.exe'),
+        (Join-Path $BinRoot 'agy.exe'),
+        (Join-Path $BinRoot 'agy.cmd')
+    )) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $candidate }
+    }
     $cmd = Get-Command agy.exe,agy.cmd,agy -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($cmd) { return $cmd.Source }
-    foreach ($candidate in @((Join-Path $env:LOCALAPPDATA 'agy\bin\agy.exe'), (Join-Path $HOME '.local\bin\agy.exe'))) {
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
-    }
     return $null
 }
 function Ask-InstallUi([string]$Label) {
@@ -5933,11 +5961,12 @@ function Ask-InstallUi([string]$Label) {
 
 function Find-Rtk {
     foreach ($candidate in @(
+        $PersistedRtkCommand,
         (Join-Path $RtkBinRoot 'rtk.exe'),
         (Join-Path $HOME '.local\share\lazydev\rtk.exe'),
         (Join-Path $HOME '.local\bin\rtk.exe')
     )) {
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $candidate }
     }
     foreach ($name in @('rtk.exe','rtk')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -6520,6 +6549,7 @@ if ($RtkNeedsUpdate) {
     if (-not (Test-RtkTokenKiller $RtkExe)) { Fail 'Installed RTK is not the Rust Token Killer.' }
     $RtkCurrentVersion = Get-RtkVersion $RtkExe
     if (-not $RtkCurrentVersion) { Fail 'Could not read the installed RTK version.' }
+    $PersistedRtkCommand = $RtkExe
     Write-Host "✓ RTK $RtkCurrentVersion ready"
 } else {
     $rtkDisplayVersion = if ($RtkCurrentVersion) { $RtkCurrentVersion } else { 'installed' }
@@ -6655,6 +6685,7 @@ if ($InstallKimi -and $KimiNeedsUpdate) {
     if (-not $KimiExe) { Fail "Kimi Code did not install a usable launcher." }
     $KimiCurrentVersion = Get-KimiVersion $KimiExe
     if (-not $KimiCurrentVersion) { Fail 'Installed Kimi Code version could not be detected.' }
+    $PersistedKimiCommand = $KimiExe
     if ($KimiLatestVersion -and -not (Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion)) { Fail "Installed Kimi Code is $KimiCurrentVersion; latest detected release is $KimiLatestVersion." }
     Write-Host "✓ Kimi Code $KimiCurrentVersion ready"
 }
@@ -6669,6 +6700,7 @@ if ($InstallCodex -and $CodexNeedsUpdate) {
     $CodexExe = if (Test-Path -LiteralPath $CodexInstalledPath -PathType Leaf) { $CodexInstalledPath } else { Find-Codex }
     if (-not $CodexExe) { Fail 'Codex did not install a usable launcher.' }
     $CodexCurrentVersion = Get-VersionFromText ((& $CodexExe --version 2>$null) -join "`n")
+    $PersistedCodexCommand = $CodexExe
     if (-not $CodexCurrentVersion) {
         $CodexCurrentVersion = $CodexTargetVersion
         Write-Host "✓ Codex $CodexCurrentVersion ready (official archive verified)"
@@ -6696,6 +6728,7 @@ if ($InstallAntigravity -and $AgyNeedsUpdate) {
     $AgyExe = Find-Antigravity
     if (-not $AgyExe) { Fail 'Antigravity did not install a usable launcher.' }
     $AgyCurrentVersion = Get-VersionFromText ((& $AgyExe --version 2>$null) -join "`n")
+    $PersistedAntigravityCommand = $AgyExe
     if (-not $AgyCurrentVersion) { Fail 'Installed Antigravity version could not be detected.' }
     if ($AgyLatestVersion -and -not (Test-VersionAtLeast $AgyCurrentVersion $AgyLatestVersion)) { Fail "Installed Antigravity is $AgyCurrentVersion; latest detected release is $AgyLatestVersion." }
     Write-Host "✓ Antigravity CLI $AgyCurrentVersion ready"
@@ -6710,6 +6743,17 @@ $entries = @($entries | Where-Object { $_ -notin @($BinRoot, (Join-Path $HOME '.
 $entries = @($BinRoot, $CodexBinRoot, $RtkBinRoot, (Join-Path $HOME '.kimi-code\bin')) + $entries
 [Environment]::SetEnvironmentVariable('Path', ($entries | Select-Object -Unique) -join ';', 'User')
 $env:Path = (($entries | Select-Object -Unique) -join ';')
+
+# Re-resolve installed components and persist their exact executable paths so
+# LazyDev does not depend on the current PowerShell session's PATH.
+$resolvedRtk = Find-Rtk
+if ($resolvedRtk) { $PersistedRtkCommand = $resolvedRtk }
+$resolvedKimi = Find-Kimi
+if ($resolvedKimi) { $PersistedKimiCommand = $resolvedKimi }
+$resolvedCodex = Find-Codex
+if ($resolvedCodex) { $PersistedCodexCommand = $resolvedCodex }
+$resolvedAgy = Find-Antigravity
+if ($resolvedAgy) { $PersistedAntigravityCommand = $resolvedAgy }
 
 # Actual installation order: RTK → Lazy Developer → selected UI(s).
 
@@ -6762,6 +6806,8 @@ function Refresh-ExistingLazyDevLaunchers {
         } catch {}
     }
 }
+
+Write-InstallState
 
 Write-Host ''
 Write-Host 'Lazy Developer installer finished.'
