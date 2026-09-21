@@ -144,7 +144,7 @@ tiktok2.html
 
 LazyDev keeps the official Codex executable at its normal `codex` path. It no longer replaces `codex` with a tmux wrapper, so running `codex` directly invokes the real upstream binary. Older LazyDev installations that used `codex.bin` plus a tmux shadow launcher are automatically repaired during reinstall/update.
 
-For Android/Termux environments where a specific Codex release still has the historical foreground-TTY issue, the tmux compatibility path remains available as an explicit opt-in for LazyDev: `LAZYDEV_CODEX_USE_TMUX=1 lazydev chat`. This is intentionally not the default because Codex also has separate tmux/TUI issues in some releases.
+LazyDev does not wrap Codex in tmux. On Android/Termux, `lazydev chat` launches the official Codex executable directly so behavior matches `codex` as closely as possible. If a particular upstream Codex release has a foreground-terminal issue on Android/Termux, that is an upstream compatibility limitation rather than a LazyDev wrapper.
 
 ### 🌐 Search & Browser Resilience
 

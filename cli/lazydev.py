@@ -3624,17 +3624,9 @@ def _launch_codex(codex: str, proxy: _ProviderProxy, pc: dict[str, Any], workspa
         # native picker exactly as the official CLI expects.
         args = ['resume'] if resume else []
         command = [codex, *args]
-        # Launch the real Codex executable directly. Older LazyDev builds
-        # shadowed `codex` with a tmux wrapper on Termux, which made even a
-        # normal `codex` command unexpectedly open a tmux session. That wrapper
-        # is intentionally gone; the official binary must remain transparent.
-        # An explicit LAZYDEV_CODEX_USE_TMUX=1 opt-in can still be used as a
-        # compatibility fallback on Android if a particular upstream build
-        # exhibits the historical foreground-TTY issue.
-        if (IS_TERMUX and os.environ.get('LAZYDEV_CODEX_USE_TMUX') == '1'
-                and not os.environ.get('TMUX') and shutil.which('tmux')
-                and sys.stdin.isatty() and sys.stdout.isatty()):
-            command = ['tmux', '-f', '/dev/null', 'new-session', '-A', '-s', 'codex-lazydev', *command]
+        # Always launch the resolved official Codex executable directly.
+        # LazyDev must never wrap Codex in tmux or replace the canonical
+        # `codex` command with a compatibility launcher.
         try:
             return subprocess.call(command, cwd=str(ARTIFACT_DIR), env=env)
         except KeyboardInterrupt:

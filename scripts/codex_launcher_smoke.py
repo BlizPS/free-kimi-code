@@ -18,23 +18,25 @@ def main() -> None:
     shell = INSTALL.read_text(encoding="utf-8")
     lazy = LAZY.read_text(encoding="utf-8")
 
-    if "write_codex_android_wrapper" in shell:
-        fail("install.sh still contains the old Android Codex wrapper implementation")
+    if "LAZYDEV_CODEX_USE_TMUX" in lazy:
+        fail("LazyDev still exposes a tmux Codex fallback")
+    if "new-session" in lazy or "codex-lazydev" in lazy:
+        fail("LazyDev still contains an active tmux Codex launcher")
+    if "tmux is not installed; launching directly" in shell:
+        fail("installer still contains the old tmux launcher message")
     if 'mv -f "$temp_binary" "$CODEX_BIN_DIR/codex"' not in shell:
         fail("official Codex archive is not installed at the canonical codex path")
-    if "LAZYDEV_CODEX_USE_TMUX" not in lazy:
-        fail("LazyDev is missing the explicit tmux compatibility opt-in")
-    if "new-session" not in lazy or "LAZYDEV_CODEX_USE_TMUX" not in lazy:
-        fail("LazyDev lost its optional tmux fallback")
+    if "restore_codex_from_legacy_wrapper" not in shell:
+        fail("legacy Codex wrapper migration is missing")
 
     start = shell.index("restore_codex_from_legacy_wrapper() {")
-    end = shell.index("\n}\n", start) + 3
+    end = shell.index("\n}\n\ninstall_codex_official()", start) + 2
     fn = shell[start:end]
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         wrapper = root / "codex"
         real = root / "codex.bin"
-        wrapper.write_text("#!/bin/sh\necho 'Codex TUI compatibility: tmux'\n", encoding="utf-8")
+        wrapper.write_text("#!/bin/sh\necho 'Codex TUI compatibility: tmux is not installed; launching directly.'\n", encoding="utf-8")
         wrapper.chmod(0o755)
         real.write_text("#!/bin/sh\necho 'codex-cli 0.155.1'\n", encoding="utf-8")
         real.chmod(0o755)
@@ -52,7 +54,7 @@ grep -q 'codex-cli 0.155.1' "$CODEX_BIN_DIR/codex"
 """.replace("__ROOT__", qroot).replace("__FN__", fn)
         subprocess.run(["sh", "-c", script], check=True)
 
-    print("PASS: Codex stays canonical, legacy tmux shadow launchers are repaired, and LazyDev tmux is opt-in")
+    print("PASS: Codex is direct-only; legacy tmux shadow launchers are repaired to the official binary")
 
 
 if __name__ == "__main__":
