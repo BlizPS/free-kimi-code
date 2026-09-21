@@ -47,7 +47,6 @@ checks += [
     ('install.sh', 'native Python CLI', sh),
     ('install.ps1', 'The LazyDev CLI is native Python', ps),
     ('install.sh', 'glibc Linux userland', sh),
-    ('install.sh', 'LAZYDEV_BIN_DIR=\"${LAZYDEV_BIN_DIR:-${PREFIX:-$HOME/.local}/bin}\"', sh),
     ('install.sh', 'if [ -L \"$LAZYDEV_LAUNCHER\" ]; then rm -f \"$LAZYDEV_LAUNCHER\"; fi', sh),
     ('uninstall.sh', '/storage/emulated/0/lazydevfile', (ROOT/'uninstall.sh').read_text(encoding='utf-8')),
 ]
@@ -72,12 +71,38 @@ if 'LAZYDEV_STATUS_MESSAGE=""' not in sh:
 for name, needle, text in checks:
     if needle not in text: errors.append(f'{name}: missing {needle}')
 
+
+state_needles = [
+    'LAZYDEV_STATE_FILE',
+    'load_install_state()',
+    'write_install_state()',
+    'rtk_bin_dir=',
+    'kimi_bin_dir=',
+    'codex_bin_dir=',
+    'CODEX_BIN_DIR/codex',
+    'HOME/.local/share/lazydev/codex',
+]
+for needle in state_needles:
+    if needle not in sh: errors.append(f'install.sh: persistent install state/discovery missing: {needle}')
+if 'LAZYDEV_STATE_HOME' not in (ROOT/'uninstall.sh').read_text(encoding='utf-8') or '$StateRoot' not in ps:
+    errors.append('uninstallers: persistent installer state cleanup missing')
+if 'install-state.json' not in ps or '$RtkBinRoot' not in ps or '$CodexBinRoot' not in ps:
+    errors.append('uninstall.ps1: state-selected component locations missing')
+if '## 🗑️ Uninstall' not in (ROOT/'README.md').read_text(encoding='utf-8'):
+    errors.append('README.md: uninstall instructions missing')
+
 # RTK verification regression: the POSIX installer must define its helper
 # before using it, and must rediscover the managed RTK location on reinstall.
 if sh.index('rtk_is_token_killer() {') > sh.index('rtk_is_token_killer "$RTK_COMMAND"'):
     errors.append('install.sh: rtk_is_token_killer is defined after first use')
 if '$HOME/.local/share/lazydev/rtk' not in sh:
     errors.append('install.sh: managed RTK location is not discoverable on reinstall')
+if 'LAZYDEV_STATE_FILE' not in sh or 'load_install_state()' not in sh or 'write_install_state()' not in sh:
+    errors.append('install.sh: persistent installer state missing')
+if 'LAZYDEV_STATE_LOADED=1' not in sh or 'if [ "$LAZYDEV_STATE_LOADED" -eq 0 ] &&' not in sh:
+    errors.append('install.sh: persisted state must prevent PATH-based bin directory drift')
+if 'LAZYDEV_STATE_FILE' in sh and sh.index('LAZYDEV_STATE_FILE=') > sh.index('elif [ -f "$LAZYDEV_STATE_FILE" ]'):
+    errors.append('install.sh: state file is read before it is initialized')
 if '"$candidate" gain >/dev/null 2>&1' not in sh:
     errors.append('install.sh: RTK identity verification must use rtk gain')
 
@@ -112,7 +137,7 @@ if 'lazydev-help.txt' not in sh or 'Lazy Developer command surface is stale' not
     errors.append('install.sh: post-refresh command surface verification missing')
 if 'Refresh-ActiveLazyDevLauncher' not in ps or 'Lazy Developer command surface is stale' not in ps:
     errors.append('install.ps1: post-refresh command surface verification missing')
-if 'CODEX_INSTALLED_BIN="$LAZYDEV_BIN_DIR/codex"' not in sh or 'official archive verified' not in sh:
+if 'CODEX_INSTALLED_BIN="$CODEX_BIN_DIR/codex"' not in sh or 'official archive verified' not in sh:
     errors.append('install.sh: Codex post-install verification fallback missing')
 if 'resilient_download()' not in sh or '--http1.1' not in sh or '--retry 8' not in sh or ' -C - ' not in sh:
     errors.append('install.sh: Codex resilient resumable download policy missing')
@@ -128,7 +153,7 @@ else:
     if ps.index("Step 'RTK'") > ps.index('Step \"Installing/updating Lazy Developer $LazyDevVersion\"'): errors.append('install.ps1: RTK lifecycle marker must precede LazyDev install')
 if 'Refresh-ActiveLazyDevLauncher' not in ps:
     errors.append('install.ps1: active LazyDev launcher refresh missing')
-if "$CodexInstalledPath = Join-Path $BinRoot 'codex.exe'" not in ps or 'official archive verified' not in ps:
+if "$CodexInstalledPath = Join-Path $CodexBinRoot 'codex.exe'" not in ps or 'official archive verified' not in ps:
     errors.append('install.ps1: Codex post-install verification fallback missing')
 if 'Invoke-ResilientDownload' not in ps or '--http1.1' not in ps or '--retry' not in ps or '--continue-at' not in ps:
     errors.append('install.ps1: Codex resilient resumable download policy missing')

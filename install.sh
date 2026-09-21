@@ -25,7 +25,11 @@ REPO_ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz
 GITHUB_API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"
 
 LAZYDEV_HOME="${LAZYDEV_HOME:-$HOME/.local/share/lazydev}"
+LAZYDEV_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/lazydev"
+LAZYDEV_STATE_FILE="$LAZYDEV_STATE_HOME/install-state"
 LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-}"
+KIMI_BIN_DIR="${KIMI_BIN_DIR:-${KIMI_CODE_HOME:-$HOME/.kimi-code}/bin}"
+LAZYDEV_STATE_LOADED=0
 LAZYDEV_NEEDS_UPDATE=1
 LAZYDEV_FEATURE_REFRESH=0
 LAZYDEV_INSTALL_COMPLETE=0
@@ -60,16 +64,47 @@ if [ "$ANDROID_HOST" -eq 1 ] && { [ "$TERMUX_LINUX" -eq 1 ] || [ -e /data/data/c
   ANDROID_TERMUX=1
 fi
 
-if [ "$TERMUX_LINUX" -eq 1 ]; then
-  if command -v getconf >/dev/null 2>&1 && getconf GNU_LIBC_VERSION >/dev/null 2>&1; then
-    LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-${PREFIX:-$HOME/.local}/bin}"
-  elif command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qiE 'gnu libc|glibc'; then
-    LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-${PREFIX:-$HOME/.local}/bin}"
-  else
-    fatal "Termux/Android detected, but no glibc Linux userland was found. Install a Linux userland first (for example: pkg install proot-distro && proot-distro install debian && proot-distro login debian), then run this installer inside Linux."
+if [ -n "${LAZYDEV_BIN_DIR:-}" ]; then
+  : # Explicit caller override wins.
+elif [ -f "$LAZYDEV_STATE_FILE" ]; then
+  saved_bin_dir="$(sed -n 's/^bin_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  saved_kimi_bin="$(sed -n 's/^kimi_bin_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  if [ -n "$saved_bin_dir" ]; then
+    LAZYDEV_BIN_DIR="$saved_bin_dir"
+    LAZYDEV_STATE_LOADED=1
   fi
-else
-  LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-$HOME/.local/bin}"
+  case "$saved_kimi_bin" in /*) [ -n "$saved_kimi_bin" ] && KIMI_BIN_DIR="$saved_kimi_bin";; esac
+fi
+
+# Recover an existing managed location before falling back to a default.
+# This is intentionally independent of PATH so a new shell cannot make an
+# installed CLI appear missing.
+if [ -z "${LAZYDEV_BIN_DIR:-}" ]; then
+  for candidate in \
+    "$HOME/.local/share/lazydev/bin" \
+    "$HOME/.local/share/lazydev" \
+    "$HOME/.local/bin"; do
+    if [ -x "$candidate/lazydev" ] || [ -x "$candidate/rtk" ] || \
+       [ -x "$candidate/codex" ] || [ -x "$candidate/codex.bin" ]; then
+      LAZYDEV_BIN_DIR="$candidate"
+      break
+    fi
+  done
+fi
+if [ -z "${LAZYDEV_BIN_DIR:-}" ] && [ -n "${PREFIX:-}" ]; then
+  candidate="$PREFIX/bin"
+  if [ -x "$candidate/lazydev" ] || [ -x "$candidate/rtk" ] || \
+     [ -x "$candidate/codex" ] || [ -x "$candidate/codex.bin" ]; then
+    LAZYDEV_BIN_DIR="$candidate"
+  fi
+fi
+
+if [ -z "${LAZYDEV_BIN_DIR:-}" ]; then
+  if [ "$TERMUX_LINUX" -eq 1 ]; then
+    LAZYDEV_BIN_DIR="${PREFIX:-$HOME/.local}/bin"
+  else
+    LAZYDEV_BIN_DIR="$HOME/.local/bin"
+  fi
 fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
@@ -6199,7 +6234,7 @@ resilient_download() {
 write_codex_android_wrapper() {
   real="$1"
   [ -x "$real" ] || return 1
-  wrapper="$LAZYDEV_BIN_DIR/codex"
+  wrapper="$CODEX_BIN_DIR/codex"
   cat > "$wrapper" <<EOF
 #!/bin/sh
 set -eu
@@ -6221,7 +6256,7 @@ EOF
 
 install_codex_android_wrapper() {
   [ "$ANDROID_TERMUX" -eq 1 ] || return 0
-  real="$LAZYDEV_BIN_DIR/codex.bin"
+  real="$CODEX_BIN_DIR/codex.bin"
   [ -x "$real" ] || return 0
   write_codex_android_wrapper "$real"
   say "✓ Android/Termux Codex TUI compatibility launcher enabled (tmux)"
@@ -6238,7 +6273,7 @@ install_codex_official() {
   sums="$cache_root/codex-package_SHA256SUMS"
   extract_dir="$TMP_DIR/codex-extract"
 
-  mkdir -p "$cache_root" "$extract_dir" "$LAZYDEV_BIN_DIR"
+  mkdir -p "$cache_root" "$extract_dir" "$CODEX_BIN_DIR"
   say "Codex $version · official release asset · $target"
   say "Downloading with resumable retries (HTTP/1.1) …"
 
@@ -6257,15 +6292,15 @@ install_codex_official() {
   codex_binary="$(find "$extract_dir" -type f -name 'codex-*' -print | head -n 1)"
   [ -n "$codex_binary" ] || fatal "Official Codex archive did not contain the expected binary."
   chmod 0755 "$codex_binary"
-  temp_binary="$LAZYDEV_BIN_DIR/.codex.new.$$"
+  temp_binary="$CODEX_BIN_DIR/.codex.new.$$"
   cp "$codex_binary" "$temp_binary"
   chmod 0755 "$temp_binary"
   if [ "$ANDROID_TERMUX" -eq 1 ]; then
-    mv -f "$temp_binary" "$LAZYDEV_BIN_DIR/codex.bin"
+    mv -f "$temp_binary" "$CODEX_BIN_DIR/codex.bin"
     install_codex_android_wrapper
   else
-    mv -f "$temp_binary" "$LAZYDEV_BIN_DIR/codex"
-    rm -f "$LAZYDEV_BIN_DIR/codex.bin" 2>/dev/null || true
+    mv -f "$temp_binary" "$CODEX_BIN_DIR/codex"
+    rm -f "$CODEX_BIN_DIR/codex.bin" 2>/dev/null || true
   fi
   rm -f "$archive" "$sums"
   rmdir "$cache_root" 2>/dev/null || true
@@ -6297,12 +6332,39 @@ get_remote_revision() {
 }
 
 TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t lazydev)"
+# Component-specific paths are persisted so update/reinstall checks are not
+# coupled to the current shell PATH. The files are tiny shell-compatible state.
+load_install_state() {
+  [ -f "$LAZYDEV_STATE_FILE" ] || return 0
+  saved_rtk_bin="$(sed -n 's/^rtk_bin_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  saved_codex_bin="$(sed -n 's/^codex_bin_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  case "$saved_rtk_bin" in /*) [ -n "$saved_rtk_bin" ] && RTK_BIN_DIR="$saved_rtk_bin";; esac
+  case "$saved_codex_bin" in /*) [ -n "$saved_codex_bin" ] && CODEX_BIN_DIR="$saved_codex_bin";; esac
+}
+
+write_install_state() {
+  mkdir -p "$LAZYDEV_STATE_HOME" 2>/dev/null || return 0
+  tmp="$LAZYDEV_STATE_FILE.$$"
+  {
+    printf 'version=1\n'
+    printf 'bin_dir=%s\n' "$LAZYDEV_BIN_DIR"
+    printf 'kimi_bin_dir=%s\n' "${KIMI_BIN_DIR:-${KIMI_CODE_HOME:-$HOME/.kimi-code}/bin}"
+    printf 'rtk_bin_dir=%s\n' "${RTK_BIN_DIR:-$LAZYDEV_BIN_DIR}"
+    printf 'codex_bin_dir=%s\n' "${CODEX_BIN_DIR:-$LAZYDEV_BIN_DIR}"
+  } > "$tmp"
+  mv -f "$tmp" "$LAZYDEV_STATE_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+}
+
+load_install_state
+RTK_BIN_DIR="${RTK_BIN_DIR:-$LAZYDEV_BIN_DIR}"
+CODEX_BIN_DIR="${CODEX_BIN_DIR:-$LAZYDEV_BIN_DIR}"
+
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT INT TERM HUP
 
 find_kimi() {
-  for candidate in "$HOME/.kimi-code/bin/kimi" "$HOME/.local/bin/kimi"; do
-    if [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
+  for candidate in     "${KIMI_BIN_DIR:-}/kimi"     "${KIMI_CODE_HOME:-$HOME/.kimi-code}/bin/kimi"     "$HOME/.kimi-code/bin/kimi"     "$LAZYDEV_BIN_DIR/kimi"     "$HOME/.local/share/lazydev/kimi"     "$HOME/.local/bin/kimi"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
   done
   if command -v kimi >/dev/null 2>&1; then
     command -v kimi
@@ -6312,10 +6374,14 @@ find_kimi() {
 }
 
 find_codex() {
-  # Resolve the exact `codex` executable the current shell would run first.
-  # This prevents a stale local shim from causing a false update prompt.
-  command -v codex 2>/dev/null && return 0
-  for candidate in "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.cmd"; do
+  # Resolve the managed location first, then common historical locations.
+  # PATH is deliberately not the sole source of truth.
+  for candidate in \
+    "$CODEX_BIN_DIR/codex" "$CODEX_BIN_DIR/codex.bin" \
+    "$LAZYDEV_BIN_DIR/codex" "$LAZYDEV_BIN_DIR/codex.bin" \
+    "$HOME/.local/share/lazydev/codex" "$HOME/.local/share/lazydev/codex.bin" \
+    "$HOME/.local/bin/codex" "$HOME/.local/bin/codex.cmd" \
+    ${PREFIX:+"$PREFIX/bin/codex" "$PREFIX/bin/codex.bin"}; do
     if [ -x "$candidate" ] || [ -f "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
   done
   return 1
@@ -6351,9 +6417,12 @@ find_rtk() {
   # Prefer LazyDev-managed locations so a stale/wrong global `rtk` cannot
   # shadow the verified Rust Token Killer installation.
   for candidate in \
+    "${RTK_BIN_DIR:-}/rtk" \
     "${LAZYDEV_BIN_DIR:-}/rtk" \
     "$HOME/.local/share/lazydev/rtk" \
+    "$HOME/.local/share/lazydev/bin/rtk" \
     "$HOME/.local/bin/rtk" \
+    ${PREFIX:+"$PREFIX/bin/rtk"} \
     "$HOME/.cargo/bin/rtk"; do
     if [ -n "$candidate" ] && [ -x "$candidate" ]; then
       printf '%s\n' "$candidate"
@@ -6404,7 +6473,7 @@ is_lazydev_launcher() {
 # prefer that exact directory. This fixes Bash's command hash cache (including
 # Termux/proot paths such as /data/data/com.termux/files/usr/bin/lazydev) without
 # requiring the user to restart the shell.
-if [ -z "${LAZYDEV_BIN_DIR:-}" ] || [ "$LAZYDEV_BIN_DIR" = "$HOME/.local/bin" ]; then
+if [ "$LAZYDEV_STATE_LOADED" -eq 0 ] && { [ -z "${LAZYDEV_BIN_DIR:-}" ] || [ "$LAZYDEV_BIN_DIR" = "$HOME/.local/bin" ]; }; then
   old_ifs="$IFS"
   IFS=':'
   for dir in ${PATH:-}; do
@@ -6431,7 +6500,7 @@ fi
 # environment. Prefer a writable directory that is already on the current
 # PATH so `lazydev` works immediately after installation, with no `source`
 # or shell restart required. Only fall back to ~/.local/bin when none exists.
-if [ "${LAZYDEV_BIN_DIR:-}" = "$HOME/.local/bin" ]; then
+if [ "$LAZYDEV_STATE_LOADED" -eq 0 ] && [ "${LAZYDEV_BIN_DIR:-}" = "$HOME/.local/bin" ]; then
   old_ifs="$IFS"
   IFS=':'
   for dir in ${PATH:-}; do
@@ -6543,10 +6612,13 @@ refresh_shell_path() {
   else
     : > "$tmp"
   fi
-  printf '# Lazy Developer PATH\nexport PATH="%s:%s:$PATH"\n' "$LAZYDEV_BIN_DIR" "$HOME/.kimi-code/bin" >> "$tmp"
+  printf '# Lazy Developer PATH\nexport PATH="%s:%s:%s:%s:$PATH"\n' "$LAZYDEV_BIN_DIR" "$CODEX_BIN_DIR" "$RTK_BIN_DIR" "$HOME/.kimi-code/bin" >> "$tmp"
   mv "$tmp" "$rc"
 }
 KIMI_COMMAND="$(find_kimi 2>/dev/null || true)"
+if [ -n "$KIMI_COMMAND" ]; then
+  case "$KIMI_COMMAND" in /*) KIMI_BIN_DIR="$(dirname "$KIMI_COMMAND")";; esac
+fi
 KIMI_CURRENT_VERSION=""
 KIMI_LATEST_VERSION=""
 KIMI_NEEDS_UPDATE=1
@@ -6570,23 +6642,24 @@ fi
 CODEX_COMMAND="$(find_codex 2>/dev/null || true)"
 if [ "$ANDROID_TERMUX" -eq 1 ] && [ -n "$CODEX_COMMAND" ]; then
   case "$CODEX_COMMAND" in
-    "$LAZYDEV_BIN_DIR/codex"|"$LAZYDEV_BIN_DIR/codex.bin") ;;
+    "$CODEX_BIN_DIR/codex"|"$CODEX_BIN_DIR/codex.bin") ;;
     *)
       if [ -x "$CODEX_COMMAND" ] || [ -f "$CODEX_COMMAND" ]; then
         write_codex_android_wrapper "$CODEX_COMMAND" || true
-        CODEX_COMMAND="$LAZYDEV_BIN_DIR/codex"
+        CODEX_COMMAND="$CODEX_BIN_DIR/codex"
       fi
       ;;
   esac
 fi
-if [ "$ANDROID_TERMUX" -eq 1 ] && [ -x "$LAZYDEV_BIN_DIR/codex.bin" ]; then
-  write_codex_android_wrapper "$LAZYDEV_BIN_DIR/codex.bin" || true
+if [ "$ANDROID_TERMUX" -eq 1 ] && [ -x "$CODEX_BIN_DIR/codex.bin" ]; then
+  write_codex_android_wrapper "$CODEX_BIN_DIR/codex.bin" || true
 fi
 CODEX_CURRENT_VERSION=""
 CODEX_LATEST_VERSION=""
 CODEX_NEEDS_UPDATE=1
 CODEX_UPDATE_AVAILABLE=0
 if [ -n "$CODEX_COMMAND" ]; then
+  case "$CODEX_COMMAND" in /*) CODEX_BIN_DIR="$(dirname "$CODEX_COMMAND")";; esac
   CODEX_CURRENT_VERSION="$(extract_semver "$($CODEX_COMMAND --version 2>/dev/null || true)")"
   if [ -n "$CODEX_CURRENT_VERSION" ]; then
     CODEX_LATEST_FILE="$TMP_DIR/codex-latest.version"
@@ -6629,6 +6702,7 @@ RTK_LATEST_VERSION=""
 RTK_NEEDS_UPDATE=1
 RTK_UPDATE_AVAILABLE=0
 if [ -n "$RTK_COMMAND" ]; then
+  case "$RTK_COMMAND" in /*) RTK_BIN_DIR="$(dirname "$RTK_COMMAND")";; esac
   RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
   if [ -n "$RTK_CURRENT_VERSION" ] && rtk_is_token_killer "$RTK_COMMAND"; then
     RTK_LATEST_FILE="$TMP_DIR/rtk-latest.version"
@@ -6857,6 +6931,8 @@ fi
 # Clear the question screen before doing the actual installs.
 clear 2>/dev/null || true
 
+write_install_state
+
 # Actual installation order: RTK → Lazy Developer → selected AI UIs (Kimi → Codex → Antigravity).
 # The Kimi/Codex/Antigravity Y/n choices were collected above and are applied only after
 # RTK and the Lazy Developer runtime are ready. Provider/model setup is intentionally skipped.
@@ -6867,9 +6943,9 @@ clear 2>/dev/null || true
 step "RTK"
 if [ "$RTK_NEEDS_UPDATE" -eq 1 ]; then
   say "RTK is missing, outdated, or not the Rust Token Killer — installing the official RTK first."
-  mkdir -p "$LAZYDEV_BIN_DIR"
-  curl -fsSL "$RTK_INSTALL_URL" | RTK_INSTALL_DIR="$LAZYDEV_BIN_DIR" RTK_TELEMETRY_DISABLED=1 sh
-  PATH="$LAZYDEV_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
+  mkdir -p "$RTK_BIN_DIR"
+  curl -fsSL "$RTK_INSTALL_URL" | RTK_INSTALL_DIR="$RTK_BIN_DIR" RTK_TELEMETRY_DISABLED=1 sh
+  PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$KIMI_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
   export PATH
   RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
   [ -n "$RTK_COMMAND" ] || fatal "RTK did not install a usable launcher."
@@ -6949,7 +7025,7 @@ exit 1
 EOF
   chmod 755 "$LAZYDEV_LAUNCHER"
 
-  PATH="$LAZYDEV_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
+  PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
   export PATH
 
   say "✓ Lazy Developer $LAZYDEV_VERSION ready"
@@ -6962,7 +7038,8 @@ ensure_legacy_launcher_targets
 replace_legacy_lazydev_launchers
 refresh_active_lazydev_launcher
 hash -r 2>/dev/null || true
-PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$HOME/.kimi-code/bin:$PATH"; export PATH
+PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$KIMI_BIN_DIR:$HOME/.local/bin:$HOME/.kimi-code/bin:$PATH"; export PATH
+write_install_state
 LAZYDEV_HELP_OUTPUT="$TMP_DIR/lazydev-help.txt"
 if ! "$LAZYDEV_BIN_DIR/lazydev" help >"$LAZYDEV_HELP_OUTPUT" 2>&1; then
   cat "$LAZYDEV_HELP_OUTPUT" >&2 || true
@@ -7063,6 +7140,7 @@ if [ "$INSTALL_KIMI" -eq 1 ] && [ "$KIMI_NEEDS_UPDATE" -eq 1 ]; then
   cat "$KIMI_INSTALL_LOG"
   KIMI_COMMAND="$(find_kimi 2>/dev/null || true)"
   [ -n "$KIMI_COMMAND" ] || fatal "Kimi Code did not install a usable launcher."
+  case "$KIMI_COMMAND" in /*) KIMI_BIN_DIR="$(dirname "$KIMI_COMMAND")";; esac
   KIMI_CURRENT_VERSION="$(extract_semver "$($KIMI_COMMAND --version 2>/dev/null || true)")"
   [ -n "$KIMI_CURRENT_VERSION" ] || fatal "Could not read the installed Kimi Code version."
   if [ -n "$KIMI_LATEST_VERSION" ] && ! version_at_least "$KIMI_CURRENT_VERSION" "$KIMI_LATEST_VERSION"; then fatal "Installed Kimi Code is $KIMI_CURRENT_VERSION; latest detected release is $KIMI_LATEST_VERSION."; fi
@@ -7077,13 +7155,13 @@ if [ "$INSTALL_CODEX" -eq 1 ] && [ "$CODEX_NEEDS_UPDATE" -eq 1 ]; then
   fi
   [ -n "$CODEX_TARGET_VERSION" ] || fatal "Could not resolve the latest official Codex release version."
   install_codex_official "$CODEX_TARGET_VERSION"
-  PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
+  PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$KIMI_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
   hash -r 2>/dev/null || true
-  if [ "$ANDROID_TERMUX" -eq 1 ] && [ -x "$LAZYDEV_BIN_DIR/codex.bin" ]; then
-    CODEX_INSTALLED_BIN="$LAZYDEV_BIN_DIR/codex.bin"
+  if [ "$ANDROID_TERMUX" -eq 1 ] && [ -x "$CODEX_BIN_DIR/codex.bin" ]; then
+    CODEX_INSTALLED_BIN="$CODEX_BIN_DIR/codex.bin"
     write_codex_android_wrapper "$CODEX_INSTALLED_BIN" || true
   else
-    CODEX_INSTALLED_BIN="$LAZYDEV_BIN_DIR/codex"
+    CODEX_INSTALLED_BIN="$CODEX_BIN_DIR/codex"
   fi
   if [ -x "$CODEX_INSTALLED_BIN" ]; then CODEX_COMMAND="$CODEX_INSTALLED_BIN"; else CODEX_COMMAND="$(find_codex 2>/dev/null || true)"; fi
   [ -n "$CODEX_COMMAND" ] || fatal "Codex did not install a usable launcher."
@@ -7111,7 +7189,7 @@ if [ "$INSTALL_ANTIGRAVITY" -eq 1 ] && [ "$AGY_NEEDS_UPDATE" -eq 1 ]; then
     fatal "Antigravity installer failed."
   fi
   cat "$AGY_LOG"
-  PATH="$LAZYDEV_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
+  PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$HOME/.local/bin:$PATH"; export PATH
   AGY_COMMAND="$(find_antigravity 2>/dev/null || true)"
   [ -n "$AGY_COMMAND" ] || fatal "Antigravity did not install a usable launcher."
   say "✓ Antigravity ready: $AGY_COMMAND"

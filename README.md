@@ -182,9 +182,31 @@ npx skills add BlizPS/free-kimi-code --all
 
 ---
 
+## 🗑️ Uninstall
+
+To remove Lazy Developer and the CLIs managed by its installer, run the matching uninstaller. This removes LazyDev-managed configuration, sessions, caches, and launcher files; your project folders and unrelated files are left untouched.
+
+### macOS / Linux
+
+```sh
+curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/uninstall.sh" | sh
+```
+
+### Windows PowerShell
+
+```powershell
+iwr "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/uninstall.ps1" -UseBasicParsing | iex
+```
+
+The uninstaller removes the Lazy Developer-managed Kimi Code, Codex, Antigravity CLI, and RTK installation state. It does not delete your project directories.
+
 ## 🚀 Quick Start
 
 The installer collects the Kimi Code → Codex → Antigravity choices first, then installs **RTK**, refreshes **Lazy Developer**, and only after that installs/updates the selected AI UI(s). The selected choices are carried forward; there is no provider/model setup step in the installer. It never runs `lazydev setup` during installation. After installation, run `lazydev setup` when you are ready to choose a provider, API key, and live model.
+
+### Reinstalling is safe
+
+The installer stores its managed binary locations in a small persistent state file under `~/.local/state/lazydev/` on macOS/Linux/Termux Linux. On Windows it uses the same state location under the user profile. Re-running the installer, opening a new terminal, or changing the shell PATH does **not** make an already-installed CLI look missing. A CLI is only downloaded again when it is actually missing or a newer release is detected.
 
 **1. Set up** and inspect the available providers and models:
 

@@ -21,8 +21,35 @@ $GitHubApiUrl = "https://api.github.com/repos/$Repo/commits/$Branch"
 $RtkApiUrl = 'https://api.github.com/repos/rtk-ai/rtk/releases/latest'
 $RtkInstallRepo = 'https://github.com/rtk-ai/rtk'
 $InstallRoot = if ($env:LAZYDEV_HOME) { $env:LAZYDEV_HOME } else { Join-Path $HOME '.local\share\lazydev' }
-$BinRoot = if ($env:LAZYDEV_BIN_DIR) { $env:LAZYDEV_BIN_DIR } else { Join-Path $HOME '.local\bin' }
 $ConfigRoot = if ($env:LAZYDEV_CONFIG_DIR) { $env:LAZYDEV_CONFIG_DIR } else { Join-Path $env:APPDATA 'lazydev' }
+$StateRoot = if ($env:XDG_STATE_HOME) { Join-Path $env:XDG_STATE_HOME 'lazydev' } else { Join-Path $HOME '.local\state\lazydev' }
+$StateFile = Join-Path $StateRoot 'install-state.json'
+$StateLoaded = $false
+$BinRoot = if ($env:LAZYDEV_BIN_DIR) { $env:LAZYDEV_BIN_DIR } else { Join-Path $HOME '.local\bin' }
+$KimiBinRoot = Join-Path $HOME '.kimi-code\bin'
+$RtkBinRoot = $BinRoot
+$CodexBinRoot = $BinRoot
+if (-not $env:LAZYDEV_BIN_DIR -and -not (Test-Path -LiteralPath $StateFile -PathType Leaf)) {
+    foreach ($candidate in @((Join-Path $HOME '.local\share\lazydev\bin'), (Join-Path $HOME '.local\share\lazydev'), (Join-Path $HOME '.local\bin'))) {
+        if ((Test-Path -LiteralPath (Join-Path $candidate 'lazydev.cmd') -PathType Leaf) -or
+            (Test-Path -LiteralPath (Join-Path $candidate 'rtk.exe') -PathType Leaf) -or
+            (Test-Path -LiteralPath (Join-Path $candidate 'codex.exe') -PathType Leaf)) {
+            $BinRoot = $candidate
+            $RtkBinRoot = $candidate
+            $CodexBinRoot = $candidate
+            break
+        }
+    }
+}
+if (-not $env:LAZYDEV_BIN_DIR -and (Test-Path -LiteralPath $StateFile -PathType Leaf)) {
+    try {
+        $state = Get-Content -Raw -LiteralPath $StateFile | ConvertFrom-Json
+        if ($state.bin_dir) { $BinRoot = [string]$state.bin_dir; $StateLoaded = $true }
+        if ($state.kimi_bin_dir) { $KimiBinRoot = [string]$state.kimi_bin_dir }
+        if ($state.rtk_bin_dir) { $RtkBinRoot = [string]$state.rtk_bin_dir }
+        if ($state.codex_bin_dir) { $CodexBinRoot = [string]$state.codex_bin_dir }
+    } catch {}
+}
 $KimiRuntimeHome = Join-Path $ConfigRoot 'kimi-code'
 $LazyDevUiHome = if ($env:LAZYDEV_UI_RUNTIME) { $env:LAZYDEV_UI_RUNTIME } else { Join-Path $ConfigRoot 'ui-runtime' }
 $LazyDevUiPackage = '@poppinss/cliui'
@@ -5840,6 +5867,13 @@ $RtkConfigCandidates = @(
 
 function Step([string]$Message) { Write-Host "`n==> $Message" }
 function Fail([string]$Message) { throw $Message }
+function Write-InstallState {
+    try {
+        New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
+        [ordered]@{ version = 1; bin_dir = $BinRoot; kimi_bin_dir = $KimiBinRoot; rtk_bin_dir = $RtkBinRoot; codex_bin_dir = $CodexBinRoot } |
+            ConvertTo-Json | Set-Content -LiteralPath $StateFile -Encoding UTF8
+    } catch {}
+}
 function Get-VersionFromText([string]$Text) {
     $m = [regex]::Match($Text, '(\d+\.\d+\.\d+)')
     if ($m.Success) { return $m.Groups[1].Value }
@@ -5851,6 +5885,9 @@ function Test-VersionAtLeast([string]$Current, [string]$Required) {
 function Find-Kimi {
     foreach ($candidate in @(
         (Join-Path $HOME '.kimi-code\bin\kimi.exe'),
+        (Join-Path $BinRoot 'kimi.exe'),
+        (Join-Path $BinRoot 'kimi.cmd'),
+        (Join-Path $HOME '.local\share\lazydev\kimi.exe'),
         (Join-Path $HOME '.local\bin\kimi.exe'),
         (Join-Path $HOME '.local\bin\kimi.cmd')
     )) {
@@ -5867,11 +5904,15 @@ function Get-KimiVersion([string]$Exe) {
     try { return Get-VersionFromText ((& $Exe --version 2>$null) -join "`n") } catch { return '' }
 }
 function Find-Codex {
-    $cmd = Get-Command codex.exe,codex.cmd,codex -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($cmd) { return $cmd.Source }
-    foreach ($candidate in @((Join-Path $HOME '.local\bin\codex.exe'), (Join-Path $HOME '.local\bin\codex.cmd'))) {
+    foreach ($candidate in @(
+        (Join-Path $CodexBinRoot 'codex.exe'), (Join-Path $CodexBinRoot 'codex.cmd'),
+        (Join-Path $HOME '.local\share\lazydev\codex.exe'), (Join-Path $HOME '.local\share\lazydev\codex.cmd'),
+        (Join-Path $HOME '.local\bin\codex.exe'), (Join-Path $HOME '.local\bin\codex.cmd')
+    )) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
     }
+    $cmd = Get-Command codex.exe,codex.cmd,codex -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { return $cmd.Source }
     return $null
 }
 function Find-Antigravity {
@@ -5891,12 +5932,17 @@ function Ask-InstallUi([string]$Label) {
 }
 
 function Find-Rtk {
+    foreach ($candidate in @(
+        (Join-Path $RtkBinRoot 'rtk.exe'),
+        (Join-Path $HOME '.local\share\lazydev\rtk.exe'),
+        (Join-Path $HOME '.local\bin\rtk.exe')
+    )) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
     foreach ($name in @('rtk.exe','rtk')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
         if ($cmd) { return $cmd.Source }
     }
-    $candidate = Join-Path $BinRoot 'rtk.exe'
-    if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
     return $null
 }
 function Get-RtkVersion([string]$Exe) {
@@ -6153,8 +6199,8 @@ function Install-CodexOfficial([string]$Version) {
         if ($LASTEXITCODE -ne 0) { throw 'Could not unpack the official Codex archive.' }
         $binary = Get-ChildItem -LiteralPath $extract -File -Recurse | Where-Object { $_.Name -like 'codex-*' } | Select-Object -First 1
         if (-not $binary) { throw 'Official Codex archive did not contain the expected binary.' }
-        New-Item -ItemType Directory -Force -Path $BinRoot | Out-Null
-        Copy-Item -LiteralPath $binary.FullName -Destination (Join-Path $BinRoot 'codex.exe') -Force
+        New-Item -ItemType Directory -Force -Path $CodexBinRoot | Out-Null
+        Copy-Item -LiteralPath $binary.FullName -Destination (Join-Path $CodexBinRoot 'codex.exe') -Force
         Remove-Item -LiteralPath $archive,$sums -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $versionRoot -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "✓ Codex $Version installed from the official release archive"
@@ -6203,8 +6249,8 @@ function Install-Rtk {
         Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
         $exe = Get-ChildItem -LiteralPath $extract -Filter 'rtk.exe' -Recurse -File | Select-Object -First 1
         if (-not $exe) { Fail 'The RTK archive did not contain rtk.exe.' }
-        New-Item -ItemType Directory -Path $BinRoot -Force | Out-Null
-        Copy-Item -LiteralPath $exe.FullName -Destination (Join-Path $BinRoot 'rtk.exe') -Force
+        New-Item -ItemType Directory -Path $RtkBinRoot -Force | Out-Null
+        Copy-Item -LiteralPath $exe.FullName -Destination (Join-Path $RtkBinRoot 'rtk.exe') -Force
     } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 }
 function Connect-RtkToKimi([string]$RtkExe) {
@@ -6265,6 +6311,7 @@ if ($KimiExe) {
 }
 
 $CodexExe = Find-Codex
+if ($CodexExe -and -not $env:LAZYDEV_BIN_DIR) { $CodexBinRoot = Split-Path -Parent $CodexExe }
 $CodexCurrentVersion = if ($CodexExe) { Get-VersionFromText ((& $CodexExe --version 2>$null) -join "`n") } else { '' }
 $CodexLatestVersion = ''
 $CodexNeedsUpdate = $true
@@ -6333,6 +6380,7 @@ if ($AgyExe) {
 }
 
 $RtkExe = Find-Rtk
+if ($RtkExe -and -not $env:LAZYDEV_BIN_DIR) { $RtkBinRoot = Split-Path -Parent $RtkExe }
 $RtkCurrentVersion = ''
 $RtkLatestVersion = ''
 $RtkNeedsUpdate = $true
@@ -6455,6 +6503,8 @@ if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Con
     $LazyDevStatusMessage += 'Legacy private Node.js runtime detected — it will be removed during the Lazy Developer update.'
 }
 
+Write-InstallState
+
 # Installation order: collect all Y/n choices first, then RTK → Lazy Developer → selected UI(s).
 # Provider/model setup is intentionally skipped; use `lazydev setup` after installation.
 
@@ -6464,7 +6514,7 @@ Step 'RTK'
 if ($RtkNeedsUpdate) {
     Write-Host 'RTK is missing, outdated, or not the Rust Token Killer — installing the official RTK first.'
     Install-Rtk
-    $env:Path = "$BinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
+    $env:Path = "$BinRoot;$CodexBinRoot;$RtkBinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
     $RtkExe = Find-Rtk
     if (-not $RtkExe) { Fail 'RTK did not install a usable launcher.' }
     if (-not (Test-RtkTokenKiller $RtkExe)) { Fail 'Installed RTK is not the Rust Token Killer.' }
@@ -6615,7 +6665,7 @@ if ($InstallCodex -and $CodexNeedsUpdate) {
     if (-not $CodexTargetVersion) { Fail 'Could not resolve the latest official Codex release version.' }
     Install-CodexOfficial $CodexTargetVersion
     $env:Path = "$BinRoot;$(Join-Path $HOME '.local\bin');$env:Path"
-    $CodexInstalledPath = Join-Path $BinRoot 'codex.exe'
+    $CodexInstalledPath = Join-Path $CodexBinRoot 'codex.exe'
     $CodexExe = if (Test-Path -LiteralPath $CodexInstalledPath -PathType Leaf) { $CodexInstalledPath } else { Find-Codex }
     if (-not $CodexExe) { Fail 'Codex did not install a usable launcher.' }
     $CodexCurrentVersion = Get-VersionFromText ((& $CodexExe --version 2>$null) -join "`n")
@@ -6657,12 +6707,11 @@ if ($InstallAntigravity -and $AgyNeedsUpdate) {
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $entries = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
 $entries = @($entries | Where-Object { $_ -notin @($BinRoot, (Join-Path $HOME '.kimi-code\bin')) })
-$entries = @($BinRoot, (Join-Path $HOME '.kimi-code\bin')) + $entries
+$entries = @($BinRoot, $CodexBinRoot, $RtkBinRoot, (Join-Path $HOME '.kimi-code\bin')) + $entries
 [Environment]::SetEnvironmentVariable('Path', ($entries | Select-Object -Unique) -join ';', 'User')
 $env:Path = (($entries | Select-Object -Unique) -join ';')
 
-# Actual UI installation order: Kimi Code → Codex → Antigravity.
-# RTK is installed after the selected AI UIs. Lazy Developer is refreshed after RTK.
+# Actual installation order: RTK → Lazy Developer → selected UI(s).
 
 function Refresh-ActiveLazyDevLauncher {
     $canonical = Join-Path $BinRoot 'lazydev.cmd'

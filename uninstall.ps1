@@ -5,7 +5,21 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $LazyDevHome = if ($env:LAZYDEV_HOME) { $env:LAZYDEV_HOME } else { Join-Path $HOME '.local\share\lazydev' }
+$StateRoot = if ($env:XDG_STATE_HOME) { Join-Path $env:XDG_STATE_HOME 'lazydev' } else { Join-Path $HOME '.local\state\lazydev' }
+$StateFile = Join-Path $StateRoot 'install-state.json'
 $LazyDevBin = if ($env:LAZYDEV_BIN_DIR) { $env:LAZYDEV_BIN_DIR } else { Join-Path $HOME '.local\bin' }
+$KimiBinRoot = Join-Path $HOME '.kimi-code\bin'
+$RtkBinRoot = $LazyDevBin
+$CodexBinRoot = $LazyDevBin
+if (-not $env:LAZYDEV_BIN_DIR -and (Test-Path -LiteralPath $StateFile -PathType Leaf)) {
+    try {
+        $state = Get-Content -Raw -LiteralPath $StateFile | ConvertFrom-Json
+        if ($state.bin_dir) { $LazyDevBin = [string]$state.bin_dir }
+        if ($state.kimi_bin_dir) { $KimiBinRoot = [string]$state.kimi_bin_dir }
+        if ($state.rtk_bin_dir) { $RtkBinRoot = [string]$state.rtk_bin_dir }
+        if ($state.codex_bin_dir) { $CodexBinRoot = [string]$state.codex_bin_dir }
+    } catch {}
+}
 $LazyDevConfig = if ($env:LAZYDEV_CONFIG_DIR) { $env:LAZYDEV_CONFIG_DIR } else { Join-Path $env:APPDATA 'lazydev' }
 $KimiNativeHome = Join-Path $HOME '.kimi-code'
 $CodexHome = Join-Path $HOME '.codex'
@@ -85,6 +99,8 @@ foreach ($dir in @($KimiNativeHome) + $KimiLegacyDirs) {
 foreach ($dir in @((Join-Path $HOME '.local\share\kimi-code'), (Join-Path $HOME '.cache\kimi-code'), (Join-Path $HOME '.local\state\kimi-code'))) {
     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
 }
+Remove-Item -LiteralPath (Join-Path $KimiBinRoot 'kimi.exe') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $KimiBinRoot 'kimi.cmd') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $LazyDevBin 'kimi.exe') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $LazyDevBin 'kimi.cmd') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $HOME '.local\bin\kimi.exe') -Force -ErrorAction SilentlyContinue
@@ -120,7 +136,12 @@ if (Test-Path -LiteralPath $AgyMcpFile) {
         }
     } catch {}
 }
-foreach ($file in @('codex.exe','codex.cmd','agy.exe','agy.cmd')) {
+foreach ($file in @('codex.exe','codex.cmd','codex','codex.bin')) {
+    Remove-Item -LiteralPath (Join-Path $CodexBinRoot $file) -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $LazyDevBin $file) -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $HOME ('.local\bin\' + $file)) -Force -ErrorAction SilentlyContinue
+}
+foreach ($file in @('agy.exe','agy.cmd','agy')) {
     Remove-Item -LiteralPath (Join-Path $LazyDevBin $file) -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $HOME ('.local\bin\' + $file)) -Force -ErrorAction SilentlyContinue
 }
@@ -131,6 +152,7 @@ if ($RtkExeCurrent) {
     & $RtkExeCurrent.Source gain *> $null
     if ($LASTEXITCODE -eq 0) { & $RtkExeCurrent.Source init -g --uninstall *> $null }
 }
+Remove-Item -LiteralPath (Join-Path $RtkBinRoot 'rtk.exe') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $LazyDevBin 'rtk.exe') -Force -ErrorAction SilentlyContinue
 foreach ($dir in $RtkConfigs) {
     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
@@ -154,16 +176,22 @@ if ($userPath) {
     $env:Path = (($entries -join ';') + ';' + $env:Path)
 }
 
+Write-Host "`n==> Removing installer state"
+Remove-Item -LiteralPath $StateRoot -Recurse -Force -ErrorAction SilentlyContinue
+
 Write-Host "`n==> Checking cleanup"
 $paths = @(
     $LazyDevHome,
     $LazyDevConfig,
+    $StateRoot,
     $KimiNativeHome,
     $KimiLegacyHome,
     $CodexHome,
     $AntigravityHome,
     (Join-Path $LazyDevBin 'lazydev.cmd'),
     (Join-Path $LazyDevBin 'rtk.exe'),
+    (Join-Path $RtkBinRoot 'rtk.exe'),
+    (Join-Path $CodexBinRoot 'codex.exe'),
     (Join-Path $LazyDevBin 'kimi.exe'),
     $ArtifactDir
 ) + $RtkConfigs + $RtkDataDirs + $KimiLegacyDirs

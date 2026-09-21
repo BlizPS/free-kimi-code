@@ -2,7 +2,22 @@
 set -eu
 
 LAZYDEV_HOME="${LAZYDEV_HOME:-$HOME/.local/share/lazydev}"
+LAZYDEV_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/lazydev"
+LAZYDEV_STATE_FILE="$LAZYDEV_STATE_HOME/install-state"
 LAZYDEV_BIN_DIR="${LAZYDEV_BIN_DIR:-}"
+RTK_BIN_DIR="${LAZYDEV_BIN_DIR:-}"
+CODEX_BIN_DIR="${LAZYDEV_BIN_DIR:-}"
+KIMI_BIN_DIR="${LAZYDEV_BIN_DIR:-$HOME/.kimi-code/bin}"
+if [ -f "$LAZYDEV_STATE_FILE" ]; then
+  saved_bin_dir="$(sed -n 's/^bin_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  saved_rtk_bin="$(sed -n 's/^rtk_bin_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  saved_codex_bin="$(sed -n 's/^codex_bin_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  saved_kimi_bin="$(sed -n 's/^kimi_bin_dir=//p' "$LAZYDEV_STATE_FILE" | head -n 1)"
+  case "$saved_bin_dir" in /*) [ -n "$saved_bin_dir" ] && LAZYDEV_BIN_DIR="$saved_bin_dir";; esac
+  case "$saved_rtk_bin" in /*) [ -n "$saved_rtk_bin" ] && RTK_BIN_DIR="$saved_rtk_bin";; esac
+  case "$saved_codex_bin" in /*) [ -n "$saved_codex_bin" ] && CODEX_BIN_DIR="$saved_codex_bin";; esac
+  case "$saved_kimi_bin" in /*) [ -n "$saved_kimi_bin" ] && KIMI_BIN_DIR="$saved_kimi_bin";; esac
+fi
 TERMUX_LINUX=0
 case "${PREFIX:-}" in
   */com.termux/files/usr|*/com.termux/files/usr/) TERMUX_LINUX=1 ;;
@@ -124,6 +139,8 @@ assert_stopped
 step "Removing Lazy Developer"
 rm -rf "$LAZYDEV_HOME" "$LAZYDEV_HOME.previous" "$LAZYDEV_CONFIG_DIR"
 rm -f "$LAZYDEV_BIN_DIR/lazydev" "$LAZYDEV_BIN_DIR/lazydev.cmd" "$LAZYDEV_BIN_DIR/lazydev.ps1"
+rm -f "$CODEX_BIN_DIR/codex" "$CODEX_BIN_DIR/codex.bin" "$CODEX_BIN_DIR/codex.cmd" "$CODEX_BIN_DIR/codex.exe" 2>/dev/null || true
+rm -f "$RTK_BIN_DIR/rtk" "$RTK_BIN_DIR/rtk.exe" 2>/dev/null || true
 rm -f "$HOME/.local/bin/lazydev" "$HOME/.local/bin/lazydev.cmd" "$HOME/.local/bin/lazydev.ps1" 2>/dev/null || true
 if [ -n "${PREFIX:-}" ]; then rm -f "$PREFIX/bin/lazydev" "$PREFIX/bin/lazydev.cmd" "$PREFIX/bin/lazydev.ps1" 2>/dev/null || true; fi
 
@@ -194,7 +211,8 @@ case "${SHELL:-}" in
 esac
 
 step "Checking cleanup"
-for path in "$LAZYDEV_HOME" "$LAZYDEV_CONFIG_DIR" "$KIMI_NATIVE_HOME" "$KIMI_LEGACY_HOME" "$CODEX_HOME" "$ANTIGRAVITY_HOME" "$RTK_CONFIG_DIR" "$RTK_DATA_DIR" "$RTK_CACHE_DIR" "$LAZYDEV_BIN_DIR/lazydev" "$HOME/.local/bin/lazydev" "$LAZYDEV_BIN_DIR/rtk" "$ARTIFACT_DIR"; do
+rm -rf "$LAZYDEV_STATE_HOME" 2>/dev/null || true
+for path in "$LAZYDEV_HOME" "$LAZYDEV_CONFIG_DIR" "$LAZYDEV_STATE_HOME" "$KIMI_NATIVE_HOME" "$KIMI_LEGACY_HOME" "$CODEX_HOME" "$ANTIGRAVITY_HOME" "$RTK_CONFIG_DIR" "$RTK_DATA_DIR" "$RTK_CACHE_DIR" "$LAZYDEV_BIN_DIR/lazydev" "$HOME/.local/bin/lazydev" "$LAZYDEV_BIN_DIR/rtk" "$ARTIFACT_DIR"; do
   [ ! -e "$path" ] || fatal "Cleanup incomplete: $path still exists."
 done
 
