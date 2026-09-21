@@ -5,8 +5,8 @@
   <br>
 
   [![Version](https://img.shields.io/badge/version-1.0.2-7C3AED?style=for-the-badge)](https://github.com/BlizPS/free-kimi-code)
-  [![License: MIT](https://img.shields.io/badge/license-MIT-22C55E?style=for-the-badge)](LICENSE)
-  [![Platforms](https://img.shields.io/badge/platform-macOS%20·%20Linux%20·%20Windows%20·%20Termux-0EA5E9?style=for-the-badge)](#-installation)
+  [![License](https://img.shields.io/badge/license-MIT-22C55E?style=for-the-badge)](LICENSE)
+  [![Platforms](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows%20%C2%B7%20Termux-0EA5E9?style=for-the-badge)](#-installation)
   [![Stars](https://img.shields.io/github/stars/BlizPS/free-kimi-code?style=for-the-badge&color=F59E0B)](https://github.com/BlizPS/free-kimi-code/stargazers)
 
   <p>
@@ -15,145 +15,114 @@
   </p>
 
   <p>
-    <strong>Supercharge Kimi Code, Codex, and Antigravity with one portable LazyDev skill + routing layer.</strong><br>
-    <em>Keep the familiar Kimi Code workflow while adding a stronger, cleaner developer experience.</em>
+    <strong>One portable LazyDev layer for Kimi Code, Codex, and Antigravity.</strong><br>
+    <em>Keep the native CLI experience. Share the routing, skills, context controls, MCP, and developer workflow.</em>
   </p>
 </div>
 
 ---
 
-## What is Lazy Developer?
+## What is Free Kimi Code?
 
-**Lazy Developer** is a free, open-source toolkit that keeps **Kimi Code**, **Codex**, and **Antigravity** as your UI surfaces, while sharing **one** setup, model selection, proxy/routing layer, token/context optimization, and the bundled **LazyDev Skills**.
+**Free Kimi Code** is a portable, open-source developer layer built around **Kimi Code**, **Codex**, and **Antigravity**.
 
----
-
-## Why Lazy Developer?
-
-Kimi Code already provides the agent workflow. Lazy Developer focuses on the layer **around** it:
+It does not replace their terminal UIs. Instead, Lazy Developer sits underneath them and keeps the parts that should be shared in one place:
 
 ```text
 Kimi Code · Codex · Antigravity
-   │
-   ├── Portable AI Skills
-   ├── Live Provider / Model Discovery
-   ├── Model-Aware Tools
-   ├── Context Protection
-   ├── Safer Artifacts
-   ├── Search / Browser Resilience
-   └── Cleaner Terminal Output
+        │
+        ├── Provider / model routing
+        ├── Portable LazyDev Skills
+        ├── Context + token optimization
+        ├── Search / browser resilience
+        ├── MCP integration
+        ├── Safe artifact handling
+        └── Persistent CLI discovery
 ```
 
-The goal is to keep the familiar agent experience while making longer, tool-heavy coding sessions easier to manage.
-
----
-
-## Kimi Code · Codex · Antigravity
-
-Lazy Developer keeps the native **Kimi Code, Codex, and Antigravity** CLI UIs and unifies the layer underneath them.
-
-| | What happens |
-| --- | --- |
-| **Pick your UI** | Install whichever UIs you want. |
-| **`lazydev chat`** | Opens the only installed UI automatically, or asks you to pick when several are installed. |
-| **Provider & model** | Always comes from `lazydev setup`. |
-| **Shared layer** | Same proxy, context/token layer, MCP server, and LazyDev Skills across all three surfaces. |
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/MoonshotAI/kimi-code/main/docs/media/intro.gif" alt="Kimi Code demo" width="860">
-</p>
-
-<p align="center">
-  <sub>Example Kimi Code workflow from the official <a href="https://github.com/MoonshotAI/kimi-code">MoonshotAI/kimi-code</a> repository</sub>
-</p>
+The result is a familiar native CLI on top, with one consistent runtime underneath.
 
 ---
 
 ## ✨ What You Get
 
-### 🧠 Portable AI Skills
+### 🧠 Native AI CLI UIs
 
-Focused skills ship with the project for **implementation, debugging, review, testing**, and reusable engineering workflows.
+Choose the terminal surface you already like:
 
-They are packaged so compatible agent/plugin environments can use the same skill collection independently.
+- **Kimi Code** — native Kimi Code workflow and session handling.
+- **Codex** — official Codex CLI launched directly, without a LazyDev tmux wrapper.
+- **Antigravity** — native `agy` terminal workflow with the shared LazyDev layer.
 
-### ⚡ Live Provider & Model Discovery
+`lazydev chat` detects installed UIs from persisted executable paths, known native install locations, package-manager bins, and PATH fallback.
 
-Run:
+### ⚡ Live Provider & Model Routing
 
 ```sh
 lazydev setup
 ```
 
-Lazy Developer can discover provider and model information from **live catalogs** where supported, instead of relying on one permanently hard-coded model roster.
+Choose a provider, discover its available models, and keep the selected route consistent across the supported UIs.
 
-Use `lazydev setup` to inspect the providers, models, credentials, and capabilities available on your current installation.
+When the selected model does not expose native tool calling, LazyDev can keep the same model and bridge the tool protocol locally instead of silently replacing the model.
 
-### 🔌 Model-Aware Tool Handling
+### 🪶 Context Efficiency
 
-- When a selected model supports **native tool calling**, Lazy Developer uses it directly.
-- When native tool calling is unavailable on the selected route, the runtime can use a compatible **synthetic tool protocol** with the **same model** instead of silently switching to another one.
+Long coding sessions can collect huge tool outputs and historical context. LazyDev keeps the active window focused with rolling output trimming, retained session history, and relevance-aware retrieval.
 
-Tool behavior is based on **model capability**, not one fixed model ID.
+The goal is **better use of the model's actual context**, not pretending a model has a smaller hard limit.
 
-### 🪶 Context Optimization
+### ⚡ RTK Integration
 
-Long coding sessions can accumulate large amounts of tool output and archived history. Lazy Developer keeps the active context useful with:
+The installer integrates **Rust Token Killer (RTK)** for supported terminal output, reducing repetitive shell output before it reaches the model.
 
-- Token budgeting
-- Rolling tool-output pruning
-- Relevance-aware archive/retrieval
-- Proactive context protection
-- Preservation of useful code, paths, commands, errors, URLs, decisions, and evidence
-
-> The runtime does not pretend the model has a smaller fixed context window. It focuses on using the available context **more efficiently**.
-
-### ⚡ RTK-Powered Terminal Output
-
-**Rust Token Killer (RTK)** is integrated for supported shell commands, so unnecessary terminal output is reduced *before* it reaches the model.
-
-Terminal-heavy sessions stay lighter on tokens and context.
-
-### 🧠 Thinking Compatibility
-
-Provider and model metadata are respected for reasoning/thinking behavior where supported.
-
-Model-specific capabilities are preserved without forcing one generic runtime setting onto every route.
-
-### 🛡️ Context & Session Safety
-
-Lazy Developer separates **active request context** from **archived history and tool output**. It keeps existing sessions usable across normal provider/model changes, and avoids blindly injecting unrelated archived content into every request.
+RTK is stored separately from the LazyDev runtime so refreshing LazyDev does not remove the RTK executable.
 
 ### 📁 Safe Artifacts
 
-Standalone artifacts use the canonical `lazydevfile` directory and **never overwrite existing files**.
-
-- Official CLI application data stays in each CLI's normal user-home location.
-- `lazydevfile` is the visible shared workspace/artifact root.
-- Termux/PRoot is the only storage exception for visible artifacts.
-
-Filenames are chosen by the active AI from the task and artifact purpose — not from fixed placeholders such as `index.html`. Collisions receive the lowest available numeric suffix before the extension, while the existing artifact stays untouched:
+Standalone generated files use the canonical `lazydevfile` workspace and are create-only:
 
 ```text
-tiktok.html
-tiktok1.html
-tiktok2.html
+landing-page.html
+landing-page1.html
+landing-page2.html
 ```
 
-### 🌐 Search & Browser Resilience
+Existing standalone artifacts are not overwritten, and generic placeholder names such as `index.html`, `output.*`, or `result.*` are avoided.
 
-Search, browser, and file operations include validation and recovery checks for common malformed tool arguments.
+### 🧩 Portable Skills
 
-Large outputs are handled without blindly filling the active context.
+The repository ships reusable skills for implementation, debugging, review, and testing. The same skill set can be shared across compatible agent environments.
+
+---
+
+## 🔌 MCP Layer
+
+LazyDev keeps MCP intentionally small instead of dumping a huge server catalog into every session.
+
+### Included
+
+**`lazydev-search`** is the bundled local search/browser MCP. It runs from the LazyDev runtime and is configured for Kimi Code, Codex, and Antigravity without replacing the UI's native tools.
+
+**Context7** is also added automatically when `npx` is available. The current pinned package is `@upstash/context7-mcp@4.1.1`, which provides documentation-oriented context without requiring a token for the basic local setup.
+
+The Context7 server is configured through local stdio, not a remote HTTP endpoint. This keeps the default configuration simpler and avoids the remote-MCP edge cases reported by some CLI clients.
+
+### Optional: GitHub MCP
+
+For repository, issue, pull request, Actions, and code context, the official **GitHub MCP Server** is the stronger optional addition. It requires its own GitHub authentication and can expose write-capable tools, so Free Kimi Code does **not** enable it automatically.
+
+Official project:
+
+`https://github.com/github/github-mcp-server`
+
+The current GitHub MCP Server release is **1.12.2**. Configure only the toolsets you actually need, and prefer read-only mode when write operations are unnecessary.
 
 ---
 
 ## 📦 Installation
 
-### macOS / Linux
-
-During installation, the installer first collects the **Kimi Code**, **Codex**, and **Antigravity** install/update choices. It then installs or updates **RTK**, refreshes **Lazy Developer**, skips provider/model setup, and only after that installs or updates the selected native UIs in **Kimi Code → Codex → Antigravity** order. The installer never opens `lazydev setup`; provider/model configuration remains a separate runtime step. Existing AI UI configurations and sessions are left in place, while LazyDev keeps the provider/model, proxy/routing, context optimization, and shared skills layer common across the UIs.
-Codex downloads use the official release archive directly with resumable retries and checksum verification, so a transient CDN reset does not force a full restart. Partial downloads are cached outside the workspace and can be resumed by rerunning the installer.
+### macOS / Linux / Termux Linux
 
 ```sh
 curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install.sh" | sh
@@ -165,30 +134,33 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install.ps1")))
 ```
 
-Then:
+The installer collects the requested native AI UIs first, then keeps the runtime layers consistent:
+
+```text
+RTK
+ ↓
+Lazy Developer
+ ↓
+selected native AI CLI(s)
+```
+
+Provider/model setup is separate:
 
 ```sh
 lazydev setup
-lazydev chat
 ```
 
-### Universal Skills
-
-The bundled skills can also be installed independently for compatible agent CLIs:
+Then launch:
 
 ```sh
-npx skills add BlizPS/free-kimi-code --all
+lazydev chat
 ```
 
 ---
 
 ## 🗑️ Uninstall
 
-To remove Lazy Developer and the CLIs managed by its installer, run the matching uninstaller. This removes LazyDev-managed configuration, sessions, caches, and launcher files; your project folders and unrelated files are left untouched.
-
 ### macOS / Linux / Termux Linux
-
-Run directly from GitHub:
 
 ```sh
 curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/uninstall.sh" | sh
@@ -196,147 +168,114 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/uninsta
 
 ### Windows PowerShell
 
-Run directly from GitHub:
-
 ```powershell
-iwr "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/uninstall.ps1" -UseBasicParsing | iex
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/uninstall.ps1")))
 ```
 
-The uninstaller removes the Lazy Developer-managed Kimi Code, Codex, Antigravity CLI, and RTK installation state. It does not delete your project directories.
+The uninstaller removes Free Kimi Code / LazyDev-managed launchers, state, integrations, caches, and `lazydevfile` artifacts. Native Kimi Code, Codex, Antigravity, and RTK user data are preserved.
 
-## 🚀 Quick Start
+---
 
-The installer collects the Kimi Code → Codex → Antigravity choices first, then installs **RTK**, refreshes **Lazy Developer**, and only after that installs/updates the selected AI UI(s). The selected choices are carried forward; there is no provider/model setup step in the installer. It never runs `lazydev setup` during installation. After installation, run `lazydev setup` when you are ready to choose a provider, API key, and live model.
+## 🔄 Reinstalling is safe
 
-### Reinstalling is safe
+The installer keeps persistent executable paths outside the replaceable LazyDev runtime.
 
-The installer stores its managed binary locations in a small persistent state file under `~/.local/state/lazydev/` on macOS/Linux/Termux Linux. On Windows it uses the same state location under the user profile. Re-running the installer, opening a new terminal, or changing the shell PATH does **not** make an already-installed CLI look missing. A CLI is only downloaded again when it is actually missing or a newer release is detected.
+A normal reinstall or a new terminal does not make an existing CLI look missing just because `PATH` changed. The installer only downloads a CLI again when its actual executable is absent or a newer release needs to be installed.
 
-**1. Set up** and inspect the available providers and models:
+Legacy installations that stored Codex or RTK inside the old LazyDev runtime are migrated back to durable external locations before that runtime is refreshed.
 
-```sh
+---
+
+## 💬 Commands
+
+```text
 lazydev setup
-```
-
-**2. Start** a coding session:
-
-```sh
 lazydev chat
-```
-
-**3. Check** the installation:
-
-```sh
+lazydev resume
 lazydev doctor
-```
-
-Show the installed version:
-
-```sh
-lazydev version
-```
-
----
-
-## 🧩 Skills & Plugin Support
-
-Lazy Developer is designed so its skills can be used **beyond the main CLI** in compatible agent and plugin environments.
-
-The repository includes reusable skill assets and compatibility-oriented project integrations for:
-
-- Kimi Code
-- Codex CLI
-- Antigravity CLI
-- Claude-compatible plugin environments
-- OpenCode
-- OpenClaw
-- Cursor
-- Other compatible skill/plugin runtimes
-
-> Compatibility can vary by environment and feature.
-
----
-
-## 🧰 Useful Commands
-
-## 🔄 Resuming chats
-
-To continue an existing chat instead of starting a new one, run:
-
-```text
-lazydev resume
-```
-
-LazyDev uses the same AI UI selector as `lazydev chat`. Choose Kimi Code, Codex, or Antigravity, then press Enter. Kimi opens its native `/sessions` session picker, Codex launches `codex resume`, and Antigravity opens its native `/resume` conversation picker. The selected UI keeps the LazyDev provider/model routing, MCP, shared Skills, workspace, and runtime configuration active while restoring the saved conversation history.
-
-For Codex, LazyDev supplies resume-time proxy credentials and environment configuration so the resumed thread does not depend on a stale or missing `LAZYDEV_CODEX_API_KEY` in the shell.
-
-```text
-lazydev help
-lazydev setup
-lazydev chat
-lazydev resume
 lazydev skills
-lazydev artifact <filename>
-lazydev env
-lazydev doctor
+lazydev path
 lazydev version
+lazydev ui-demo
 ```
+
+### Resume
+
+```sh
+lazydev resume
+```
+
+LazyDev keeps the native resume flow for each UI instead of inventing a parallel session format:
+
+- Kimi Code uses its native session picker.
+- Codex uses `codex resume`.
+- Antigravity uses its native `/resume` flow.
 
 ---
 
-## 🔄 Updating
+## 🛠️ Codex Integration
 
-Re-run the matching installer, then verify:
+Codex is launched through its resolved **official executable path**. LazyDev does not replace `codex` with a tmux compatibility command.
 
-```sh
-lazydev version
-lazydev doctor
+LazyDev provides Codex with a private routing endpoint through `CODEX_HOME/config.toml`, then translates the provider response into the Responses API event format expected by Codex.
+
+The bridge emits the completed assistant `response.output_item.done` event as part of every streamed response, so native Codex transcript features such as `/copy` can see the last assistant response correctly.
+
+---
+
+## 🛰️ Antigravity Integration
+
+Antigravity keeps its native `agy` executable and native home-level configuration. LazyDev adds only its managed MCP entry and preserves unrelated MCP servers.
+
+The current Antigravity configuration path is:
+
+```text
+~/.gemini/config/mcp_config.json
 ```
+
+Skills continue to use the native Antigravity user skill location rather than being hidden inside the LazyDev workspace.
 
 ---
 
 ## 🐢 Termux / Android
 
-Kimi Code's Linux binary requires a **glibc-based** Linux userland.
-
-On Termux, use a Debian or Ubuntu guest:
+Kimi Code, Codex, and Antigravity have platform-specific terminal/runtime requirements. For Termux, a glibc Linux guest such as Debian or Ubuntu is recommended for the native Linux CLI binaries.
 
 ```sh
 pkg update
 pkg install proot-distro
-
 proot-distro install debian
 proot-distro login debian
 ```
 
-Then run the normal Lazy Developer installer inside the guest.
+Then use the normal installer inside the guest.
+
+Codex is still launched directly. LazyDev does not install a tmux wrapper around the public `codex` command.
 
 ---
 
-## 🛡️ Safe by Default
+## 🔧 Developer Notes
 
-- Standalone artifacts never overwrite existing files.
-- Saved sessions stay in place during normal model switching.
-- Strict proxy routes can repair incomplete tool-call history.
-- Never commit API keys, OAuth tokens, or provider credentials.
+Free Kimi Code is intentionally built around the native CLIs rather than cloning their UIs.
+
+The shared layer owns routing, context management, skills, MCP registration, artifact policy, and installation state. Each external CLI remains responsible for its own TUI, authentication, sessions, and native configuration.
+
+That separation makes upgrades safer and avoids hiding external CLI state inside a replaceable LazyDev runtime directory.
 
 ---
 
 ## 🤝 Contributing
 
-Bug reports, feature requests, documentation improvements, and compatible skill contributions are all welcome. ❤️
+Bug reports, compatibility reports, documentation improvements, and skill contributions are welcome.
 
-Use [GitHub Issues](https://github.com/BlizPS/free-kimi-code/issues) and [Discussions](https://github.com/BlizPS/free-kimi-code/discussions) for project feedback, compatibility reports, ideas, and community support.
-
-If you find Lazy Developer useful, consider starring the repository.
+Use [Issues](https://github.com/BlizPS/free-kimi-code/issues) for bugs and feature requests, and [Discussions](https://github.com/BlizPS/free-kimi-code/discussions) for ideas and community support.
 
 ---
 
 ## 📄 License
 
-MIT. See [LICENSE](LICENSE)
+MIT. See [LICENSE](LICENSE).
 
 <div align="center">
-  <sub>Built by <strong>BlizPS</strong> · Lazy Developer 1.0.2 · Kimi Code + Codex + Antigravity</sub>
+  <sub>Built by <strong>BlizPS</strong> · Free Kimi Code 1.0.2 · Lazy Developer · Kimi Code + Codex + Antigravity</sub>
 </div>

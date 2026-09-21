@@ -61,6 +61,8 @@ UI_RUNTIME_DIR = Path(os.environ.get("LAZYDEV_UI_RUNTIME", str(CONFIG_DIR / "ui-
 UI_PACKAGE = "@poppinss/cliui"
 UI_PACKAGE_VERSION = "6.8.1"
 UI_HELPER = ROOT / "runtime" / "lazydev-ui.mjs"
+CONTEXT7_MCP_PACKAGE = "@upstash/context7-mcp@4.1.1"
+CONTEXT7_MCP_NAME = "context7"
 
 PROVIDERS: list[dict[str, Any]] = [
     {"id": "openrouter", "label": "OpenRouter", "kind": "openai", "models": "https://openrouter.ai/api/v1/models", "base": "https://openrouter.ai/api/v1", "env": "OPENROUTER_API_KEY"},
@@ -2916,8 +2918,29 @@ def write_kimi_files(provider: dict[str, Any], cfg: dict[str, Any], proxy: _Prov
     return config_path, tui_path
 
 
+def _npx_command() -> str | None:
+    """Return the host's npx executable without forcing a platform-specific path."""
+    env = _command_env_with_managed_bins()
+    names = ("npx.cmd", "npx") if IS_WINDOWS else ("npx",)
+    for name in names:
+        found = shutil.which(name, path=env.get("PATH"))
+        if found:
+            return found
+    return None
+
+
+def _context7_mcp_entry() -> dict[str, Any] | None:
+    npx = _npx_command()
+    if not npx:
+        return None
+    return {
+        "command": npx,
+        "args": ["-y", CONTEXT7_MCP_PACKAGE],
+    }
+
+
 def write_kimi_mcp_config() -> Path:
-    """Register the dependency-free Python browser/search MCP without Node.js."""
+    """Register LazyDev search plus optional local Context7 without touching user servers."""
     KIMI_HOME.mkdir(parents=True, exist_ok=True)
     mcp_file = KIMI_HOME / "mcp.json"
     try:
@@ -2936,6 +2959,9 @@ def write_kimi_mcp_config() -> Path:
         "startupTimeoutMs": 30000,
         "toolTimeoutMs": 60000,
     }
+    context7 = _context7_mcp_entry()
+    if context7 and (CONTEXT7_MCP_NAME not in servers or not isinstance(servers.get(CONTEXT7_MCP_NAME), dict)):
+        servers[CONTEXT7_MCP_NAME] = context7
     data["mcpServers"] = servers
     temp = mcp_file.with_suffix(f".tmp-{os.getpid()}")
     temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -3326,7 +3352,16 @@ def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
         'startup_timeout_sec = 30',
         'tool_timeout_sec = 60',
         'env = { LAZYDEV_BROWSER_USER_AGENT = "LazyDev-Browser/1.0.2" }',
-    ])+'\n'
+    ]) + '\n'
+    context7 = _context7_mcp_entry()
+    if context7:
+        config = config.rstrip() + '\n\n' + '\n'.join([
+            '[mcp_servers.context7]',
+            f'command = {toml_quote(str(context7["command"]))}',
+            f'args = [{toml_quote(str(context7["args"][0]))}, {toml_quote(str(context7["args"][1]))}]',
+            'startup_timeout_sec = 20',
+            'tool_timeout_sec = 60',
+        ]) + '\n'
     (home/'config.toml').write_text(config, encoding='utf-8')
     return home
 
@@ -3445,13 +3480,17 @@ class _ResponsesProxy:
                 resp_id=str(completion.get("id") or f"resp_lazydev_{secrets.token_hex(8)}")
                 output=[]
                 if isinstance(msg,dict):
+                    text=_content_text(msg.get("content"))
+                    # Responses output ordering matters to Codex. When a model
+                    # returns both assistant text and tool calls, emit the
+                    # assistant message first, then function calls.
+                    if text:
+                        output.append({"type":"message","id":f"msg_{secrets.token_hex(6)}","role":"assistant","status":"completed","content":[{"type":"output_text","text":text,"annotations":[]}]})
                     for call in msg.get("tool_calls") or []:
                         fn=call.get("function") if isinstance(call,dict) else {}
                         if isinstance(fn,dict) and fn.get("name"):
-                            output.append({"type":"function_call","id":str(call.get("id") or f"fc_{secrets.token_hex(6)}"),"call_id":str(call.get("id") or f"call_{secrets.token_hex(6)}"),"name":str(fn["name"]),"arguments":str(fn.get("arguments") or "{}"),"status":"completed"})
-                    text=msg.get("content")
-                    if text:
-                        output.append({"type":"message","id":f"msg_{secrets.token_hex(6)}","role":"assistant","status":"completed","content":[{"type":"output_text","text":str(text),"annotations":[]}]})
+                            call_id=str(call.get("id") or f"call_{secrets.token_hex(6)}")
+                            output.append({"type":"function_call","id":str(call.get("id") or f"fc_{secrets.token_hex(6)}"),"call_id":call_id,"name":str(fn["name"]),"arguments":str(fn.get("arguments") or "{}"),"status":"completed"})
                 raw_usage=completion.get("usage") if isinstance(completion.get("usage"),dict) else {}
                 input_tokens=int(raw_usage.get("input_tokens") or raw_usage.get("prompt_tokens") or 0)
                 output_tokens=int(raw_usage.get("output_tokens") or raw_usage.get("completion_tokens") or 0)
@@ -3496,20 +3535,42 @@ class _ResponsesProxy:
                 except Exception as exc: return self._send(502,{"error":{"message":f"Invalid upstream JSON: {exc}"}})
                 result=self._from_chat(completion)
                 if body.get("stream"):
+                    response_meta={k:result[k] for k in ("id","object","created_at","model")}
                     events=[
-                        {"type":"response.created","response":{k:result[k] for k in ("id","object","created_at","model","status")}},
+                        {"type":"response.created","response":{**response_meta,"status":"in_progress"}},
+                        {"type":"response.in_progress","response":{**response_meta,"status":"in_progress"}},
                     ]
-                    text=str(result.get("output_text") or "")
-                    if text:
-                        events.append({"type":"response.output_text.delta","item_id":result["output"][0]["id"],"output_index":0,"content_index":0,"delta":text})
-                        events.append({"type":"response.output_text.done","item_id":result["output"][0]["id"],"output_index":0,"content_index":0,"text":text})
-                    for item in result.get("output",[]):
-                        if item.get("type")=="function_call":
-                            events.append({"type":"response.output_item.added","output_index":0,"item":item})
-                            events.append({"type":"response.function_call_arguments.delta","item_id":item["id"],"output_index":0,"delta":item["arguments"]})
-                            events.append({"type":"response.function_call_arguments.done","item_id":item["id"],"output_index":0,"arguments":item["arguments"]})
+                    for output_index,item in enumerate(result.get("output",[])):
+                        kind=str(item.get("type") or "")
+                        if kind=="message":
+                            item_id=str(item.get("id") or f"msg_{secrets.token_hex(6)}")
+                            content=item.get("content") if isinstance(item.get("content"),list) else []
+                            text="\n".join(
+                                str(part.get("text") or "")
+                                for part in content
+                                if isinstance(part,dict) and part.get("type")=="output_text"
+                            )
+                            added_item=dict(item)
+                            added_item["status"] = "in_progress"
+                            events.append({"type":"response.output_item.added","output_index":output_index,"item":added_item})
+                            events.append({"type":"response.content_part.added","item_id":item_id,"output_index":output_index,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}})
+                            if text:
+                                events.append({"type":"response.output_text.delta","item_id":item_id,"output_index":output_index,"content_index":0,"delta":text})
+                                events.append({"type":"response.output_text.done","item_id":item_id,"output_index":output_index,"content_index":0,"text":text})
+                            events.append({"type":"response.content_part.done","item_id":item_id,"output_index":output_index,"content_index":0,"part":{"type":"output_text","text":text,"annotations":[]}})
+                            events.append({"type":"response.output_item.done","output_index":output_index,"item":item})
+                        elif kind=="function_call":
+                            item_id=str(item.get("id") or f"fc_{secrets.token_hex(6)}")
+                            arguments=str(item.get("arguments") or "{}")
+                            events.append({"type":"response.output_item.added","output_index":output_index,"item":item})
+                            events.append({"type":"response.function_call_arguments.delta","item_id":item_id,"output_index":output_index,"delta":arguments})
+                            events.append({"type":"response.function_call_arguments.done","item_id":item_id,"output_index":output_index,"arguments":arguments})
+                            events.append({"type":"response.output_item.done","output_index":output_index,"item":item})
                     events.append({"type":"response.completed","response":result})
-                    raw=b"".join((b"data: "+json.dumps(e,separators=(",",":")).encode()+b"\n\n") for e in events)
+                    raw=b"".join(
+                        (b"event: "+str(e.get("type","")).encode()+b"\n"+b"data: "+json.dumps(e,separators=(",",":"),ensure_ascii=False).encode()+b"\n\n")
+                        for e in events
+                    )
                     return self._send(200,raw,"text/event-stream")
                 return self._send(200,result)
         return Handler
@@ -3661,6 +3722,9 @@ def _write_antigravity_runtime(pc: dict[str, Any]) -> tuple[Path, Path]:
         "cwd":str(ROOT),
         "env":{"LAZYDEV_BROWSER_USER_AGENT":f"LazyDev-Browser/{VERSION}"},
     }
+    context7 = _context7_mcp_entry()
+    if context7 and (CONTEXT7_MCP_NAME not in servers or not isinstance(servers.get(CONTEXT7_MCP_NAME), dict)):
+        servers[CONTEXT7_MCP_NAME] = context7
     data["mcpServers"]=servers
     mcp_file.write_text(json.dumps(data, indent=2)+"\n", encoding="utf-8")
     return settings_file, mcp_file
