@@ -25,12 +25,8 @@ $LazyDevConfig = if ($env:LAZYDEV_CONFIG_DIR) { $env:LAZYDEV_CONFIG_DIR } else {
 $ArtifactDir = Join-Path $HOME 'lazydevfile'
 $DeepSeekHarnessRuntime = if ($env:LAZYDEV_DSH_RUNTIME) { $env:LAZYDEV_DSH_RUNTIME } else { Join-Path $LazyDevConfig 'deepseek-harness-runtime' }
 $DeepSeekHarnessHome = if ($env:LAZYDEV_DSH_HOME) { $env:LAZYDEV_DSH_HOME } else { Join-Path $LazyDevConfig 'deepseek-harness-home' }
-    (Join-Path $env:APPDATA 'rtk'),
-    (Join-Path $env:LOCALAPPDATA 'rtk')
-)
-
 if ($Help) {
-@"
+    $HelpText = @"
 Lazy Developer uninstaller
 
 This removes LazyDev-managed files, launchers, integrations, state, and artifacts.
@@ -38,8 +34,9 @@ Native Kimi Code, Codex, Antigravity, Claude Code, and RTK user data and session
 Project directories outside those managed locations are left untouched.
 
 To reinstall later, run the Lazy Developer installer again.
-"@ | Write-Host
-exit 0
+"@
+    Write-Host $HelpText
+    exit 0
 }
 
 function Remove-IfManagedFile([string]$Path, [string]$Pattern) {
@@ -167,6 +164,7 @@ $paths = @(
     (Join-Path $CodexBinRoot 'codex.exe'),
     (Join-Path $LazyDevBin 'kimi.exe'),
     $ArtifactDir
+)
 foreach ($path in $paths) {
     if (Test-Path -LiteralPath $path) { throw "Cleanup incomplete: $path still exists." }
 }

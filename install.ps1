@@ -6925,15 +6925,16 @@ function Connect-RtkToKimi([string]$RtkExe) {
     } finally { Pop-Location }
 }
 if ($Help) {
-@"
+    $HelpText = @"
 Lazy Developer installer
 
 Installs or updates the selected Kimi Code, Codex, Antigravity, Claude Code, and DeepSeek Harness UIs, then RTK and Lazy Developer $LazyDevVersion.
 The LazyDev CLI is native Python and does not require Node.js.
 Run the same command again to update only components that changed.
 Existing Kimi sessions are left alone during updates.
-"@ | Write-Host
-exit 0
+"@
+    Write-Host $HelpText
+    exit 0
 }
 
 $KimiExe = Find-Kimi
@@ -7449,13 +7450,13 @@ if ($InstallDeepSeekHarness -and $DeepSeekHarnessNeedsUpdate) {
     if (-not $node -or -not $npm) { Fail 'DeepSeek Harness needs Node.js and a package manager.' }
     New-Item -ItemType Directory -Path $DeepSeekHarnessRuntime -Force | Out-Null
     $pkgPath = Join-Path $DeepSeekHarnessRuntime 'package.json'
-    Set-Content -LiteralPath $pkgPath -Encoding UTF8 -Value (@"
+    Set-Content -LiteralPath $pkgPath -Encoding UTF8 -Value @"
 {
   `"name`": `"@blizps/lazydev-deepseek-harness-runtime`",
   `"private`": true,
   `"dependencies`": { `"$DeepSeekHarnessPackage`": `"$DeepSeekHarnessTargetVersion`" }
 }
-"@)
+"@
     Push-Location $DeepSeekHarnessRuntime
     try {
         & $npm install --no-package-lock --include=optional --omit=dev
