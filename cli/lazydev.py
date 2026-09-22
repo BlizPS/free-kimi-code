@@ -23,6 +23,9 @@ import io
 import hashlib
 import sys
 import textwrap
+
+if sys.version_info < (3, 10):
+    raise RuntimeError("Lazy Developer requires Python 3.10 or newer.")
 import urllib.error
 import urllib.parse
 import urllib.request

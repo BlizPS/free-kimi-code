@@ -6602,9 +6602,17 @@ function Test-RtkTokenKiller([string]$Exe) {
     try { & $Exe gain *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
 function Get-PythonCommand {
-    foreach ($name in @('py.exe', 'python.exe', 'python3.exe')) {
+    foreach ($name in @('python.exe', 'python3.exe')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
         if ($cmd) { return $cmd.Source }
+    }
+    $pyLauncher = Get-Command 'py.exe' -ErrorAction SilentlyContinue
+    if ($pyLauncher) {
+        try {
+            $resolved = @(& $pyLauncher.Source -3 -c "import sys; print(sys.executable)" 2>$null) | Select-Object -First 1
+            $resolved = ([string]$resolved).Trim()
+            if ($resolved -and (Test-Path -LiteralPath $resolved -PathType Leaf)) { return $resolved }
+        } catch {}
     }
     return $null
 }
@@ -7308,33 +7316,11 @@ if ($LazyDevNeedsUpdate) {
         Move-Item -LiteralPath $stage -Destination $InstallRoot -Force
 
         New-Item -ItemType Directory -Path $BinRoot -Force | Out-Null
-        $launcherContent = @(
-            '@echo off',
-            'setlocal',
-            ('set "LAZYDEV_ROOT=' + $InstallRoot + '"'),
-            ('set "PATH=' + $BinRoot + ';' + $KimiBinRoot + ';%PATH%"'),
-            'where py.exe >nul 2>&1',
-            'if not errorlevel 1 (',
-            '  py.exe -3 "%LAZYDEV_ROOT%\cli\lazydev.py" %*',
-            '  set "EXIT_CODE=%ERRORLEVEL%"',
-            '  endlocal & exit /b %EXIT_CODE%',
-            ')',
-            'where python.exe >nul 2>&1',
-            'if not errorlevel 1 (',
-            '  python.exe "%LAZYDEV_ROOT%\cli\lazydev.py" %*',
-            '  set "EXIT_CODE=%ERRORLEVEL%"',
-            '  endlocal & exit /b %EXIT_CODE%',
-            ')',
-            'where uv.exe >nul 2>&1',
-            'if not errorlevel 1 (',
-            '  uv.exe run --no-project --python 3.13 "%LAZYDEV_ROOT%\cli\lazydev.py" %*',
-            '  set "EXIT_CODE=%ERRORLEVEL%"',
-            '  endlocal & exit /b %EXIT_CODE%',
-            ')',
-            'echo LazyDev requires Python 3.10+ or uv. The installer does not install Node.js. 1>&2',
-            'endlocal & exit /b 1'
-        ) -join [Environment]::NewLine
-        Set-Content -LiteralPath $Launcher -Value $launcherContent -Encoding ASCII
+        # Keep CMD syntax out of PowerShell source. Windows PowerShell 5.1 then
+        # parses the installer without seeing CMD operators such as & as PowerShell code.
+        $launcherTemplate = [Text.Encoding]::ASCII.GetString([Convert]::FromBase64String('QGVjaG8gb2ZmDQpzZXRsb2NhbA0Kc2V0ICJMQVpZREVWX1JPT1Q9X19MQVpZREVWX1JPT1RfXyINCnNldCAiUEFUSD1fX0JJTl9ST09UX187X19LSU1JX0JJTl9ST09UX187JVBBVEglIg0Kd2hlcmUgcHl0aG9uLmV4ZSA+bnVsIDI+JjENCmlmIG5vdCBlcnJvcmxldmVsIDEgKA0KICBweXRob24uZXhlICIlTEFaWURFVl9ST09UJVxjbGlcbGF6eWRldi5weSIgJSoNCiAgc2V0ICJFWElUX0NPREU9JUVSUk9STEVWRUwlIg0KICBlbmRsb2NhbCAmIGV4aXQgL2IgJUVYSVRfQ09ERSUNCikNCndoZXJlIHB5dGhvbjMuZXhlID5udWwgMj4mMQ0KaWYgbm90IGVycm9ybGV2ZWwgMSAoDQogIHB5dGhvbjMuZXhlICIlTEFaWURFVl9ST09UJVxjbGlcbGF6eWRldi5weSIgJSoNCiAgc2V0ICJFWElUX0NPREU9JUVSUk9STEVWRUwlIg0KICBlbmRsb2NhbCAmIGV4aXQgL2IgJUVYSVRfQ09ERSUNCikNCndoZXJlIHB5LmV4ZSA+bnVsIDI+JjENCmlmIG5vdCBlcnJvcmxldmVsIDEgKA0KICBweS5leGUgLTMgIiVMQVpZREVWX1JPT1QlXGNsaVxsYXp5ZGV2LnB5IiAlKg0KICBzZXQgIkVYSVRfQ09ERT0lRVJST1JMRVZFTCUiDQogIGVuZGxvY2FsICYgZXhpdCAvYiAlRVhJVF9DT0RFJQ0KKQ0Kd2hlcmUgdXYuZXhlID5udWwgMj4mMQ0KaWYgbm90IGVycm9ybGV2ZWwgMSAoDQogIHV2LmV4ZSBydW4gLS1uby1wcm9qZWN0IC0tcHl0aG9uIDMuMTMgIiVMQVpZREVWX1JPT1QlXGNsaVxsYXp5ZGV2LnB5IiAlKg0KICBzZXQgIkVYSVRfQ09ERT0lRVJST1JMRVZFTCUiDQogIGVuZGxvY2FsICYgZXhpdCAvYiAlRVhJVF9DT0RFJQ0KKQ0KZWNobyBMYXp5RGV2IHJlcXVpcmVzIFB5dGhvbiAzLjEwKyBvciB1di4gVGhlIGluc3RhbGxlciBkb2VzIG5vdCBpbnN0YWxsIE5vZGUuanMuIDE+JjINCmVuZGxvY2FsICYgZXhpdCAvYiAxDQo='))
+        $launcherContent = $launcherTemplate.Replace('__LAZYDEV_ROOT__', $InstallRoot).Replace('__BIN_ROOT__', $BinRoot).Replace('__KIMI_BIN_ROOT__', $KimiBinRoot)
+        [IO.File]::WriteAllText($Launcher, $launcherContent, [Text.Encoding]::ASCII)
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
         $parts = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
         foreach ($entry in @($BinRoot, (Join-Path $HOME '.kimi-code\bin'))) {
@@ -7487,7 +7473,7 @@ if ($InstallDeepSeekHarness -and $DeepSeekHarnessNeedsUpdate) {
 # Prefer the managed bin directory in new and current PowerShell sessions.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $entries = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
-$entries = @($entries | Where-Object { $_ -notin @($BinRoot, (Join-Path $HOME '.kimi-code\bin')) })
+$entries = @($entries | Where-Object { $_ -ne $BinRoot -and $_ -ne (Join-Path $HOME '.kimi-code\bin') })
 $entries = @($BinRoot, $CodexBinRoot, $RtkBinRoot, (Join-Path $HOME '.kimi-code\bin')) + $entries
 [Environment]::SetEnvironmentVariable('Path', ($entries | Select-Object -Unique) -join ';', 'User')
 $env:Path = (($entries | Select-Object -Unique) -join ';')
