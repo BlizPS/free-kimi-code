@@ -63,3 +63,8 @@ The only special storage exception is native Termux and Debian/Ubuntu through PR
 ### Codex TUI on Android/Termux
 
 OpenAI currently documents Codex CLI for supported desktop/Linux environments rather than native Android. LazyDev keeps the official Codex binary unchanged and launches it directly; it never replaces `codex` with a direct execution wrapper.
+
+
+## DeepSeek Harness
+
+Desktop uses the current supported Web UI runtime; Android/Termux uses the compatibility-pinned runtime path documented in `docs/deepseek-harness.md`.

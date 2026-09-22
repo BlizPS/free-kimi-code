@@ -10,21 +10,21 @@
   [![Stars](https://img.shields.io/github/stars/BlizPS/free-kimi-code?style=for-the-badge&color=F59E0B)](https://github.com/BlizPS/free-kimi-code/stargazers)
 
   <p>
-    <strong>One portable developer layer for Kimi Code, Codex, Antigravity, and Claude Code.</strong><br>
-    <em>Keep the native CLI experience. Share skills, routing, context controls, MCP, artifacts, and developer tooling.</em>
+    <strong>One portable developer layer for Kimi Code, Codex, Antigravity, Claude Code, and DeepSeek Harness.</strong><br>
+    <em>Keep the native interfaces. Share skills, routing, context controls, MCP, artifacts, and developer tooling.</em>
   </p>
 </div>
 
 ---
 
-[Installation](#-installation) · [Features](#-features) · [Commands](#commands) · [Integrations](#-native-cli-integrations) · [Contributing](#-contributing)
+[Installation](#-installation) · [Features](#-features) · [Commands](#commands) · [Integrations](#-native-cli-integrations) · [Docs](docs/README.md)
 
 # Free Kimi Code
 
-**Free Kimi Code** is a free, open-source developer layer for **Kimi Code**, **Codex CLI**, **Antigravity CLI**, and **Claude Code**. It keeps their native interfaces while Lazy Developer provides the shared coding layer underneath.
+**Free Kimi Code** is a free, open-source developer layer for **Kimi Code**, **Codex CLI**, **Antigravity CLI**, **Claude Code**, and **DeepSeek Harness**. Native interfaces stay in charge while Lazy Developer provides the shared layer underneath.
 
 ```text
-Kimi Code · Codex · Antigravity · Claude Code
+Kimi Code · Codex · Antigravity · Claude Code · DeepSeek Harness
         │
         ├── Portable AI skills
         ├── Live model routing
@@ -32,26 +32,26 @@ Kimi Code · Codex · Antigravity · Claude Code
         ├── MCP search / browser tools
         ├── Safe artifact handling
         ├── Developer intelligence
-        └── Native session compatibility
+        └── Native session / Web UI compatibility
 ```
 
-> Free Kimi Code is free software. Upstream model/provider availability, limits, authentication, and pricing are controlled by their respective services.
+> Free Kimi Code is free software. Upstream availability, limits, authentication, and pricing stay with the configured services.
 
 ## ✨ Features
 
 ### 🧠 Portable AI Skills
 
-Four focused skills are bundled: `lazy-developer`, `lazy-debug`, `lazy-review`, and `lazy-test`. The same skills can be used by compatible agent and plugin environments.
+Four focused skills are bundled: `lazy-developer`, `lazy-debug`, `lazy-review`, and `lazy-test`. They are shared across supported agent environments, including Claude Code and DeepSeek Harness.
 
 ### ⚡ Live Provider & Model Routing
 
-Run `lazydev setup` to see the providers and models currently available to your installation. The catalog stays dynamic instead of being hard-coded in the README.
+Run `lazydev setup` to see the providers and models currently available to your installation. The catalog stays dynamic instead of being frozen in the README.
 
-### 🤖 Four Native CLI UIs
+### 🤖 Five Coding Surfaces
 
-The installer can install **Kimi Code → Codex → Antigravity → Claude Code** in that order. Each component is optional through a `Y/n` prompt. When all four are installed, `lazydev chat` and `lazydev resume` offer all four native UIs.
+The installer can install **Kimi Code → Codex → Antigravity → Claude Code → DeepSeek Harness** in that order. Each choice is optional with a `Y/n` prompt.
 
-Claude Code uses the same LazyDev provider/model route as the other native CLIs. No second provider setup is required.
+`lazydev chat` can open all five when installed. `lazydev resume` stays limited to the native session-based CLIs; DeepSeek Harness is a local Web UI and is intentionally not part of the resume picker.
 
 ### 🎯 Model-Aware Tools & Thinking
 
@@ -67,11 +67,11 @@ The bundled search/browser layer provides Unicode-safe output, focused reads, ar
 
 ### 📁 Safe Artifacts
 
-Generated files use the canonical `lazydevfile` workspace and are create-only. Existing artifacts and native client data are preserved.
+Generated files use the canonical `lazydevfile` workspace. Existing artifacts and native client data are preserved.
 
 ### 🎨 UI, 3D, SEO & Language Intelligence
 
-`lazydev ui <brief>` can generate a searchable design system before implementation. Research gates and `lazydev lang` provide current design/SEO/3D research and language-aware coding contracts.
+`lazydev ui <brief>` can generate a searchable design system before implementation. Research gates and `lazydev lang` provide research-aware and language-aware coding contracts.
 
 ## 📦 Installation
 
@@ -87,7 +87,29 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install.ps1")))
 ```
 
-The installer asks which native coding CLIs to install or update. The order is **Kimi Code → Codex → Antigravity → Claude Code**, with each choice using `Y/n`.
+The installer asks which native coding CLIs to install or update in this order:
+
+```text
+Kimi Code → Codex → Antigravity → Claude Code → DeepSeek Harness
+```
+
+Each component uses its own `Y/n` prompt. DeepSeek Harness is the last choice because it runs as a local Web UI.
+
+## 🐢 Termux / Android
+
+Kimi Code's Linux binary requires a glibc-based Linux userland.
+
+On Termux, use a Debian or Ubuntu guest:
+
+```sh
+pkg update
+pkg install proot-distro
+
+proot-distro install debian
+proot-distro login debian
+```
+
+For Android/Termux, LazyDev pins the DeepSeek Harness runtime to the known Android-compatible release path instead of the newer builds that use unsupported native file locking. See [Troubleshooting](docs/troubleshooting.md).
 
 Then configure the current provider/model catalog and open the UI:
 
@@ -96,16 +118,12 @@ lazydev setup
 lazydev chat
 ```
 
-### Skills
-
-`lazydev chat` syncs the bundled Lazy Developer skills into each supported native CLI, including Claude Code.
-
 ## Commands
 
 ```text
 lazydev setup             Configure the available provider/model route
-lazydev chat              Open a selected native coding UI
-lazydev resume            Resume a saved native chat
+lazydev chat              Open a selected coding UI
+lazydev resume            Resume a saved native CLI chat
 lazydev skills            Browse bundled LazyDev skills
 lazydev artifact <name>   Work with a standalone artifact path
 lazydev env               Inspect the runtime environment
@@ -118,11 +136,25 @@ lazydev version           Show the installed version
 
 ## 🖥️ Native CLI Integrations
 
-**Kimi Code**, **Codex CLI**, **Antigravity CLI**, and **Claude Code** keep ownership of their native interfaces and session behavior. Lazy Developer provides the shared routing, context/token layer, skills, MCP, artifact policy, and installation discovery.
+**Kimi Code**, **Codex CLI**, **Antigravity CLI**, and **Claude Code** keep their native terminal interfaces and session behavior. **DeepSeek Harness** keeps its native local Web UI and session workspace. Lazy Developer provides the shared routing, context/token layer, skills, MCP, artifact policy, and installation discovery.
 
-### Claude Code
+### DeepSeek Harness
 
-When Claude Code is selected from `lazydev chat`, it uses the same configured LazyDev route while keeping the native Claude Code interface and session flow.
+Select **DeepSeek Harness** from `lazydev chat`. LazyDev starts its local Web UI on loopback, connects its model layer to the active LazyDev route, installs the bundled skills into the isolated Harness home, and opens the local page when a supported browser launcher is available.
+
+```text
+✓ DeepSeek Harness selected
+
+Starting DeepSeek Harness Web UI...
+Connecting LazyDev proxy...
+Loading active model...
+Opening local browser...
+
+DeepSeek Harness is ready
+Web UI → http://127.0.0.1:<port>
+Proxy   → Connected
+Model   → Sonnet
+```
 
 ### Resume
 
@@ -130,7 +162,7 @@ When Claude Code is selected from `lazydev chat`, it uses the same configured La
 lazydev resume
 ```
 
-The chooser includes any installed native UI, including Claude Code. Claude Code uses its native `--continue` flow.
+The resume chooser includes installed native session CLIs. DeepSeek Harness is intentionally excluded because its workflow is Web UI based rather than a native terminal resume command.
 
 ## 🔄 Updating
 
@@ -141,30 +173,22 @@ lazydev version
 lazydev doctor
 ```
 
-## 🧪 Verification
-
-The repository includes smoke tests covering skills, providers, MCP, artifacts, filesystem guards, context handling, sessions, proxies, authentication, installers, efficiency, language detection, and plugin manifests.
-
-
 ## 📚 Docs
 
-[Getting Started](docs/getting-started.md) · [Claude Code Integration](docs/claude-code.md) · [Skills](docs/skills.md) · [Provider & Model Routing](docs/provider-routing.md) · [Troubleshooting](docs/troubleshooting.md)
+[Getting Started](docs/getting-started.md) · [DeepSeek Harness](docs/deepseek-harness.md) · [Claude Code](docs/claude-code.md) · [Skills](docs/skills.md) · [Provider & Model Routing](docs/provider-routing.md) · [Troubleshooting](docs/troubleshooting.md)
 
 [Architecture](ARCHITECTURE.md) · [Compatibility](COMPATIBILITY.md) · [Contributing](CONTRIBUTING.md) · [Support](SUPPORT.md)
 
 ## ❓ FAQ
 
 **What is Free Kimi Code?**  
-A free, open-source Lazy Developer layer for Kimi Code, Codex CLI, Antigravity CLI, and Claude Code.
+A free, open-source Lazy Developer layer for five native coding surfaces: Kimi Code, Codex CLI, Antigravity CLI, Claude Code, and DeepSeek Harness.
 
 **How do I see available providers and models?**  
 Run `lazydev setup`. The catalog is intentionally dynamic.
 
 **Does it replace the native CLIs?**  
-No. The native interfaces and session systems remain in charge.
-
-**Does Free Kimi Code make every upstream model free?**  
-No. Upstream access and limits depend on the configured service.
+No. Native interfaces and session systems remain in charge.
 
 ## 🗑️ Uninstall
 
@@ -180,7 +204,7 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/uninsta
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/uninstall.ps1")))
 ```
 
-The uninstallers remove LazyDev-managed files while preserving supported native client data and RTK user data.
+The uninstallers remove LazyDev-managed files while preserving native client data and user session data.
 
 ## 🤝 Contributing
 
@@ -193,5 +217,5 @@ If Free Kimi Code is useful to you, a star helps other developers discover the p
 MIT. See [LICENSE](LICENSE).
 
 <div align="center">
-  <sub>Built by <strong>BlizPS</strong> · Free Kimi Code 1.0.3 · Lazy Developer · Kimi Code + Codex + Antigravity + Claude Code</sub>
+  <sub>Built by <strong>BlizPS</strong> · Free Kimi Code 1.0.3 · Lazy Developer · Kimi Code + Codex + Antigravity + Claude Code + DeepSeek Harness</sub>
 </div>

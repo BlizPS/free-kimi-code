@@ -34,8 +34,11 @@ VERSION = "1.0.3"
 CLAUDE_EXPOSED_MODEL_ALIAS = "sonnet"
 CLAUDE_ANDROID_MESSAGING_BUG_MIN = (2, 1, 248)
 CLAUDE_ANDROID_MESSAGING_BUG_MAX = (2, 1, 251)
-CLAUDE_ANDROID_SAFE_VERSION = (2, 1, 247)
-CLAUDE_ANDROID_SAFE_VERSION_TEXT = "2.1.247"
+DEEPSEEK_HARNESS_PACKAGE = "@deepseek-ai/dsh"
+DEEPSEEK_HARNESS_DESKTOP_VERSION = os.environ.get("LAZYDEV_DSH_VERSION", "0.1.5-rc.2")
+DEEPSEEK_HARNESS_TERMUX_VERSION = os.environ.get("LAZYDEV_DSH_TERMUX_VERSION", "0.1.2-rc.1")
+DEEPSEEK_HARNESS_RUNTIME = Path(os.environ.get("LAZYDEV_DSH_RUNTIME", str(Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "lazydev" / "deepseek-harness-runtime")))
+DEEPSEEK_HARNESS_HOME = Path(os.environ.get("LAZYDEV_DSH_HOME", str(Path.home() / ".local" / "share" / "lazydev" / "deepseek-harness-home")))
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -690,7 +693,7 @@ def _load_install_state() -> dict[str, str]:
 
     # Prefer an actually existing command path. A stale old state entry should
     # never hide a valid path preserved by the independent CLI registry.
-    command_keys = ("kimi_command", "codex_command", "antigravity_command", "claude_command", "rtk_command", "lazydev_command")
+    command_keys = ("kimi_command", "codex_command", "antigravity_command", "claude_command", "deepseek_harness_command", "rtk_command", "lazydev_command")
     for key in command_keys:
         chosen = state.get(key, "")
         if chosen:
@@ -724,6 +727,7 @@ def _state_command(state: dict[str, str], key: str) -> str | None:
             "codex_command": "codex.exe" if IS_WINDOWS else "codex",
             "antigravity_command": "agy.exe" if IS_WINDOWS else "agy",
             "claude_command": "claude.exe" if IS_WINDOWS else "claude",
+            "deepseek_harness_command": "dsh.cmd" if IS_WINDOWS else "dsh",
             "rtk_command": "rtk.exe" if IS_WINDOWS else "rtk",
         }.get(key)
         if basename:
@@ -952,7 +956,7 @@ def _persist_detected_command(key: str, path: str) -> None:
                 shutil.copy2(CLI_REGISTRY_FILE, CLI_REGISTRY_FILE.with_name(CLI_REGISTRY_FILE.name + ".bak"))
             except OSError:
                 pass
-        ordered = ["rtk_command", "codex_command", "kimi_command", "antigravity_command", "claude_command"]
+        ordered = ["rtk_command", "codex_command", "kimi_command", "antigravity_command", "claude_command", "deepseek_harness_command"]
         lines = ["version=1"] + [f"{k}={registry[k]}" for k in ordered if registry.get(k)]
         rtmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
         os.replace(rtmp, CLI_REGISTRY_FILE)
@@ -1067,6 +1071,34 @@ def find_claude() -> str | None:
         extra_dirs=(HOME / ".local" / "bin",),
         scan_roots=(HOME / ".local", HOME / ".claude", HOME / ".config", HOME / ".nvm", HOME / ".volta", HOME / ".asdf", HOME),
     )
+
+
+def deepseek_harness_target_version() -> str:
+    return DEEPSEEK_HARNESS_TERMUX_VERSION if IS_TERMUX else DEEPSEEK_HARNESS_DESKTOP_VERSION
+
+
+def find_deepseek_harness() -> str | None:
+    runtime_bin = DEEPSEEK_HARNESS_RUNTIME / "node_modules" / ".bin" / ("dsh.cmd" if IS_WINDOWS else "dsh")
+    candidates = [runtime_bin, HOME / ".local" / "bin" / ("dsh.cmd" if IS_WINDOWS else "dsh")]
+    for candidate in candidates:
+        if candidate.is_file() and (IS_WINDOWS or os.access(candidate, os.X_OK)):
+            return str(candidate)
+    return _discover_command(
+        command_name="dsh",
+        state_key="deepseek_harness_command",
+        aliases=("dsh.cmd", "dsh.exe") if IS_WINDOWS else (),
+        extra_dirs=(HOME / ".local" / "bin", DEEPSEEK_HARNESS_RUNTIME / "node_modules" / ".bin"),
+        scan_roots=(HOME / ".dsh", HOME / ".local", HOME / ".config"),
+    )
+
+
+def _deepseek_version(dsh: str) -> str:
+    try:
+        proc = subprocess.run([dsh, "--version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=5, check=False)
+        match = re.search(r"\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)\b", proc.stdout or "")
+        return match.group(1) if match else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 def toml_quote(value: str) -> str:
     return json.dumps(str(value))
@@ -2120,6 +2152,131 @@ def _openai_sse_to_anthropic(raw: bytes, model: str) -> bytes:
     return "\n".join(frames).encode("utf-8") + b"\n"
 
 
+def _anthropic_sse_event(event: str, data: dict[str, Any] | str) -> bytes:
+    if isinstance(data, str):
+        payload = data
+    else:
+        payload = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+    return (f"event: {event}\ndata: {payload}\n\n").encode("utf-8")
+
+
+def _stream_openai_http_to_anthropic(response: Any, writer: Any, model: str) -> None:
+    """Stream an OpenAI SSE response into Anthropic SSE without buffering tokens."""
+    response_id = f"msg_{secrets.token_hex(8)}"
+    sent_start = False
+    text_index: int | None = None
+    tool_indexes: dict[int, dict[str, Any]] = {}
+    next_index = 0
+    stop_reason = "end_turn"
+    input_tokens = output_tokens = 0
+    data_lines: list[bytes] = []
+
+    def emit(event: str, payload: dict[str, Any]) -> None:
+        writer.write(_anthropic_sse_event(event, payload))
+        try:
+            writer.flush()
+        except Exception:
+            pass
+
+    def ensure_start() -> None:
+        nonlocal sent_start
+        if sent_start:
+            return
+        emit("message_start", {
+            "type": "message_start",
+            "message": {
+                "id": response_id, "type": "message", "role": "assistant",
+                "model": model, "content": [], "stop_reason": None, "stop_sequence": None,
+                "usage": {"input_tokens": input_tokens, "output_tokens": 0},
+            },
+        })
+        sent_start = True
+
+    def process_payload(payload: dict[str, Any]) -> None:
+        nonlocal response_id, text_index, next_index, stop_reason, input_tokens, output_tokens
+        response_id = str(payload.get("id") or response_id)
+        usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+        input_tokens = max(input_tokens, int(usage.get("prompt_tokens") or 0))
+        output_tokens = max(output_tokens, int(usage.get("completion_tokens") or 0))
+        ensure_start()
+        choices = payload.get("choices") if isinstance(payload.get("choices"), list) else []
+        first = choices[0] if choices and isinstance(choices[0], dict) else {}
+        delta = first.get("delta") if isinstance(first.get("delta"), dict) else {}
+        text = delta.get("content")
+        if text is not None and str(text) != "":
+            if text_index is None:
+                text_index = next_index
+                next_index += 1
+                emit("content_block_start", {"type":"content_block_start","index":text_index,"content_block":{"type":"text","text":""}})
+            emit("content_block_delta", {"type":"content_block_delta","index":text_index,"delta":{"type":"text_delta","text":str(text)}})
+        calls = delta.get("tool_calls") if isinstance(delta.get("tool_calls"), list) else []
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            idx = int(call.get("index") or 0)
+            entry = tool_indexes.get(idx)
+            if entry is None:
+                block_index = next_index
+                next_index += 1
+                entry = {"index": block_index, "id": str(call.get("id") or secrets.token_hex(8)), "name": "tool"}
+                tool_indexes[idx] = entry
+                fn0 = call.get("function") if isinstance(call.get("function"), dict) else {}
+                entry["name"] = str(fn0.get("name") or "tool")
+                emit("content_block_start", {"type":"content_block_start","index":block_index,"content_block":{"type":"tool_use","id":entry["id"],"name":entry["name"],"input":{}}})
+            fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+            if fn.get("arguments") is not None:
+                emit("content_block_delta", {"type":"content_block_delta","index":entry["index"],"delta":{"type":"input_json_delta","partial_json":str(fn.get("arguments"))}})
+        reason = str(first.get("finish_reason") or "")
+        if reason == "tool_calls":
+            stop_reason = "tool_use"
+        elif reason == "length":
+            stop_reason = "max_tokens"
+
+    while True:
+        chunk = response.readline()
+        if not chunk:
+            if data_lines:
+                data_line = b"\n".join(data_lines).strip()
+                data_lines.clear()
+                if data_line and data_line != b"[DONE]":
+                    try:
+                        obj = json.loads(data_line.decode("utf-8", "replace"))
+                    except Exception:
+                        obj = None
+                    if isinstance(obj, dict):
+                        process_payload(obj)
+            break
+
+        line = chunk.rstrip(b"\r\n")
+        if not line:
+            if not data_lines:
+                continue
+            data_line = b"\n".join(data_lines).strip()
+            data_lines.clear()
+            if not data_line:
+                continue
+            if data_line == b"[DONE]":
+                break
+            try:
+                obj = json.loads(data_line.decode("utf-8", "replace"))
+            except Exception:
+                continue
+            if isinstance(obj, dict):
+                process_payload(obj)
+            continue
+
+        if line.startswith(b"data:"):
+            data_lines.append(line[5:].lstrip())
+
+    ensure_start()
+    if text_index is not None:
+        emit("content_block_stop", {"type":"content_block_stop","index":text_index})
+    for entry in tool_indexes.values():
+        emit("content_block_stop", {"type":"content_block_stop","index":entry["index"]})
+    emit("message_delta", {"type":"message_delta","delta":{"stop_reason":stop_reason,"stop_sequence":None},"usage":{"output_tokens":output_tokens}})
+    emit("message_stop", {"type":"message_stop"})
+
+
 def _openai_to_anthropic(body: dict[str, Any], model: str) -> dict[str, Any]:
     messages = []
     system_parts = []
@@ -2754,6 +2911,22 @@ class _ProviderProxy:
                         return
                     try:
                         if anthropic_mode:
+                            if is_stream:
+                                wire_model = CLAUDE_EXPOSED_MODEL_ALIAS
+                                self.send_response(200)
+                                self.send_header("Content-Type", "text/event-stream")
+                                self.send_header("Cache-Control", "no-cache")
+                                self.send_header("X-LazyDev-Provider-Proxy", "1")
+                                self.send_header("Connection", "close")
+                                self.end_headers()
+                                _stream_openai_http_to_anthropic(response, self.wfile, wire_model)
+                                try:
+                                    response.close(); connection.close()
+                                except Exception:
+                                    pass
+                                self.close_connection = True
+                                return
+
                             payload = response.read()
                             try:
                                 response.close(); connection.close()
@@ -2773,15 +2946,6 @@ class _ProviderProxy:
                                 self.send_header("X-LazyDev-Provider-Proxy", "1")
                                 self.send_header("Connection", "close")
                                 self.end_headers(); self.wfile.write(payload); self.close_connection = True; return
-                            if is_stream:
-                                wire_model = CLAUDE_EXPOSED_MODEL_ALIAS
-                                raw_stream = _openai_sse_to_anthropic(payload, wire_model)
-                                self.send_response(200)
-                                self.send_header("Content-Type", "text/event-stream")
-                                self.send_header("Content-Length", str(len(raw_stream)))
-                                self.send_header("X-LazyDev-Provider-Proxy", "1")
-                                self.send_header("Connection", "close")
-                                self.end_headers(); self.wfile.write(raw_stream); self.close_connection = True; return
                             try:
                                 source_payload = json.loads(payload.decode("utf-8", "replace"))
                                 wire_model = CLAUDE_EXPOSED_MODEL_ALIAS
@@ -3399,12 +3563,13 @@ def _run_ui_helper(*args: str) -> int:
         print(f"LazyDev CLI UI failed to start: {exc}", file=sys.stderr)
         return 1
 
-def installed_chat_uis() -> list[tuple[str, str, str]]:
+def installed_chat_uis(*, include_web: bool = True) -> list[tuple[str, str, str]]:
     items=[]
     if find_kimi(): items.append(("kimi", "Kimi Code", "kimi"))
     if find_codex(): items.append(("codex", "Codex", "codex"))
     if find_antigravity(): items.append(("antigravity", "Antigravity", "agy"))
     if find_claude(): items.append(("claude", "Claude Code", "claude"))
+    if include_web and find_deepseek_harness(): items.append(("deepseek", "DeepSeek Harness", "dsh"))
     return items
 
 
@@ -4142,46 +4307,25 @@ def _claude_unshare_prefix() -> list[str]:
 
 
 def _claude_android_messaging_workaround_needed(claude: str) -> bool:
-    """Return True when Android/Termux needs the upstream-known-good Claude build."""
+    """Detect the Android/Termux Claude Code regression documented in #90908.
+
+    Claude Code 2.1.248-2.1.251 misread Android's empty /proc/self/uid_map and
+    rejected the daemon socket before it could start. On later/unknown versions
+    we leave native messaging enabled so upstream fixes are preserved.
+    """
     if not IS_TERMUX or not sys.platform.startswith("linux"):
         return False
     if _claude_uid_mapping_available():
         return False
     version = _claude_version_tuple(claude)
     if version is None:
+        # Fail closed only on the exact Android shape reported by the issue:
+        # empty uid_map and no user-namespace proc entry.
         try:
-            return Path("/proc/self/ns/user").exists() is False and Path("/proc/self/uid_map").read_bytes() == b""
+            return not Path("/proc/self/ns/user").exists() and Path("/proc/self/uid_map").read_bytes() == b""
         except OSError:
             return False
-    return version != CLAUDE_ANDROID_SAFE_VERSION
-
-
-def _claude_android_pinned_command() -> str | None:
-    """Find the known-good Claude binary installed by the native versioned installer."""
-    if not IS_TERMUX or not sys.platform.startswith("linux"):
-        return None
-    version = ".".join(str(x) for x in CLAUDE_ANDROID_SAFE_VERSION)
-    roots = (
-        HOME / ".local" / "share" / "claude" / "versions" / version,
-        HOME / ".claude" / "local" / "share" / "claude" / "versions" / version,
-    )
-    candidates = []
-    for root in roots:
-        candidates.extend((root / "claude", root / "claude-code", root))
-    for candidate in candidates:
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
-    return None
-
-
-def _claude_stop_stale_daemon(claude: str) -> None:
-    """Best-effort cleanup of daemons left behind by a newer broken Android build."""
-    if not IS_TERMUX or not sys.platform.startswith("linux"):
-        return
-    try:
-        subprocess.run([claude, "daemon", "stop", "--any"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3, check=False)
-    except (OSError, subprocess.SubprocessError):
-        pass
+    return CLAUDE_ANDROID_MESSAGING_BUG_MIN <= version <= CLAUDE_ANDROID_MESSAGING_BUG_MAX
 
 
 def _claude_messaging_args(claude: str | None = None) -> tuple[list[str], Path | None]:
@@ -4196,14 +4340,6 @@ def _claude_messaging_args(claude: str | None = None) -> tuple[list[str], Path |
 
 def _launch_claude(claude: str, provider: dict[str,Any], pc: dict[str,Any], workspace: Path, proxy: _ProviderProxy, resume: bool = False) -> int:
     _ensure_cross_ui_skills()
-    pinned = _claude_android_pinned_command()
-    android_pinning_required = IS_TERMUX and sys.platform.startswith("linux") and not _claude_uid_mapping_available()
-    if android_pinning_required:
-        if pinned:
-            claude = pinned
-        else:
-            print(f"Claude Code on Android/Termux requires the pinned {CLAUDE_ANDROID_SAFE_VERSION_TEXT} build for background/session compatibility. Run the LazyDev installer again to install that build.", file=sys.stderr)
-            return 1
     env = _clean_ui_env()
     env.update({k: v for k, v in _command_env_with_managed_bins().items() if k == "PATH"})
     route_model = str(pc.get("model") or "")
@@ -4224,30 +4360,21 @@ def _launch_claude(claude: str, provider: dict[str,Any], pc: dict[str,Any], work
     env["DISABLE_ERROR_REPORTING"] = "1"
     env["LAZYDEV_CLAUDE_PROXY"] = "1"
 
-    # Android/Termux: Claude Code 2.1.248+ has an upstream background-session
-    # regression around empty /proc/self/uid_map. LazyDev uses the pinned 2.1.247
-    # native binary when it is installed, and stops any stale newer daemon first.
+    # Linux user-namespace environments may expose no usable uid_map. Prefer a
+    # real mapped namespace so Claude can keep background/cross-session messaging
+    # ownership checks intact. If neither mapping nor unshare is available, keep
+    # foreground chat/resume usable without surfacing the daemon warning.
     uid_mapping_missing = sys.platform.startswith("linux") and not _claude_uid_mapping_available()
-    android_bug = _claude_android_messaging_workaround_needed(claude)
-    if android_bug:
-        _claude_stop_stale_daemon(claude)
-        env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "android-pinned-2.1.247"
-        env["DISABLE_AUTOUPDATER"] = "1"
+    unshare_prefix = _claude_unshare_prefix() if uid_mapping_missing else []
+    if unshare_prefix:
+        env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "unshare-uid-map"
         messaging_args = []
-        unshare_prefix = []
+    elif uid_mapping_missing:
+        env["DISABLE_GROWTHBOOK"] = "1"
+        env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "uid-map-unavailable"
+        messaging_args = []
     else:
-        unshare_prefix = _claude_unshare_prefix() if uid_mapping_missing else []
-        if unshare_prefix:
-            env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "unshare-uid-map"
-            messaging_args = []
-        elif uid_mapping_missing:
-            # Do not pretend a custom messaging socket bypasses Claude's daemon
-            # ownership check. Keep foreground chat/resume usable instead.
-            env["DISABLE_GROWTHBOOK"] = "1"
-            env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "uid-map-unavailable"
-            messaging_args = []
-        else:
-            messaging_args, _messaging_socket = _claude_messaging_args(claude)
+        messaging_args, _messaging_socket = _claude_messaging_args(claude)
 
     # Always expose a Claude-recognized alias to the native CLI. LazyDev's proxy
     # maps that alias to route_model internally, preventing provider IDs from being
@@ -4262,6 +4389,188 @@ def _launch_claude(claude: str, provider: dict[str,Any], pc: dict[str,Any], work
         return 130
 
 
+def _deepseek_patch_path() -> Path:
+    DEEPSEEK_HARNESS_HOME.mkdir(parents=True, exist_ok=True)
+    return DEEPSEEK_HARNESS_HOME / "lazydev.patch.yml"
+
+
+def _yaml_quote(value: str) -> str:
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _write_deepseek_harness_patch(proxy: _ProviderProxy, provider: dict[str, Any], pc: dict[str, Any]) -> Path:
+    patch = _deepseek_patch_path()
+    context = model_context_size(provider, pc)
+    output = model_output_size(provider, pc)
+    model = CLAUDE_EXPOSED_MODEL_ALIAS
+    base_url = f"http://127.0.0.1:{proxy.port}/v1"
+    lines = [
+        "- id: llm-deepseek",
+        '  name: "@deepseek-ai/dsh-llm-deepseek"',
+        "  config:",
+        "    apiKeyEnv: LAZYDEV_DSH_API_KEY",
+        f"    baseURL: {_yaml_quote(base_url)}",
+        '    protocol: "chat-completions"',
+        "    thinking: enabled",
+        "    reasoningEffort: high",
+        f"    maxTokens: {output}",
+        f"    defaultContextWindow: {context}",
+        "    models:",
+        f"      - id: {_yaml_quote(model)}",
+        '        name: "Sonnet"',
+        f"        contextWindow: {context}",
+        f"        maxTokens: {output}",
+        "- id: agent-default-model",
+        '  name: "@deepseek-ai/dsh-agent-default-model"',
+        "  config:",
+        '    provider: "deepseek"',
+        f"    model: {_yaml_quote(model)}",
+    ]
+    patch.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return patch
+
+
+def _ensure_deepseek_harness_skills() -> None:
+    shared = _ensure_shared_skill_root()
+    target_root = DEEPSEEK_HARNESS_HOME / "skills"
+    target_root.mkdir(parents=True, exist_ok=True)
+    for name, _description in SKILLS:
+        source = shared / name
+        target = target_root / name
+        if target.exists() or target.is_symlink():
+            try:
+                if target.is_symlink() and target.resolve() == source.resolve():
+                    continue
+            except OSError:
+                pass
+            continue
+        try:
+            target.symlink_to(source, target_is_directory=True)
+        except OSError:
+            shutil.copytree(source, target, dirs_exist_ok=True)
+    agents = DEEPSEEK_HARNESS_HOME / "AGENTS.md"
+    if not agents.exists():
+        agents.write_text("# LazyDev skills\n\nUse the skills available in $DSH_HOME/skills.\n", encoding="utf-8")
+
+
+def _open_local_url(url: str) -> None:
+    candidates = []
+    if IS_TERMUX:
+        candidates.extend(["termux-open-url", str(Path(os.environ.get("PREFIX", "")) / "bin" / "termux-open-url")])
+    candidates.extend(["xdg-open", "open"])
+    for command in candidates:
+        if not command or (os.path.sep in command and not Path(command).is_file()):
+            continue
+        executable = command if os.path.sep in command else shutil.which(command)
+        if not executable:
+            continue
+        try:
+            subprocess.Popen([executable, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return
+        except OSError:
+            continue
+
+
+def _wait_for_local_http(url: str, process: subprocess.Popen[str], timeout: float = 30.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return False
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=1.5) as response:
+                if 200 <= response.status < 500:
+                    return True
+        except (OSError, urllib.error.URLError):
+            pass
+        time.sleep(0.25)
+    return False
+
+
+def _launch_deepseek_harness(dsh: str, provider: dict[str, Any], pc: dict[str, Any], workspace: Path, proxy: _ProviderProxy) -> int:
+    _ensure_deepseek_harness_skills()
+    patch = _write_deepseek_harness_patch(proxy, provider, pc)
+    port = _find_free_local_port()
+    url = f"http://127.0.0.1:{port}"
+    env = _clean_ui_env()
+    env.update({k: v for k, v in _command_env_with_managed_bins().items() if k == "PATH"})
+    env.update({
+        "DSH_HOME": str(DEEPSEEK_HARNESS_HOME),
+        "LAZYDEV_DSH_API_KEY": str(proxy.token),
+        "LAZYDEV_DSH_MODEL": CLAUDE_EXPOSED_MODEL_ALIAS,
+        "LAZYDEV_DSH_PROXY": f"http://127.0.0.1:{proxy.port}/v1",
+        "LAZYDEV_VERSION": VERSION,
+        "LAZYDEV_ARTIFACT_DIR": str(ARTIFACT_DIR),
+    })
+    version = _deepseek_version(dsh)
+    if IS_TERMUX and version and version != DEEPSEEK_HARNESS_TERMUX_VERSION:
+        print(f"DeepSeek Harness {version} is not Android-safe; expected {DEEPSEEK_HARNESS_TERMUX_VERSION}.", file=sys.stderr)
+        return 1
+    print("✓ DeepSeek Harness selected")
+    print()
+    print("Starting DeepSeek Harness Web UI...")
+    print("Connecting LazyDev proxy...")
+    print("Loading active model...")
+    print("Opening local browser...")
+    print()
+    command = [dsh, "web", "--host", "127.0.0.1", "--port", str(port), "--no-open", "--patch", str(patch)]
+    log_path = DEEPSEEK_HARNESS_HOME / "deepseek-harness.log"
+    DEEPSEEK_HARNESS_HOME.mkdir(parents=True, exist_ok=True)
+    try:
+        log_file = log_path.open("a", encoding="utf-8")
+        process = subprocess.Popen(command, cwd=str(workspace), env=env, start_new_session=(os.name != "nt"), stdout=log_file, stderr=subprocess.STDOUT, text=True)
+    except OSError as exc:
+        print(f"DeepSeek Harness failed to start: {exc}", file=sys.stderr)
+        return 1
+    if not _wait_for_local_http(url, process):
+        output = ""
+        try:
+            log_file.flush(); output = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+        except Exception:
+            pass
+        print("DeepSeek Harness did not become ready.", file=sys.stderr)
+        if output.strip():
+            print(output.strip(), file=sys.stderr)
+        try:
+            process.terminate()
+        except OSError:
+            pass
+        try:
+            log_file.close()
+        except Exception:
+            pass
+        return 1
+    print("DeepSeek Harness is ready")
+    print(f"Web UI → {url}")
+    print("Proxy   → Connected")
+    print("Model   → Sonnet")
+    _open_local_url(url)
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        try:
+            process.terminate()
+        except OSError:
+            pass
+        try:
+            log_file.close()
+        except Exception:
+            pass
+        return 130
+    finally:
+        try:
+            log_file.close()
+        except Exception:
+            pass
+
+
+def _find_free_local_port() -> int:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
 def chat(sessions: bool = False, continue_session: bool = False, resume: bool = False) -> int:
     clear_terminal()
     cfg = read_config()
@@ -4274,9 +4583,9 @@ def chat(sessions: bool = False, continue_session: bool = False, resume: bool = 
     if not pc.get("model"):
         print("No active provider is configured. Run: lazydev setup", file=sys.stderr)
         return 1
-    items=installed_chat_uis()
+    items=installed_chat_uis(include_web=not resume and not continue_session)
     if not items:
-        print("No supported AI CLI was detected. Run the LazyDev installer and choose Kimi Code, Codex, Antigravity, or Claude Code. The optional CLI UI helper is separate from chat.", file=sys.stderr)
+        print("No supported AI UI was detected. Run the LazyDev installer and choose at least one coding UI.", file=sys.stderr)
         return 1
     ui=choose_chat_ui(items)
     if not ui: return 1
@@ -4289,10 +4598,11 @@ def chat(sessions: bool = False, continue_session: bool = False, resume: bool = 
     # Kimi and Codex use the existing OpenAI-compatible provider proxy;
     # Antigravity keeps its native Gemini runtime path; Claude Code uses the
     # Anthropic-compatible loopback proxy rooted at ANTHROPIC_BASE_URL.
-    if provider["id"] not in {"anthropic", "gemini"} or ui in {"codex", "antigravity", "claude"}:
+    if provider["id"] not in {"anthropic", "gemini"} or ui in {"codex", "antigravity", "claude", "deepseek"}:
         proxy = _ProviderProxy(provider, pc)
     try:
-        update_session_alias_history(cfg, discover_session_model_aliases(f"lazydev/{pc.get('model')}") + [_normalize_session_alias(pc.get("model", ""))])
+        if ui != "deepseek":
+            update_session_alias_history(cfg, discover_session_model_aliases(f"lazydev/{pc.get('model')}") + [_normalize_session_alias(pc.get("model", ""))])
         write_config(cfg)
         kimi_config_path, _ = write_kimi_files(provider, cfg, proxy)
         write_kimi_mcp_config()
@@ -4312,6 +4622,10 @@ def chat(sessions: bool = False, continue_session: bool = False, resume: bool = 
             if proxy is not None: proxy.close()
     if ui == "claude":
         try: return _launch_claude(find_claude() or "claude", provider, pc, workspace, proxy, resume=resume)
+        finally:
+            if proxy is not None: proxy.close()
+    if ui == "deepseek":
+        try: return _launch_deepseek_harness(find_deepseek_harness() or "dsh", provider, pc, workspace, proxy)
         finally:
             if proxy is not None: proxy.close()
     kimi = find_kimi()
@@ -4624,10 +4938,12 @@ def doctor() -> int:
     codex = find_codex()
     agy = find_antigravity()
     claude = find_claude()
+    dsh = find_deepseek_harness()
     print(f"Kimi Code    {kimi or 'not detected'}")
     print(f"Codex        {codex or 'not detected'}")
     print(f"Antigravity  {agy or 'not detected'}")
     print(f"Claude Code  {claude or 'not detected'}")
+    print(f"DeepSeek     {dsh or 'not detected'}" + (f" · {_deepseek_version(dsh)}" if dsh else ""))
     print(f"Skills        {len(SKILLS)} bundled")
     print(f"Artifacts     {ARTIFACT_DIR}")
     provider = active_provider(cfg)
@@ -4696,7 +5012,7 @@ def help_command() -> int:
     title(f"Lazy Developer {VERSION}")
     print("Build · debug · review · test · ship\n")
     rows = [
-        ("lazydev chat", "Open the installed Kimi Code, Codex, Antigravity, or Claude Code UI"),
+        ("lazydev chat", "Open the installed Kimi Code, Codex, Antigravity, Claude Code, or DeepSeek Harness UI"),
         ("lazydev setup", "Choose provider, API key, and live model"),
         ("lazydev resume", "Resume a saved Kimi, Codex, Antigravity, or Claude Code chat"),
         ("lazydev skills", "Browse bundled LazyDev skills"),

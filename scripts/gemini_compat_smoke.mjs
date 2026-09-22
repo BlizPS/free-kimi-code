@@ -8,7 +8,7 @@ const py = fs.readFileSync(path.join(root, 'cli', 'lazydev.py'), 'utf8');
 const errors = [];
 if (/antigravity-preview(?:-|$)/i.test(src)) errors.push('Legacy disabled Antigravity identifier still present');
 if (src.includes('return models.filter((m) => !isAntigravityModel(m.id));')) errors.push('Gemini catalog is still filtering Antigravity models');
-if (!py.includes("if provider[\"id\"] not in {\"anthropic\", \"gemini\"} or ui in {\"codex\", \"antigravity\", \"claude\"}:")) errors.push('Gemini/Kimi/Claude routing regression');
+if (!py.includes("if provider[\"id\"] not in {\"anthropic\", \"gemini\"} or ui in {\"codex\", \"antigravity\", \"claude\", \"deepseek\"}:")) errors.push('Gemini/Kimi/Claude/DeepSeek routing regression');
 const resilience = await import('../runtime/gemini-resilience.mjs');
 const prepared = resilience.prepareGeminiRequest({ model:'gemini-flash-lite-latest', max_tokens:512, max_completion_tokens:512, reasoning_effort:'low', extra_body:{google:{thinking_config:{thinking_level:'low'}}} }, 'gemini-flash-lite-latest');
 if ('max_tokens' in prepared || 'max_completion_tokens' in prepared) errors.push('Gemini request must not carry a hard completion cap while thinking');

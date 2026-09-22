@@ -23,7 +23,7 @@ for (const [id, spec] of Object.entries(providers)) {
   assert.ok(src.includes(`id: '${id}'`), `${id} provider missing`);
   for (const value of Object.values(spec).filter((v) => v.startsWith?.('http'))) assert.ok(src.includes(value), `${id}: missing ${value}`);
 }
-assert.ok(py.includes("if provider[\"id\"] not in {\"anthropic\", \"gemini\"} or ui in {\"codex\", \"antigravity\", \"claude\"}:"), 'Python UI routing must create the shared proxy for Codex/Antigravity/Claude Code');
+assert.ok(py.includes("if provider[\"id\"] not in {\"anthropic\", \"gemini\"} or ui in {\"codex\", \"antigravity\", \"claude\", \"deepseek\"}:"), 'Python UI routing must create the shared proxy for Codex/Antigravity/Claude Code/DeepSeek Harness');
 assert.ok(src.includes("provider.id === 'anthropic' ? '/v1/messages' : '/v1/chat/completions'"), 'protocol split missing');
 assert.ok(src.includes("const providerType = provider.id === 'gemini' && !geminiProxy ? 'google-genai'"), 'Gemini native provider type missing');
 assert.ok(src.includes("base_url = ${tomlQuote('https://generativelanguage.googleapis.com')}"), 'Gemini native base URL missing');
@@ -37,6 +37,10 @@ assert.ok(py.includes('ANTHROPIC_BASE_URL'), 'Claude Code proxy environment miss
 assert.ok(py.includes('CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY'), 'Claude Code gateway model discovery missing');
 assert.ok(py.includes('def _claude_messaging_args'), 'Claude Code user-namespace messaging fallback missing');
 assert.ok(py.includes('def _ensure_claude_skills'), 'Claude Code LazyDev skill sync helper missing');
+assert.ok(py.includes('def _launch_deepseek_harness'), 'DeepSeek Harness launcher missing');
+assert.ok(py.includes('def _write_deepseek_harness_patch'), 'DeepSeek Harness proxy patch helper missing');
+assert.ok(py.includes('protocol: \"chat-completions\"'), 'DeepSeek Harness must use chat-completions protocol');
+assert.ok(py.includes('DEEPSEEK_HARNESS_TERMUX_VERSION'), 'DeepSeek Harness Termux compatibility pin missing');
 assert.ok(py.includes('HOME / ".claude" / "skills"'), 'Claude Code native skill directory missing');
 assert.ok(py.includes('CLAUDE_EXPOSED_MODEL_ALIAS = "sonnet"'), 'Claude stable model alias missing');
 assert.ok(py.includes('env["ANTHROPIC_MODEL"] = CLAUDE_EXPOSED_MODEL_ALIAS'), 'Claude launcher must pin a stable native model alias');
@@ -46,7 +50,7 @@ assert.ok(py.includes('def _claude_unshare_prefix'), 'Claude mapped user-namespa
 assert.ok(py.includes('env["DISABLE_GROWTHBOOK"] = "1"'), 'Claude background fallback missing');
 assert.ok(py.includes('CLAUDE_ANDROID_MESSAGING_BUG_MIN = (2, 1, 248)'), 'Claude Android regression range minimum missing');
 assert.ok(py.includes('CLAUDE_ANDROID_MESSAGING_BUG_MAX = (2, 1, 251)'), 'Claude Android regression range maximum missing');
-assert.ok(py.includes('CLAUDE_ANDROID_SAFE_VERSION = (2, 1, 247)'), 'Claude Android compatibility pin missing');
+assert.ok(py.includes('--messaging-socket-path'), 'Claude Code explicit messaging socket escape hatch missing');
 assert.ok(py.includes('def _anthropic_to_openai'), 'Python Anthropic response adapter missing');
 assert.ok(py.includes('def _anthropic_sse_to_openai'), 'Python Anthropic streaming adapter missing');
 assert.ok(py.includes('headers["x-api-key"] = key'), 'Python Anthropic API key header missing');

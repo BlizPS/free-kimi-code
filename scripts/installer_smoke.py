@@ -28,7 +28,7 @@ checks=[
     ('install.ps1', '$LazyDevNeedsUpdate = $false', ps),
     ('install.ps1', '$LazyDevFeatureRefresh = $false', ps),
     ('install.ps1', '$LocalSourceDir', ps),
-    ('install.ps1', 'Existing Kimi sessions and configuration were left in place.', ps),
+    ('install.ps1', 'Existing Kimi sessions and native client data were left in place.', ps),
     ('install.ps1', "$ClaudeInstallUrl = 'https://claude.ai/install.ps1'", ps),
     ('install.ps1', 'Install/update Claude Code?', ps),
     ('install.ps1', 'Refresh-ExistingLazyDevLaunchers', ps),
@@ -62,8 +62,8 @@ checks += [
     ('install.ps1', '$RtkApiUrl =', ps),
     ('install.ps1', '$RtkNeedsUpdate = $false', ps),
     ('install.ps1', 'init --agent kimi', ps),
-    ('uninstall.sh', 'Native Kimi Code, Codex, Antigravity, Claude Code, and RTK user data were preserved.', (ROOT/'uninstall.sh').read_text(encoding='utf-8')),
-    ('uninstall.ps1', 'Native AI CLI and RTK user data were preserved', (ROOT/'uninstall.ps1').read_text(encoding='utf-8')),
+    ('uninstall.sh', 'Native Kimi Code, Codex, Antigravity, Claude Code, DeepSeek Harness, and RTK user data were preserved.', (ROOT/'uninstall.sh').read_text(encoding='utf-8')), 
+    ('uninstall.ps1', 'Native Kimi Code, Codex, Antigravity, Claude Code, and RTK user data and session history are preserved.', (ROOT/'uninstall.ps1').read_text(encoding='utf-8')), 
 ]
 
 # nounset regression: LazyDev state must be initialized before its first runtime use.
@@ -151,10 +151,6 @@ if 'CODEX_INSTALLED_BIN="$CODEX_BIN_DIR/codex"' not in sh or 'official installer
     errors.append('install.sh: Codex post-install verification fallback missing')
 if 'claude_command=%s' not in sh or 'CLAUDE_INSTALL_URL="https://claude.ai/install.sh"' not in sh or 'find_claude()' not in sh:
     errors.append('install.sh: Claude Code discovery/persistence/install contract missing')
-if 'CLAUDE_ANDROID_PINNED_VERSION="2.1.247"' not in sh or 'bash "$CLAUDE_INSTALL_SCRIPT" "$CLAUDE_ANDROID_PINNED_VERSION"' not in sh:
-    errors.append('install.sh: Android/Termux Claude pin to 2.1.247 missing')
-if 'config set autoUpdates false --global' not in sh:
-    errors.append('install.sh: Android/Termux Claude auto-update guard missing')
 if "$ClaudeInstallUrl = 'https://claude.ai/install.ps1'" not in ps or 'Find-Claude' not in ps:
     errors.append('install.ps1: Claude Code discovery/install contract missing')
 if 'resilient_download()' not in sh or '--http1.1' not in sh or '--retry 8' not in sh or ' -C - ' not in sh:

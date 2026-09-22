@@ -1,6 +1,6 @@
 # Free Kimi Code — Troubleshooting
 
-Common fixes for the four native CLI workflows: Kimi Code, Codex CLI, Antigravity CLI, and Claude Code.
+Common fixes for Kimi Code, Codex CLI, Antigravity CLI, Claude Code, and DeepSeek Harness.
 
 ## Claude Code says the background service cannot be reached
 
@@ -37,7 +37,10 @@ Re-run the installer and answer `Y` when asked to install Claude Code or refresh
 2. Codex
 3. Antigravity
 4. Claude Code
+5. DeepSeek Harness
 ```
+
+DeepSeek Harness appears only in `lazydev chat`, not `lazydev resume`.
 
 Then run `lazydev chat` again.
 
@@ -50,3 +53,18 @@ lazydev setup
 ```
 
 The provider/model catalog is intentionally discovered at setup time instead of being frozen in the documentation.
+
+## DeepSeek Harness fails on Android / Termux
+
+Run it from the Debian or Ubuntu guest. LazyDev selects the Android-compatible Harness release path instead of the newer builds that require unsupported native file locking on `android-arm64`.
+
+## DeepSeek Harness Web UI does not open
+
+Run:
+
+```sh
+lazydev doctor
+lazydev chat
+```
+
+The Harness is bound to `127.0.0.1`. If no browser launcher is available, copy the printed local URL into your browser.

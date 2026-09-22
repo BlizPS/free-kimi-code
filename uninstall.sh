@@ -35,6 +35,8 @@ if [ "$(uname -s)" = "Darwin" ]; then
   RTK_CONFIG_DIR="$HOME/Library/Application Support/rtk"
 else
   LAZYDEV_CONFIG_DIR="${LAZYDEV_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/lazydev}"
+LAZYDEV_DSH_RUNTIME="${LAZYDEV_DSH_RUNTIME:-${XDG_DATA_HOME:-$HOME/.local/share}/lazydev/deepseek-harness-runtime}"
+LAZYDEV_DSH_HOME="${LAZYDEV_DSH_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/lazydev/deepseek-harness-home}"
   RTK_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rtk"
 fi
 KIMI_NATIVE_HOME="$HOME/.kimi-code"
@@ -138,7 +140,7 @@ step "Checking running processes"
 assert_stopped
 
 step "Removing Lazy Developer"
-rm -rf "$LAZYDEV_HOME" "$LAZYDEV_HOME.previous" "$LAZYDEV_CONFIG_DIR"
+rm -rf "$LAZYDEV_HOME" "$LAZYDEV_HOME.previous" "$LAZYDEV_CONFIG_DIR" "$LAZYDEV_DSH_RUNTIME" "$LAZYDEV_DSH_HOME"
 rm -f "$LAZYDEV_BIN_DIR/lazydev" "$LAZYDEV_BIN_DIR/lazydev.cmd" "$LAZYDEV_BIN_DIR/lazydev.ps1"
 rm -f "$CODEX_BIN_DIR/codex" "$CODEX_BIN_DIR/codex.bin" "$CODEX_BIN_DIR/codex.cmd" "$CODEX_BIN_DIR/codex.exe" 2>/dev/null || true
 rm -f "$RTK_BIN_DIR/rtk" "$RTK_BIN_DIR/rtk.exe" 2>/dev/null || true
@@ -229,5 +231,5 @@ for path in "$LAZYDEV_HOME" "$LAZYDEV_CONFIG_DIR" "$LAZYDEV_STATE_HOME" "$LAZYDE
 done
 
 say ""
-say "Lazy Developer managed files, launchers, integrations, state, and LazyDev artifacts have been removed. Native Kimi Code, Codex, Antigravity, Claude Code, and RTK user data were preserved."
+say "Lazy Developer managed files, launchers, integrations, state, and LazyDev artifacts have been removed. Native Kimi Code, Codex, Antigravity, Claude Code, DeepSeek Harness, and RTK user data were preserved."
 say "Project folders outside these managed locations were left untouched."

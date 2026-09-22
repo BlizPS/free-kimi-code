@@ -23,6 +23,8 @@ if (-not $env:LAZYDEV_BIN_DIR -and (Test-Path -LiteralPath $StateFile -PathType 
 }
 $LazyDevConfig = if ($env:LAZYDEV_CONFIG_DIR) { $env:LAZYDEV_CONFIG_DIR } else { Join-Path $env:APPDATA 'lazydev' }
 $ArtifactDir = Join-Path $HOME 'lazydevfile'
+$DeepSeekHarnessRuntime = if ($env:LAZYDEV_DSH_RUNTIME) { $env:LAZYDEV_DSH_RUNTIME } else { Join-Path $LazyDevConfig 'deepseek-harness-runtime' }
+$DeepSeekHarnessHome = if ($env:LAZYDEV_DSH_HOME) { $env:LAZYDEV_DSH_HOME } else { Join-Path $LazyDevConfig 'deepseek-harness-home' }
     (Join-Path $env:APPDATA 'rtk'),
     (Join-Path $env:LOCALAPPDATA 'rtk')
 )
@@ -84,6 +86,8 @@ Write-Host "`n==> Removing Lazy Developer"
 Remove-Item -LiteralPath $LazyDevHome -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath "$LazyDevHome.previous" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $LazyDevConfig -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $DeepSeekHarnessRuntime -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $DeepSeekHarnessHome -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $LazyDevBin 'lazydev.cmd') -Force -ErrorAction SilentlyContinue
 
 Write-Host "`n==> Removing Kimi Code launcher"
@@ -168,5 +172,5 @@ foreach ($path in $paths) {
 }
 
 Write-Host ''
-Write-Host 'Lazy Developer managed files, launchers, integrations, state, and artifacts have been removed. Native AI CLI and RTK user data were preserved.'
+Write-Host 'Lazy Developer managed files, launchers, integrations, state, and artifacts have been removed. Native AI CLI, DeepSeek Harness native data, and RTK user data were preserved.'
 Write-Host 'Project directories outside these managed locations were left untouched.'

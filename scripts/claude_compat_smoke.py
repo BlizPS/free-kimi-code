@@ -10,8 +10,6 @@ assert mod.VERSION == "1.0.3"
 assert mod.CLAUDE_EXPOSED_MODEL_ALIAS == "sonnet"
 assert mod.CLAUDE_ANDROID_MESSAGING_BUG_MIN == (2, 1, 248)
 assert mod.CLAUDE_ANDROID_MESSAGING_BUG_MAX == (2, 1, 251)
-assert mod.CLAUDE_ANDROID_SAFE_VERSION == (2, 1, 247)
-assert mod.CLAUDE_ANDROID_SAFE_VERSION_TEXT == "2.1.247"
 source = (ROOT / "cli" / "lazydev.py").read_text(encoding="utf-8")
 assert '["--model", CLAUDE_EXPOSED_MODEL_ALIAS]' in source
 assert 'env["ANTHROPIC_MODEL"] = CLAUDE_EXPOSED_MODEL_ALIAS' in source
@@ -21,9 +19,6 @@ assert 'def _claude_unshare_prefix' in source
 assert 'env["DISABLE_GROWTHBOOK"] = "1"' in source
 assert 'uid_mapping_missing = sys.platform.startswith("linux")' in source
 assert 'subprocess.call([*unshare_prefix, claude, *args]' in source
-assert 'CLAUDE_ANDROID_SAFE_VERSION = (2, 1, 247)' in source
-assert 'requires the pinned' in source
-assert 'config set autoUpdates false --global' in (ROOT / 'install.sh').read_text(encoding='utf-8')
 
 old_termux, old_platform, old_uid = mod.IS_TERMUX, mod.sys.platform, mod._claude_uid_mapping_available
 try:
@@ -32,26 +27,12 @@ try:
     mod._claude_uid_mapping_available = lambda: False
     with tempfile.TemporaryDirectory() as td:
         fake = Path(td) / "claude"
-        fake.write_text("#!/bin/sh\nprintf '2.1.278\n'\n", encoding="utf-8")
+        fake.write_text("#!/bin/sh\nprintf '2.1.251\n'\n", encoding="utf-8")
         fake.chmod(0o755)
         assert mod._claude_android_messaging_workaround_needed(str(fake)) is True
         prefix = mod._claude_unshare_prefix()
         if mod.shutil.which("unshare"):
             assert prefix[:2] == [mod.shutil.which("unshare"), "-Ur"], prefix
-
-    # Android launcher must prefer the versioned known-good native binary.
-    with tempfile.TemporaryDirectory() as td_home:
-        old_home = mod.HOME
-        mod.HOME = Path(td_home)
-        try:
-            root = mod.HOME / ".local" / "share" / "claude" / "versions" / "2.1.247"
-            root.mkdir(parents=True)
-            exe = root / "claude"
-            exe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            exe.chmod(0o755)
-            assert mod._claude_android_pinned_command() == str(exe)
-        finally:
-            mod.HOME = old_home
 
     # Real skill installation contract: never replace ~/.claude/skills, but add
     # every bundled LazyDev skill there for Claude Code discovery.

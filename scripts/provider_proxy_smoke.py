@@ -138,15 +138,17 @@ try:
         finally:
             claude_proxy.close()
         # When all native clients exist, Claude Code must be the fourth/last chooser item.
-        saved = (mod.find_kimi, mod.find_codex, mod.find_antigravity, mod.find_claude)
+        saved = (mod.find_kimi, mod.find_codex, mod.find_antigravity, mod.find_claude, mod.find_deepseek_harness)
         try:
             mod.find_kimi = lambda: "/fake/kimi"
             mod.find_codex = lambda: "/fake/codex"
             mod.find_antigravity = lambda: "/fake/agy"
             mod.find_claude = lambda: "/fake/claude"
-            assert [x[:2] for x in mod.installed_chat_uis()] == [("kimi","Kimi Code"),("codex","Codex"),("antigravity","Antigravity"),("claude","Claude Code")]
+            mod.find_deepseek_harness = lambda: "/fake/dsh"
+            assert [x[:2] for x in mod.installed_chat_uis()] == [("kimi","Kimi Code"),("codex","Codex"),("antigravity","Antigravity"),("claude","Claude Code"),("deepseek","DeepSeek Harness")]
+            assert [x[:2] for x in mod.installed_chat_uis(include_web=False)] == [("kimi","Kimi Code"),("codex","Codex"),("antigravity","Antigravity"),("claude","Claude Code")]
         finally:
-            mod.find_kimi, mod.find_codex, mod.find_antigravity, mod.find_claude = saved
+            mod.find_kimi, mod.find_codex, mod.find_antigravity, mod.find_claude, mod.find_deepseek_harness = saved
     finally:
         claude_upstream.shutdown(); claude_upstream.server_close()
 
