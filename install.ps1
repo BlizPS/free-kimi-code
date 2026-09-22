@@ -1,6 +1,6 @@
 param([switch]$Help)
 
-# Windows PowerShell 5.1 is the minimum supported host. Avoid PowerShell 6+ language syntax here.
+# Windows PowerShell 5.1 is the minimum supported host.
 if ($PSVersionTable.PSVersion -lt [version]'5.1') {
     throw 'PowerShell 5.1 or newer is required.'
 }
@@ -6382,7 +6382,7 @@ function Migrate-LegacyExternalBinary([string]$Source, [string]$Destination) {
     if (Test-Path -LiteralPath $Destination -PathType Leaf) { return }
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
     Copy-Item -LiteralPath $Source -Destination $Destination -Force
-    Write-Host "✓ Recovered managed binary: $Source → $Destination"
+    Write-Host "[OK] Recovered managed binary: $Source -> $Destination"
 }
 
 # Pre-detection recovery for old installs that incorrectly placed RTK/Codex
@@ -6625,7 +6625,7 @@ function Ensure-PythonRunner {
         $uv = Get-Command 'uv.exe' -ErrorAction SilentlyContinue
     }
     if (-not $uv) { Fail 'Python was not found and standalone uv could not be installed.' }
-    Write-Host '✓ uv is available as the Python bootstrapper.'
+    Write-Host '[OK] uv is available as the Python bootstrapper.'
 }
 function Test-LazyDevSourceCurrent([string]$SourceDir) {
     $py = Join-Path $SourceDir 'cli\lazydev.py'
@@ -6699,7 +6699,7 @@ function Install-CliUiRuntime {
     $node = Find-NodeCommand
     $npm = Find-NpmCommand
     if (-not $node -or -not $npm) {
-        Write-Host "CLI UI helper $LazyDevUiVersion — skipped (Node.js/npm not available; native AI UIs do not require it)."
+        Write-Host "CLI UI helper $LazyDevUiVersion - skipped (Node.js/npm not available; native AI UIs do not require it)."
         return
     }
     if (Test-CliUiPackage) {
@@ -6708,9 +6708,9 @@ function Install-CliUiRuntime {
             Copy-Item -LiteralPath $sourceHelper -Destination (Join-Path $LazyDevUiHome 'lazydev-ui.mjs') -Force
         }
         if (Test-CliUiRuntime) {
-            Write-Host "CLI UI helper $LazyDevUiVersion is already current — skipped."
+            Write-Host "CLI UI helper $LazyDevUiVersion is already current - skipped."
         } else {
-            Write-Host "CLI UI helper $LazyDevUiVersion is already installed — skipped npm reinstall; runtime will self-check on use."
+            Write-Host "CLI UI helper $LazyDevUiVersion is already installed - skipped npm reinstall; runtime will self-check on use."
         }
         return
     }
@@ -6727,7 +6727,7 @@ function Install-CliUiRuntime {
     try {
         & $npm install --no-package-lock --ignore-scripts --omit=dev
         if ($LASTEXITCODE -ne 0) {
-            Write-Host 'CLI UI helper installation failed — native AI UIs remain available without it.'
+            Write-Host 'CLI UI helper installation failed - native AI UIs remain available without it.'
             return
         }
     } finally { Pop-Location }
@@ -6736,9 +6736,9 @@ function Install-CliUiRuntime {
         Copy-Item -LiteralPath $sourceHelper -Destination (Join-Path $LazyDevUiHome 'lazydev-ui.mjs') -Force
     }
     if (Test-CliUiRuntime) {
-        Write-Host "✓ CLI UI helper $LazyDevUiVersion ready"
+        Write-Host "[OK] CLI UI helper $LazyDevUiVersion ready"
     } else {
-        Write-Host 'CLI UI helper installed but runtime verification failed — native AI UIs remain available.'
+        Write-Host 'CLI UI helper installed but runtime verification failed - native AI UIs remain available.'
     }
 }
 
@@ -6857,8 +6857,8 @@ function Install-CodexOfficial([string]$Version) {
     $extract = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-codex-$([guid]::NewGuid().ToString('N'))")
     New-Item -ItemType Directory -Force -Path $extract | Out-Null
     try {
-        Write-Host "Codex $Version · official release asset · $target"
-        Write-Host 'Downloading with resumable retries (HTTP/1.1) …'
+        Write-Host "Codex $Version * official release asset * $target"
+        Write-Host 'Downloading with resumable retries (HTTP/1.1) ...'
         Invoke-ResilientDownload "$base/$asset" $archive
         Invoke-ResilientDownload "$base/codex-package_SHA256SUMS" $sums
         $line = Select-String -LiteralPath $sums -Pattern ([regex]::Escape($asset)) | Select-Object -First 1
@@ -6876,7 +6876,7 @@ function Install-CodexOfficial([string]$Version) {
         Copy-Item -LiteralPath $binary.FullName -Destination (Join-Path $CodexBinRoot 'codex.exe') -Force
         Remove-Item -LiteralPath $archive,$sums -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $versionRoot -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "✓ Codex $Version installed from the official release archive"
+        Write-Host "[OK] Codex $Version installed from the official release archive"
     } finally {
         Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -6962,26 +6962,26 @@ if ($KimiExe) {
             if (Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion) {
                 $KimiNeedsUpdate = $false
                 if ($KimiCurrentVersion -eq $KimiLatestVersion) {
-                    Write-Host "Kimi Code $KimiCurrentVersion is already current — skipped."
+                    Write-Host "Kimi Code $KimiCurrentVersion is already current - skipped."
                 } else {
-                    Write-Host "Kimi Code $KimiCurrentVersion is newer than the latest published $KimiLatestVersion — skipped."
+                    Write-Host "Kimi Code $KimiCurrentVersion is newer than the latest published $KimiLatestVersion - skipped."
                 }
             } else {
                 $KimiUpdateAvailable = $true
-                Write-Host "Kimi Code $KimiCurrentVersion → $KimiLatestVersion — update available."
+                Write-Host "Kimi Code $KimiCurrentVersion -> $KimiLatestVersion - update available."
             }
         } else {
             $KimiNeedsUpdate = $false
-            Write-Host "Kimi Code $KimiCurrentVersion is installed; latest release could not be checked — skipped."
+            Write-Host "Kimi Code $KimiCurrentVersion is installed; latest release could not be checked - skipped."
         }
     } else {
         $KimiNeedsUpdate = $false
         $KimiUpdateAvailable = $false
-        Write-Host 'Kimi Code is installed but its version could not be detected — skipped.'
+        Write-Host 'Kimi Code is installed but its version could not be detected - skipped.'
     }
 } else {
     $KimiUpdateAvailable = $true
-    Write-Host 'Kimi Code not found — installation available.'
+    Write-Host 'Kimi Code not found - installation available.'
 }
 
 $CodexExe = Find-Codex
@@ -6997,26 +6997,26 @@ if ($CodexExe) {
             if (Test-VersionAtLeast $CodexCurrentVersion $CodexLatestVersion) {
                 $CodexNeedsUpdate = $false
                 if ($CodexCurrentVersion -eq $CodexLatestVersion) {
-                    Write-Host "Codex $CodexCurrentVersion is already current — skipped."
+                    Write-Host "Codex $CodexCurrentVersion is already current - skipped."
                 } else {
-                    Write-Host "Codex $CodexCurrentVersion is newer than the latest published $CodexLatestVersion — skipped."
+                    Write-Host "Codex $CodexCurrentVersion is newer than the latest published $CodexLatestVersion - skipped."
                 }
             } else {
                 $CodexUpdateAvailable = $true
-                Write-Host "Codex $CodexCurrentVersion → $CodexLatestVersion — update available."
+                Write-Host "Codex $CodexCurrentVersion -> $CodexLatestVersion - update available."
             }
         } else {
             $CodexNeedsUpdate = $false
-            Write-Host "Codex $CodexCurrentVersion is installed; latest release could not be checked — skipped."
+            Write-Host "Codex $CodexCurrentVersion is installed; latest release could not be checked - skipped."
         }
     } else {
         $CodexNeedsUpdate = $false
         $CodexUpdateAvailable = $false
-        Write-Host 'Codex is installed but its version could not be detected — skipped.'
+        Write-Host 'Codex is installed but its version could not be detected - skipped.'
     }
 } else {
     $CodexUpdateAvailable = $true
-    Write-Host 'Codex not found — installation available.'
+    Write-Host 'Codex not found - installation available.'
 }
 
 $AgyExe = Find-Antigravity
@@ -7031,26 +7031,26 @@ if ($AgyExe) {
             if (Test-VersionAtLeast $AgyCurrentVersion $AgyLatestVersion) {
                 $AgyNeedsUpdate = $false
                 if ($AgyCurrentVersion -eq $AgyLatestVersion) {
-                    Write-Host "Antigravity CLI $AgyCurrentVersion is already current — skipped."
+                    Write-Host "Antigravity CLI $AgyCurrentVersion is already current - skipped."
                 } else {
-                    Write-Host "Antigravity CLI $AgyCurrentVersion is newer than the latest published $AgyLatestVersion — skipped."
+                    Write-Host "Antigravity CLI $AgyCurrentVersion is newer than the latest published $AgyLatestVersion - skipped."
                 }
             } else {
                 $AgyUpdateAvailable = $true
-                Write-Host "Antigravity CLI $AgyCurrentVersion → $AgyLatestVersion — update available."
+                Write-Host "Antigravity CLI $AgyCurrentVersion -> $AgyLatestVersion - update available."
             }
         } else {
             $AgyNeedsUpdate = $false
-            Write-Host "Antigravity CLI $AgyCurrentVersion is installed; latest release could not be checked — skipped."
+            Write-Host "Antigravity CLI $AgyCurrentVersion is installed; latest release could not be checked - skipped."
         }
     } else {
         $AgyNeedsUpdate = $false
         $AgyUpdateAvailable = $false
-        Write-Host 'Antigravity CLI is installed but its version could not be detected — skipped.'
+        Write-Host 'Antigravity CLI is installed but its version could not be detected - skipped.'
     }
 } else {
     $AgyUpdateAvailable = $true
-    Write-Host 'Antigravity CLI not found — installation available.'
+    Write-Host 'Antigravity CLI not found - installation available.'
 }
 
 $ClaudeExe = Find-Claude
@@ -7058,10 +7058,10 @@ $ClaudeCurrentVersion = if ($ClaudeExe) { Get-VersionFromText ((& $ClaudeExe --v
 $ClaudeNeedsUpdate = $true
 $ClaudeUpdateAvailable = $true
 if ($ClaudeExe) {
-    if ($ClaudeCurrentVersion) { Write-Host "Claude Code $ClaudeCurrentVersion is installed — install/update available." }
-    else { Write-Host 'Claude Code is installed — install/update available.' }
+    if ($ClaudeCurrentVersion) { Write-Host "Claude Code $ClaudeCurrentVersion is installed - install/update available." }
+    else { Write-Host 'Claude Code is installed - install/update available.' }
 } else {
-    Write-Host 'Claude Code not found — installation available.'
+    Write-Host 'Claude Code not found - installation available.'
 }
 
 $DeepSeekHarnessExe = Find-DeepSeekHarness
@@ -7072,15 +7072,15 @@ $DeepSeekHarnessTargetVersion = $DeepSeekHarnessDesktopVersion
 if ($DeepSeekHarnessExe) {
     if ($DeepSeekHarnessCurrentVersion -eq $DeepSeekHarnessTargetVersion) {
         $DeepSeekHarnessNeedsUpdate = $false
-        Write-Host "DeepSeek Harness $DeepSeekHarnessCurrentVersion is already current — skipped."
+        Write-Host "DeepSeek Harness $DeepSeekHarnessCurrentVersion is already current - skipped."
     } else {
         $DeepSeekHarnessUpdateAvailable = $true
         $dshCurrentDisplay = if ($DeepSeekHarnessCurrentVersion) { $DeepSeekHarnessCurrentVersion } else { 'unknown' }
-        Write-Host "DeepSeek Harness $dshCurrentDisplay → $DeepSeekHarnessTargetVersion — install/update available."
+        Write-Host "DeepSeek Harness $dshCurrentDisplay -> $DeepSeekHarnessTargetVersion - install/update available."
     }
 } else {
     $DeepSeekHarnessUpdateAvailable = $true
-    Write-Host 'DeepSeek Harness not found — installation available.'
+    Write-Host 'DeepSeek Harness not found - installation available.'
 }
 
 $RtkExe = Find-Rtk
@@ -7097,30 +7097,30 @@ if ($RtkExe) {
             if (Test-VersionAtLeast $RtkCurrentVersion $RtkLatestVersion) {
                 $RtkNeedsUpdate = $false
                 if ($RtkCurrentVersion -eq $RtkLatestVersion) {
-                    Write-Host "RTK $RtkCurrentVersion is already current — skipped."
+                    Write-Host "RTK $RtkCurrentVersion is already current - skipped."
                 } else {
-                    Write-Host "RTK $RtkCurrentVersion is newer than the latest published $RtkLatestVersion — skipped."
+                    Write-Host "RTK $RtkCurrentVersion is newer than the latest published $RtkLatestVersion - skipped."
                 }
             } else {
                 $RtkUpdateAvailable = $true
-                Write-Host "RTK $RtkCurrentVersion → $RtkLatestVersion — update available."
+                Write-Host "RTK $RtkCurrentVersion -> $RtkLatestVersion - update available."
             }
         } else {
             $RtkNeedsUpdate = $false
-            Write-Host "RTK $RtkCurrentVersion is installed; latest release could not be checked — skipped."
+            Write-Host "RTK $RtkCurrentVersion is installed; latest release could not be checked - skipped."
         }
     } elseif ($RtkCurrentVersion) {
         $RtkCurrentVersion = ''
         $RtkUpdateAvailable = $true
-        Write-Host 'A different RTK package is installed — the Rust Token Killer will be installed by LazyDev.'
+        Write-Host 'A different RTK package is installed - the Rust Token Killer will be installed by LazyDev.'
     } else {
         $RtkNeedsUpdate = $false
         $RtkUpdateAvailable = $false
-        Write-Host 'RTK is installed but its version could not be detected — skipped.'
+        Write-Host 'RTK is installed but its version could not be detected - skipped.'
     }
 } else {
     $RtkUpdateAvailable = $true
-    Write-Host 'RTK not found — installation available.'
+    Write-Host 'RTK not found - installation available.'
 }
 
 $InstallKimi = $false
@@ -7131,23 +7131,23 @@ $InstallDeepSeekHarness = $false
 $InstallRtk = $false
 if ($KimiUpdateAvailable) {
     $InstallKimi = Ask-InstallUi 'Install/update Kimi Code?'
-    if (-not $InstallKimi) { $KimiNeedsUpdate = $false; Write-Host 'Kimi Code update/install declined — skipped.' }
+    if (-not $InstallKimi) { $KimiNeedsUpdate = $false; Write-Host 'Kimi Code update/install declined - skipped.' }
 }
 if ($CodexUpdateAvailable) {
     $InstallCodex = Ask-InstallUi 'Install/update Codex?'
-    if (-not $InstallCodex) { $CodexNeedsUpdate = $false; Write-Host 'Codex update/install declined — skipped.' }
+    if (-not $InstallCodex) { $CodexNeedsUpdate = $false; Write-Host 'Codex update/install declined - skipped.' }
 }
 if ($AgyUpdateAvailable) {
     $InstallAntigravity = Ask-InstallUi 'Install/update Antigravity?'
-    if (-not $InstallAntigravity) { $AgyNeedsUpdate = $false; Write-Host 'Antigravity update/install declined — skipped.' }
+    if (-not $InstallAntigravity) { $AgyNeedsUpdate = $false; Write-Host 'Antigravity update/install declined - skipped.' }
 }
 if ($ClaudeUpdateAvailable) {
     $InstallClaude = Ask-InstallUi 'Install/update Claude Code?'
-    if (-not $InstallClaude) { $ClaudeNeedsUpdate = $false; Write-Host 'Claude Code update/install declined — skipped.' }
+    if (-not $InstallClaude) { $ClaudeNeedsUpdate = $false; Write-Host 'Claude Code update/install declined - skipped.' }
 }
 if ($DeepSeekHarnessUpdateAvailable) {
     $InstallDeepSeekHarness = Ask-InstallUi 'Install/update DeepSeek Harness?'
-    if (-not $InstallDeepSeekHarness) { $DeepSeekHarnessNeedsUpdate = $false; Write-Host 'DeepSeek Harness update/install declined — skipped.' }
+    if (-not $InstallDeepSeekHarness) { $DeepSeekHarnessNeedsUpdate = $false; Write-Host 'DeepSeek Harness update/install declined - skipped.' }
 }
 # RTK is a required dependency for the Lazy Developer install lifecycle.
 # Keep the decision automatic: install it when missing/outdated/wrong, otherwise skip.
@@ -7204,37 +7204,37 @@ $LazyDevStatusMessage = ""
 if ($LocalSourceDir) {
     if ($env:LAZYDEV_FORCE_REINSTALL -eq '1' -or $LazyDevFeatureRefresh -or -not $LazyInstallComplete -or -not $InstalledLazyRevision -or $InstalledLazyRevision -ne $RemoteRevision) {
         $LazyDevNeedsUpdate = $true
-        $LazyDevStatusMessage = "Local Lazy Developer source differs or needs repair — refreshing Lazy Developer only."
+        $LazyDevStatusMessage = "Local Lazy Developer source differs or needs repair - refreshing Lazy Developer only."
     } else {
         $LazyDevNeedsUpdate = $false
-        $LazyDevStatusMessage = "Lazy Developer $LazyDevVersion is already current — skipped."
+        $LazyDevStatusMessage = "Lazy Developer $LazyDevVersion is already current - skipped."
     }
 } elseif ($LazyDevFeatureRefresh) {
     $LazyDevNeedsUpdate = $true
-    $LazyDevStatusMessage = 'Installed Lazy Developer is missing the current command surface — refreshing Lazy Developer only.'
+    $LazyDevStatusMessage = 'Installed Lazy Developer is missing the current command surface - refreshing Lazy Developer only.'
 } elseif ($InstalledLazyVersion -and $InstalledLazyVersion -ne $LazyDevVersion) {
-    $LazyDevStatusMessage = "Lazy Developer version $InstalledLazyVersion differs from $LazyDevVersion — update required."
+    $LazyDevStatusMessage = "Lazy Developer version $InstalledLazyVersion differs from $LazyDevVersion - update required."
 } elseif ($LazyInstallComplete -and $InstalledLazyRevision -and $InstalledLazyRevision -eq $RemoteRevision) {
     $LazyDevNeedsUpdate = $false
-    $LazyDevStatusMessage = "Lazy Developer $LazyDevVersion is already current — skipped."
+    $LazyDevStatusMessage = "Lazy Developer $LazyDevVersion is already current - skipped."
 } else {
-    $LazyDevStatusMessage = "Lazy Developer changed or is missing — update required."
+    $LazyDevStatusMessage = "Lazy Developer changed or is missing - update required."
 }
 
 if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Container) {
     $LazyDevNeedsUpdate = $true
     $LazyDevStatusMessage = if ($LazyDevStatusMessage) { $LazyDevStatusMessage + ' ' } else { '' }
-    $LazyDevStatusMessage += 'Legacy private Node.js runtime detected — it will be removed during the Lazy Developer update.'
+    $LazyDevStatusMessage += 'Legacy private Node.js runtime detected - it will be removed during the Lazy Developer update.'
 }
 
-# Installation order: collect all Y/n choices first, then RTK → Lazy Developer → selected UI(s).
+# Installation order: collect all Y/n choices first, then RTK -> Lazy Developer -> selected UI(s).
 # Provider/model setup is intentionally skipped; use `lazydev setup` after installation.
 
 # Always render RTK first. A reinstall shows an explicit skipped state; a fresh or invalid
 # install repairs RTK before Lazy Developer starts.
 Step 'RTK'
 if ($RtkNeedsUpdate) {
-    Write-Host 'RTK is missing, outdated, or not the Rust Token Killer — installing the official RTK first.'
+    Write-Host 'RTK is missing, outdated, or not the Rust Token Killer - installing the official RTK first.'
     Install-Rtk
     $env:Path = "$BinRoot;$CodexBinRoot;$RtkBinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
     $RtkExe = Find-Rtk
@@ -7243,10 +7243,10 @@ if ($RtkNeedsUpdate) {
     $RtkCurrentVersion = Get-RtkVersion $RtkExe
     if (-not $RtkCurrentVersion) { Fail 'Could not read the installed RTK version.' }
     $PersistedRtkCommand = $RtkExe
-    Write-Host "✓ RTK $RtkCurrentVersion ready"
+    Write-Host "[OK] RTK $RtkCurrentVersion ready"
 } else {
     $rtkDisplayVersion = if ($RtkCurrentVersion) { $RtkCurrentVersion } else { 'installed' }
-    Write-Host "✓ RTK $rtkDisplayVersion already current — skipped."
+    Write-Host "[OK] RTK $rtkDisplayVersion already current - skipped."
 }
 
 # Lazy Developer runtime is refreshed before the selected AI UIs.
@@ -7273,7 +7273,7 @@ if ($LazyDevNeedsUpdate) {
             if (-not $sourceDir) { Fail 'Downloaded Lazy Developer source could not be unpacked.' }
             $sourceDirPath = $sourceDir.FullName
             if (-not (Test-LazyDevSourceCurrent $sourceDirPath)) {
-                Write-Host 'Remote Lazy Developer source is stale — using the installer’s embedded current source.'
+                Write-Host 'Remote Lazy Developer source is stale - using the installer's embedded current source.'
                 Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
                 New-Item -ItemType Directory -Path $extract -Force | Out-Null
                 Expand-EmbeddedLazyDevSource $extract
@@ -7308,7 +7308,6 @@ if ($LazyDevNeedsUpdate) {
         Move-Item -LiteralPath $stage -Destination $InstallRoot -Force
 
         New-Item -ItemType Directory -Path $BinRoot -Force | Out-Null
-        # Keep the .cmd payload in ordinary PowerShell strings for Windows PowerShell 5.1.
         $launcherContent = @(
             '@echo off',
             'setlocal',
@@ -7343,7 +7342,7 @@ if ($LazyDevNeedsUpdate) {
         }
         [Environment]::SetEnvironmentVariable('Path', (($parts | Select-Object -Unique) -join ';'), 'User')
         $env:Path = "$BinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
-        Write-Host "✓ Lazy Developer $LazyDevVersion ready"
+        Write-Host "[OK] Lazy Developer $LazyDevVersion ready"
     } finally { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
 } else {
     if ($LazyDevStatusMessage) { Write-Host $LazyDevStatusMessage }
@@ -7355,7 +7354,7 @@ Refresh-ActiveLazyDevLauncher
 $LazyDevHelp = & $Launcher help 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) { Write-Host $LazyDevHelp; Fail 'Lazy Developer launcher did not execute after refresh.' }
 if (($LazyDevHelp -notmatch 'lazydev resume') -or ($LazyDevHelp -match 'lazydev sessions')) { Write-Host $LazyDevHelp; Fail 'Lazy Developer command surface is stale: expected lazydev resume and no lazydev sessions.' }
-Write-Host 'Lazy Developer setup — skipped. Configure providers later with: lazydev setup'
+Write-Host 'Lazy Developer setup - skipped. Configure providers later with: lazydev setup'
 
 Install-CliUiRuntime
 
@@ -7388,7 +7387,7 @@ if ($InstallKimi -and $KimiNeedsUpdate) {
     if (-not $KimiCurrentVersion) { Fail 'Installed Kimi Code version could not be detected.' }
     $PersistedKimiCommand = $KimiExe
     if ($KimiLatestVersion -and -not (Test-VersionAtLeast $KimiCurrentVersion $KimiLatestVersion)) { Fail "Installed Kimi Code is $KimiCurrentVersion; latest detected release is $KimiLatestVersion." }
-    Write-Host "✓ Kimi Code $KimiCurrentVersion ready"
+    Write-Host "[OK] Kimi Code $KimiCurrentVersion ready"
 }
 
 if ($InstallCodex -and $CodexNeedsUpdate) {
@@ -7404,10 +7403,10 @@ if ($InstallCodex -and $CodexNeedsUpdate) {
     $PersistedCodexCommand = $CodexExe
     if (-not $CodexCurrentVersion) {
         $CodexCurrentVersion = $CodexTargetVersion
-        Write-Host "✓ Codex $CodexCurrentVersion ready (official archive verified)"
+        Write-Host "[OK] Codex $CodexCurrentVersion ready (official archive verified)"
     } else {
         if ($CodexTargetVersion -and -not (Test-VersionAtLeast $CodexCurrentVersion $CodexTargetVersion)) { Fail "Installed Codex is $CodexCurrentVersion; verified package is $CodexTargetVersion." }
-        Write-Host "✓ Codex $CodexCurrentVersion ready"
+        Write-Host "[OK] Codex $CodexCurrentVersion ready"
     }
 }
 
@@ -7432,7 +7431,7 @@ if ($InstallAntigravity -and $AgyNeedsUpdate) {
     $PersistedAntigravityCommand = $AgyExe
     if (-not $AgyCurrentVersion) { Fail 'Installed Antigravity version could not be detected.' }
     if ($AgyLatestVersion -and -not (Test-VersionAtLeast $AgyCurrentVersion $AgyLatestVersion)) { Fail "Installed Antigravity is $AgyCurrentVersion; latest detected release is $AgyLatestVersion." }
-    Write-Host "✓ Antigravity CLI $AgyCurrentVersion ready"
+    Write-Host "[OK] Antigravity CLI $AgyCurrentVersion ready"
 }
 
 if ($InstallClaude -and $ClaudeNeedsUpdate) {
@@ -7454,7 +7453,7 @@ if ($InstallClaude -and $ClaudeNeedsUpdate) {
     if (-not $ClaudeExe) { Fail 'Claude Code did not install a usable launcher.' }
     $ClaudeCurrentVersion = Get-VersionFromText ((& $ClaudeExe --version 2>$null) -join "`n")
     $PersistedClaudeCommand = $ClaudeExe
-    Write-Host "✓ Claude Code $($(if ($ClaudeCurrentVersion) { $ClaudeCurrentVersion } else { 'installed' })) ready"
+    Write-Host "[OK] Claude Code $($(if ($ClaudeCurrentVersion) { $ClaudeCurrentVersion } else { 'installed' })) ready"
 }
 
 if ($InstallDeepSeekHarness -and $DeepSeekHarnessNeedsUpdate) {
@@ -7482,15 +7481,14 @@ if ($InstallDeepSeekHarness -and $DeepSeekHarnessNeedsUpdate) {
     & $DeepSeekHarnessExe web --help *> $null
     if ($LASTEXITCODE -ne 0) { Fail 'DeepSeek Harness Web UI runtime is incomplete.' }
     $PersistedDeepSeekHarnessCommand = $DeepSeekHarnessExe
-    Write-Host "✓ DeepSeek Harness $DeepSeekHarnessCurrentVersion ready"
+    Write-Host "[OK] DeepSeek Harness $DeepSeekHarnessCurrentVersion ready"
 }
 
 # Prefer the managed bin directory in new and current PowerShell sessions.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $entries = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
-$KimiBinPath = Join-Path $HOME '.kimi-code\bin'
-$entries = @($entries | Where-Object { ($_ -ne $BinRoot) -and ($_ -ne $KimiBinPath) })
-$entries = @($BinRoot, $CodexBinRoot, $RtkBinRoot, $KimiBinPath) + $entries
+$entries = @($entries | Where-Object { $_ -notin @($BinRoot, (Join-Path $HOME '.kimi-code\bin')) })
+$entries = @($BinRoot, $CodexBinRoot, $RtkBinRoot, (Join-Path $HOME '.kimi-code\bin')) + $entries
 [Environment]::SetEnvironmentVariable('Path', ($entries | Select-Object -Unique) -join ';', 'User')
 $env:Path = (($entries | Select-Object -Unique) -join ';')
 
@@ -7509,7 +7507,7 @@ if ($resolvedClaude) { $PersistedClaudeCommand = $resolvedClaude }
 $resolvedDeepSeekHarness = Find-DeepSeekHarness
 if ($resolvedDeepSeekHarness) { $PersistedDeepSeekHarnessCommand = $resolvedDeepSeekHarness }
 
-# Actual installation order: RTK → Lazy Developer → selected UI(s) (Kimi → Codex → Antigravity → Claude Code → DeepSeek Harness).
+# Actual installation order: RTK -> Lazy Developer -> selected UI(s) (Kimi -> Codex -> Antigravity -> Claude Code -> DeepSeek Harness).
 
 function Refresh-ActiveLazyDevLauncher {
     $canonical = Join-Path $BinRoot 'lazydev.cmd'
@@ -7522,7 +7520,7 @@ function Refresh-ActiveLazyDevLauncher {
         $text = Get-Content -Raw -LiteralPath $path -ErrorAction Stop
         if ($text -match 'Lazy Developer|lazydev\.mjs|lazydev\.py|@blizps/lazy-developer|free-kimi-code') {
             Copy-Item -LiteralPath $canonical -Destination $path -Force
-            Write-Host "✓ Refreshed active LazyDev launcher: $path"
+            Write-Host "[OK] Refreshed active LazyDev launcher: $path"
         }
     } catch {}
 }
@@ -7555,7 +7553,7 @@ function Refresh-ExistingLazyDevLaunchers {
             $text = Get-Content -Raw -LiteralPath $path -ErrorAction Stop
             if ($text -match 'Lazy Developer managed launcher|lazydev\.mjs|@blizps/lazy-developer|free-kimi-code') {
                 Copy-Item -LiteralPath $canonical -Destination $path -Force
-                Write-Host "✓ Refreshed existing LazyDev launcher: $path"
+                Write-Host "[OK] Refreshed existing LazyDev launcher: $path"
             }
         } catch {}
     }
