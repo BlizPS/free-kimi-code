@@ -7569,7 +7569,12 @@ RTK_LATEST_VERSION=""
 RTK_NEEDS_UPDATE=1
 RTK_UPDATE_AVAILABLE=0
 if [ -n "$RTK_COMMAND" ]; then
-  case "$RTK_COMMAND" in /*) RTK_BIN_DIR="$(dirname "$RTK_COMMAND")";; esac
+  # Only adopt an existing directory when the discovered binary is already the
+  # correct Rust Token Killer. A wrong `rtk` on PATH must not become our install
+  # destination because crates.io also has an unrelated Rust Type Kit package.
+  if rtk_is_token_killer "$RTK_COMMAND"; then
+    case "$RTK_COMMAND" in /*) RTK_BIN_DIR="$(dirname "$RTK_COMMAND")";; esac
+  fi
   RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
   if [ -n "$RTK_CURRENT_VERSION" ] && rtk_is_token_killer "$RTK_COMMAND"; then
     RTK_LATEST_FILE="$TMP_DIR/rtk-latest.version"
@@ -7829,13 +7834,17 @@ clear 2>/dev/null || true
 step "RTK"
 if [ "$RTK_NEEDS_UPDATE" -eq 1 ]; then
   say "RTK is missing, outdated, or not the Rust Token Killer — installing the official RTK first."
+  # Install to our managed directory and verify that exact binary. Never let a
+  # stale saved command/path win after the repair has completed.
+  RTK_BIN_DIR="${LAZYDEV_EXTERNAL_BIN_DIR:-$DEFAULT_EXTERNAL_BIN_DIR}"
   mkdir -p "$RTK_BIN_DIR"
   curl -fsSL "$RTK_INSTALL_URL" | RTK_INSTALL_DIR="$RTK_BIN_DIR" RTK_TELEMETRY_DISABLED=1 sh
   PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$KIMI_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
   export PATH
-  RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
-  [ -n "$RTK_COMMAND" ] || fatal "RTK did not install a usable launcher."
-  rtk_is_token_killer "$RTK_COMMAND" || fatal "Installed RTK is not the Rust Token Killer."
+  RTK_INSTALLED_PATH="$RTK_BIN_DIR/rtk"
+  [ -x "$RTK_INSTALLED_PATH" ] || fatal "RTK did not install a usable launcher at $RTK_INSTALLED_PATH."
+  rtk_is_token_killer "$RTK_INSTALLED_PATH" || fatal "Installed RTK is not the Rust Token Killer."
+  RTK_COMMAND="$RTK_INSTALLED_PATH"
   RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
   [ -n "$RTK_CURRENT_VERSION" ] || fatal "Could not read the installed RTK version."
   say "✓ RTK $RTK_CURRENT_VERSION ready"

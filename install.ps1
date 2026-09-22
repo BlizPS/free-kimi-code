@@ -6446,14 +6446,34 @@ function Test-VersionAtLeast([string]$Current, [string]$Required) {
     try { return ([version]$Current -ge [version]$Required) } catch { return $false }
 }
 function Find-ExternalCliInHome([string[]]$Names) {
-    $roots = @($HOME, (Join-Path $env:LOCALAPPDATA 'Programs'), (Join-Path $env:APPDATA 'npm')) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } | Select-Object -Unique
+    # Normal detection stays fast on Windows. Avoid recursive HOME scans unless
+    # the user explicitly enables deep discovery with LAZYDEV_DEEP_DISCOVERY=1.
+    $roots = @(
+        $HOME,
+        (Join-Path $HOME '.local\bin'),
+        (Join-Path $HOME '.cargo\bin'),
+        (Join-Path $HOME '.volta\bin'),
+        (Join-Path $HOME '.asdf\shims'),
+        (Join-Path $HOME '.npm\bin'),
+        (Join-Path $env:LOCALAPPDATA 'Programs'),
+        (Join-Path $env:APPDATA 'npm')
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } | Select-Object -Unique
     foreach ($root in $roots) {
-        try {
-            $found = Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue |
-                Where-Object { $Names -contains $_.Name -and $_.FullName -notmatch '(?i)\\(node_modules|sessions|logs|\.cache|Cache|target|\.git)\\' } |
-                Select-Object -First 1
-            if ($found) { return $found.FullName }
-        } catch {}
+        foreach ($name in $Names) {
+            $candidate = Join-Path $root $name
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+    }
+    if ($env:LAZYDEV_DEEP_DISCOVERY -eq '1') {
+        foreach ($root in @($HOME, (Join-Path $env:LOCALAPPDATA 'Programs'))) {
+            if (-not $root -or -not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+            try {
+                $found = Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue |
+                    Where-Object { $Names -contains $_.Name -and $_.FullName -notmatch '(?i)\\(node_modules|sessions|logs|\\.cache|Cache|target|\\.git)\\' } |
+                    Select-Object -First 1
+                if ($found) { return $found.FullName }
+            } catch {}
+        }
     }
     return $null
 }
@@ -6599,8 +6619,13 @@ function Get-RtkVersion([string]$Exe) {
 }
 function Test-RtkTokenKiller([string]$Exe) {
     if (-not $Exe) { return $false }
-    try { & $Exe gain *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
+    if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { return $false }
+    try {
+        $output = ((& $Exe gain 2>&1) -join "`n")
+        return (($LASTEXITCODE -eq 0) -and ($output -notmatch '(?i)not (a )?rtk command|command not found'))
+    } catch { return $false }
 }
+
 function Get-PythonCommand {
     foreach ($name in @('python.exe', 'python3.exe')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -7092,7 +7117,6 @@ if ($DeepSeekHarnessExe) {
 }
 
 $RtkExe = Find-Rtk
-if ($RtkExe -and -not $env:LAZYDEV_BIN_DIR) { $RtkBinRoot = Split-Path -Parent $RtkExe }
 $RtkCurrentVersion = ''
 $RtkLatestVersion = ''
 $RtkNeedsUpdate = $true
@@ -7243,11 +7267,15 @@ if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Con
 Step 'RTK'
 if ($RtkNeedsUpdate) {
     Write-Host 'RTK is missing, outdated, or not the Rust Token Killer - installing the official RTK first.'
+    # Use a managed directory for repairs so a stale saved PATH entry cannot
+    # make the verifier select an unrelated `rtk` binary after installation.
+    $RtkBinRoot = $ExternalBinRoot
     Install-Rtk
     $env:Path = "$BinRoot;$CodexBinRoot;$RtkBinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
-    $RtkExe = Find-Rtk
-    if (-not $RtkExe) { Fail 'RTK did not install a usable launcher.' }
-    if (-not (Test-RtkTokenKiller $RtkExe)) { Fail 'Installed RTK is not the Rust Token Killer.' }
+    $RtkInstalledPath = Join-Path $RtkBinRoot 'rtk.exe'
+    if (-not (Test-Path -LiteralPath $RtkInstalledPath -PathType Leaf)) { Fail 'RTK did not install rtk.exe into the managed bin.' }
+    if (-not (Test-RtkTokenKiller $RtkInstalledPath)) { Fail 'Installed RTK is not the Rust Token Killer.' }
+    $RtkExe = $RtkInstalledPath
     $RtkCurrentVersion = Get-RtkVersion $RtkExe
     if (-not $RtkCurrentVersion) { Fail 'Could not read the installed RTK version.' }
     $PersistedRtkCommand = $RtkExe
