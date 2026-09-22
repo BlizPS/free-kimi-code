@@ -7281,7 +7281,7 @@ if ($LazyDevNeedsUpdate) {
             if (-not $sourceDir) { Fail 'Downloaded Lazy Developer source could not be unpacked.' }
             $sourceDirPath = $sourceDir.FullName
             if (-not (Test-LazyDevSourceCurrent $sourceDirPath)) {
-                Write-Host 'Remote Lazy Developer source is stale - using the installer's embedded current source.'
+                Write-Host 'Remote Lazy Developer source is stale - using the embedded current source.'
                 Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction SilentlyContinue
                 New-Item -ItemType Directory -Path $extract -Force | Out-Null
                 Expand-EmbeddedLazyDevSource $extract
