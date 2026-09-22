@@ -1,3 +1,4 @@
+﻿#requires -Version 5.1
 [CmdletBinding()]
 param([switch]$Help)
 
@@ -6633,7 +6634,7 @@ function Test-LazyDevSourceCurrent([string]$SourceDir) {
         $mjsText = Get-Content -Raw -LiteralPath $mjs
         return (
             $pyText -match 'lazydev resume' -and
-            $pyText -match 'if\s+cmd\s*==\s*["'']resume["'']:' -and
+            $pyText -match "if\s+cmd\s*==\s*[`"']resume[`"']:" -and
             $pyText -match 'return chat\(resume=True\)' -and
             $pyText -match 'def _discover_command\(' -and
             $pyText -match 'def _resolve_from_dirs\(' -and
@@ -6644,9 +6645,9 @@ function Test-LazyDevSourceCurrent([string]$SourceDir) {
             $pyText -match 'response\.output_item\.done' -and
             $pyText -match '_lazydev_dev_mcp_entry' -and
             (Test-Path -LiteralPath (Join-Path $SourceDir 'runtime\lazydev-dev-mcp.py') -PathType Leaf) -and
-            $pyText -notmatch '["'']--config["'']' -and
+            $pyText -notmatch "[`"']--config[`"']" -and
             $mjsText -match 'resume' -and
-            $mjsText -notmatch 'cmd\s*===\s*["'']sessions["'']'
+            $mjsText -notmatch "cmd\s*===\s*[`"']sessions[`"']"
         )
     } catch { return $false }
 }
@@ -6676,11 +6677,20 @@ function Test-CliUiRuntime {
     if (-not (Test-CliUiPackage)) { return $false }
     $node = Find-NodeCommand
     if (-not $node) { return $false }
-    Push-Location $LazyDevUiHome
+    $probe = Join-Path $LazyDevUiHome 'lazydev-cliui-probe.mjs'
+    # Keep the Node probe deliberately boring so Windows PowerShell 5.1 never has
+    # to parse JavaScript arrow functions or nested quote syntax.
+    $probeSource = 'import("@poppinss/cliui").then(function(m){if(typeof m.cliui!=="function"){process.exit(2);}}).catch(function(){process.exit(3);});'
     try {
-        & $node --input-type=module -e "import('@poppinss/cliui').then(m=>{if(typeof m.cliui!=='function')process.exit(2)}).catch(()=>process.exit(3))" *> $null
-        return ($LASTEXITCODE -eq 0) -and (Test-Path -LiteralPath (Join-Path $LazyDevUiHome 'lazydev-ui.mjs') -PathType Leaf)
-    } finally { Pop-Location }
+        Set-Content -LiteralPath $probe -Value $probeSource -Encoding UTF8
+        & $node --input-type=module -e $probeSource *> $null
+        $exitCode = $LASTEXITCODE
+        return ($exitCode -eq 0) -and (Test-Path -LiteralPath (Join-Path $LazyDevUiHome 'lazydev-ui.mjs') -PathType Leaf)
+    } catch {
+        return $false
+    } finally {
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+    }
 }
 function Install-CliUiRuntime {
     $node = Find-NodeCommand
@@ -7062,7 +7072,8 @@ if ($DeepSeekHarnessExe) {
         Write-Host "DeepSeek Harness $DeepSeekHarnessCurrentVersion is already current — skipped."
     } else {
         $DeepSeekHarnessUpdateAvailable = $true
-        Write-Host "DeepSeek Harness $($(if ($DeepSeekHarnessCurrentVersion) { $DeepSeekHarnessCurrentVersion } else { 'unknown' })) → $DeepSeekHarnessTargetVersion — install/update available."
+        $dshCurrentDisplay = if ($DeepSeekHarnessCurrentVersion) { $DeepSeekHarnessCurrentVersion } else { 'unknown' }
+        Write-Host "DeepSeek Harness $dshCurrentDisplay → $DeepSeekHarnessTargetVersion — install/update available."
     }
 } else {
     $DeepSeekHarnessUpdateAvailable = $true
@@ -7155,7 +7166,7 @@ if (-not (Test-Path -LiteralPath $installedPy -PathType Leaf)) {
     try {
         $pyText = Get-Content -Raw -LiteralPath $installedPy
         if ($pyText -notmatch 'lazydev resume' -or
-            $pyText -notmatch 'if\s+cmd\s*==\s*["'']resume["'']:' -or
+            $pyText -notmatch "if\s+cmd\s*==\s*[`"']resume[`"']:" -or
             $pyText -notmatch 'return chat\(resume=True\)' -or
             $pyText -notmatch 'def _discover_command\(' -or
             $pyText -notmatch 'def _resolve_from_dirs\(' -or
@@ -7164,7 +7175,7 @@ if (-not (Test-Path -LiteralPath $installedPy -PathType Leaf)) {
             $pyText -notmatch 'def find_codex\(' -or
             $pyText -notmatch 'def find_antigravity\(' -or
             $pyText -notmatch 'def find_claude\(' -or
-            $pyText -match '[''"]--config[''"]') { $LazyDevFeatureRefresh = $true }
+            $pyText -match "[`"']--config[`"']") { $LazyDevFeatureRefresh = $true }
     } catch { $LazyDevFeatureRefresh = $true }
 }
 if (-not (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime\lazydev-ui.mjs') -PathType Leaf)) { $LazyDevFeatureRefresh = $true }
