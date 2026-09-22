@@ -7164,7 +7164,7 @@ if (-not (Test-Path -LiteralPath $installedPy -PathType Leaf)) {
             $pyText -notmatch 'def find_codex\(' -or
             $pyText -notmatch 'def find_antigravity\(' -or
             $pyText -notmatch 'def find_claude\(' -or
-            $pyText -match '--config') { $LazyDevFeatureRefresh = $true }
+            $pyText -match "['\"]--config['\"]") { $LazyDevFeatureRefresh = $true }
     } catch { $LazyDevFeatureRefresh = $true }
 }
 if (-not (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime\lazydev-ui.mjs') -PathType Leaf)) { $LazyDevFeatureRefresh = $true }
@@ -7294,32 +7294,32 @@ if ($LazyDevNeedsUpdate) {
         Move-Item -LiteralPath $stage -Destination $InstallRoot -Force
 
         New-Item -ItemType Directory -Path $BinRoot -Force | Out-Null
-        $launcherContent = @"
-@echo off
-setlocal
-set "LAZYDEV_ROOT=$InstallRoot"
-set "PATH=$BinRoot;$(Join-Path $HOME '.kimi-code\bin');%PATH%"
-where py.exe >nul 2>&1
-if not errorlevel 1 (
-  py.exe -3 "%LAZYDEV_ROOT%\cli\lazydev.py" %*
-  set "EXIT_CODE=%ERRORLEVEL%"
-  endlocal & exit /b %EXIT_CODE%
-)
-where python.exe >nul 2>&1
-if not errorlevel 1 (
-  python.exe "%LAZYDEV_ROOT%\cli\lazydev.py" %*
-  set "EXIT_CODE=%ERRORLEVEL%"
-  endlocal & exit /b %EXIT_CODE%
-)
-where uv.exe >nul 2>&1
-if not errorlevel 1 (
-  uv.exe run --no-project --python 3.13 "%LAZYDEV_ROOT%\cli\lazydev.py" %*
-  set "EXIT_CODE=%ERRORLEVEL%"
-  endlocal & exit /b %EXIT_CODE%
-)
-echo LazyDev requires Python 3.10+ or uv. The installer does not install Node.js. 1>&2
-endlocal & exit /b 1
-"@
+        $launcherContent = @(
+            '@echo off'
+            'setlocal'
+            ('set "LAZYDEV_ROOT={0}"' -f $InstallRoot)
+            ('set "PATH={0};{1};%PATH%"' -f $BinRoot, $KimiBinRoot)
+            'where py.exe >nul 2>&1'
+            'if not errorlevel 1 ('
+            '  py.exe -3 "%LAZYDEV_ROOT%\cli\lazydev.py" %*'
+            '  set "EXIT_CODE=%ERRORLEVEL%"'
+            '  endlocal & exit /b %EXIT_CODE%'
+            ')'
+            'where python.exe >nul 2>&1'
+            'if not errorlevel 1 ('
+            '  python.exe "%LAZYDEV_ROOT%\cli\lazydev.py" %*'
+            '  set "EXIT_CODE=%ERRORLEVEL%"'
+            '  endlocal & exit /b %EXIT_CODE%'
+            ')'
+            'where uv.exe >nul 2>&1'
+            'if not errorlevel 1 ('
+            '  uv.exe run --no-project --python 3.13 "%LAZYDEV_ROOT%\cli\lazydev.py" %*'
+            '  set "EXIT_CODE=%ERRORLEVEL%"'
+            '  endlocal & exit /b %EXIT_CODE%'
+            ')'
+            'echo LazyDev requires Python 3.10+ or uv. The installer does not install Node.js. 1>&2'
+            'endlocal & exit /b 1'
+        ) -join [Environment]::NewLine
         Set-Content -LiteralPath $Launcher -Value $launcherContent -Encoding ASCII
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
         $parts = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
