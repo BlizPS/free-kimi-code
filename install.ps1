@@ -7164,7 +7164,7 @@ if (-not (Test-Path -LiteralPath $installedPy -PathType Leaf)) {
             $pyText -notmatch 'def find_codex\(' -or
             $pyText -notmatch 'def find_antigravity\(' -or
             $pyText -notmatch 'def find_claude\(' -or
-            $pyText -match "['\"]--config['\"]") { $LazyDevFeatureRefresh = $true }
+            $pyText -match '--config') { $LazyDevFeatureRefresh = $true }
     } catch { $LazyDevFeatureRefresh = $true }
 }
 if (-not (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime\lazydev-ui.mjs') -PathType Leaf)) { $LazyDevFeatureRefresh = $true }
