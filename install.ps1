@@ -23,8 +23,12 @@ $CodexReleasesApiUrl = 'https://api.github.com/repos/openai/codex/releases/lates
 $AntigravityReleasesApiUrl = 'https://api.github.com/repos/google-antigravity/antigravity-cli/releases/latest'
 $ArchiveUrl = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
 $GitHubApiUrl = "https://api.github.com/repos/$Repo/commits/$Branch"
-$RtkApiUrl = 'https://api.github.com/repos/rtk-ai/rtk/releases/latest'
-$RtkInstallRepo = 'https://github.com/rtk-ai/rtk'
+# Use the same known-good official RTK release and checksum as free-claude-code.
+# This avoids crate-name collisions and release metadata ambiguity on Windows.
+$RtkVersion = '0.44.2'
+$RtkReleaseBaseUrl = "https://github.com/rtk-ai/rtk/releases/download/v$RtkVersion"
+$RtkWindowsAssetName = 'rtk-x86_64-pc-windows-msvc.zip'
+$RtkWindowsAssetSha256 = '3a1e114edce9080f8a10663e9c87488363a82f14a5ca8aab2ad416817f89d47c'
 $InstallRoot = if ($env:LAZYDEV_HOME) { $env:LAZYDEV_HOME } else { Join-Path $HOME '.local\share\lazydev' }
 $ConfigRoot = if ($env:LAZYDEV_CONFIG_DIR) { $env:LAZYDEV_CONFIG_DIR } else { Join-Path $env:APPDATA 'lazydev' }
 $DeepSeekHarnessPackage = '@deepseek-ai/dsh'
@@ -6446,34 +6450,14 @@ function Test-VersionAtLeast([string]$Current, [string]$Required) {
     try { return ([version]$Current -ge [version]$Required) } catch { return $false }
 }
 function Find-ExternalCliInHome([string[]]$Names) {
-    # Normal detection stays fast on Windows. Avoid recursive HOME scans unless
-    # the user explicitly enables deep discovery with LAZYDEV_DEEP_DISCOVERY=1.
-    $roots = @(
-        $HOME,
-        (Join-Path $HOME '.local\bin'),
-        (Join-Path $HOME '.cargo\bin'),
-        (Join-Path $HOME '.volta\bin'),
-        (Join-Path $HOME '.asdf\shims'),
-        (Join-Path $HOME '.npm\bin'),
-        (Join-Path $env:LOCALAPPDATA 'Programs'),
-        (Join-Path $env:APPDATA 'npm')
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } | Select-Object -Unique
+    $roots = @($HOME, (Join-Path $env:LOCALAPPDATA 'Programs'), (Join-Path $env:APPDATA 'npm')) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } | Select-Object -Unique
     foreach ($root in $roots) {
-        foreach ($name in $Names) {
-            $candidate = Join-Path $root $name
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
-        }
-    }
-    if ($env:LAZYDEV_DEEP_DISCOVERY -eq '1') {
-        foreach ($root in @($HOME, (Join-Path $env:LOCALAPPDATA 'Programs'))) {
-            if (-not $root -or -not (Test-Path -LiteralPath $root -PathType Container)) { continue }
-            try {
-                $found = Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue |
-                    Where-Object { $Names -contains $_.Name -and $_.FullName -notmatch '(?i)\\(node_modules|sessions|logs|\\.cache|Cache|target|\\.git)\\' } |
-                    Select-Object -First 1
-                if ($found) { return $found.FullName }
-            } catch {}
-        }
+        try {
+            $found = Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue |
+                Where-Object { $Names -contains $_.Name -and $_.FullName -notmatch '(?i)\\(node_modules|sessions|logs|\.cache|Cache|target|\.git)\\' } |
+                Select-Object -First 1
+            if ($found) { return $found.FullName }
+        } catch {}
     }
     return $null
 }
@@ -6589,28 +6573,24 @@ function Get-DeepSeekHarnessVersion([string]$Exe) {
 }
 
 function Find-Rtk {
-    foreach ($candidate in @(
-        $PersistedRtkCommand,
+    # Always prefer LazyDev's managed RTK. A conflicting `rtk` elsewhere on PATH
+    # must never override the Rust Token Killer installed by this installer.
+    $candidates = @(
         (Join-Path $RtkBinRoot 'rtk.exe'),
-        (Join-Path $RtkBinRoot 'rtk.cmd'),
-        (Join-Path $RtkBinRoot 'rtk'),
-        (Join-Path $HOME '.local\share\lazydev\rtk\rtk.exe'),
-        (Join-Path $HOME '.local\share\lazydev\rtk\rtk.cmd'),
         (Join-Path $HOME '.local\bin\rtk.exe'),
-        (Join-Path $HOME '.local\bin\rtk.cmd'),
+        $PersistedRtkCommand,
         (Join-Path $HOME '.cargo\bin\rtk.exe')
-    )) {
-        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $candidate }
-        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Container)) {
-            $nested = Join-Path $candidate 'rtk.exe'
-            if (Test-Path -LiteralPath $nested -PathType Leaf) { return $nested }
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            if (Test-RtkTokenKiller $candidate) { return $candidate }
         }
     }
     foreach ($name in @('rtk.exe','rtk')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) { return $cmd.Source }
+        $cmd = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($cmd -and (Test-RtkTokenKiller $cmd.Source)) { return $cmd.Source }
     }
-    return Find-ExternalCliInHome @('rtk.exe','rtk.cmd','rtk')
+    return $null
 }
 
 function Get-RtkVersion([string]$Exe) {
@@ -6619,13 +6599,8 @@ function Get-RtkVersion([string]$Exe) {
 }
 function Test-RtkTokenKiller([string]$Exe) {
     if (-not $Exe) { return $false }
-    if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { return $false }
-    try {
-        $output = ((& $Exe gain 2>&1) -join "`n")
-        return (($LASTEXITCODE -eq 0) -and ($output -notmatch '(?i)not (a )?rtk command|command not found'))
-    } catch { return $false }
+    try { & $Exe gain *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
-
 function Get-PythonCommand {
     foreach ($name in @('python.exe', 'python3.exe')) {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
@@ -6821,14 +6796,7 @@ function Get-LazyDevLocalSourceRevision([string]$SourceDir) {
     }
     return 'local-' + (Get-LazyDevSourceFingerprint $SourceDir)
 }
-function Get-RtkLatestVersion {
-    try {
-        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.3' }
-        $data = Invoke-RestMethod -Headers $headers -Uri $RtkApiUrl
-        if ($data.tag_name -match '^v(\d+\.\d+\.\d+)$') { return $Matches[1] }
-    } catch {}
-    return ''
-}
+function Get-RtkLatestVersion { return $RtkVersion }
 function Get-KimiLatestVersion {
     try {
         $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.3' }
@@ -6926,39 +6894,60 @@ function Get-InstalledLazyRevision {
     try { return ([IO.File]::ReadAllText($file)).Trim() } catch { return '' }
 }
 function Install-Rtk {
-    $latest = Get-RtkLatestVersion
-    if (-not $latest) { Fail 'Could not determine the latest RTK release.' }
-    $archName = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
-    $target = switch ($archName.ToUpperInvariant()) {
-        'AMD64' { 'x86_64-pc-windows-msvc' }
-        'ARM64' { 'aarch64-pc-windows-msvc' }
-        default { Fail "Unsupported Windows architecture for RTK: $archName" }
+    $archiveUrl = "$RtkReleaseBaseUrl/$RtkWindowsAssetName"
+    if ($DryRun) {
+        Write-Host "+ irm $archiveUrl -OutFile <temporary-archive>"
+        Write-Host "+ verify pinned SHA-256 for $RtkWindowsAssetName"
+        Write-Host "+ extract and install rtk.exe to $(Join-Path $RtkBinRoot 'rtk.exe')"
+        return (Join-Path $RtkBinRoot 'rtk.exe')
     }
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-rtk-" + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+
+    $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-rtk-" + [guid]::NewGuid().ToString('N'))
+    $archivePath = Join-Path $temporaryRoot $RtkWindowsAssetName
+    $extractPath = Join-Path $temporaryRoot 'extracted'
     try {
-        $release = Invoke-RestMethod -Headers @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.3' } -Uri $RtkApiUrl
-        $asset = $release.assets | Where-Object { $_.name -eq "rtk-$target.zip" } | Select-Object -First 1
-        if (-not $asset) { Fail "RTK release $latest does not contain rtk-$target.zip." }
-        $archive = Join-Path $tmp $asset.name
-        Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $archive
-        $hashAsset = $release.assets | Where-Object { $_.name -eq 'checksums.txt' } | Select-Object -First 1
-        if (-not $hashAsset) { Fail 'RTK checksums.txt is missing from the release.' }
-        $hashPath = Join-Path $tmp 'checksums.txt'
-        Invoke-WebRequest -UseBasicParsing -Uri $hashAsset.browser_download_url -OutFile $hashPath
-        $expectedLine = Get-Content -LiteralPath $hashPath | Where-Object { $_ -match [regex]::Escape($asset.name) } | Select-Object -First 1
-        $expected = if ($expectedLine) { ($expectedLine -split '\s+')[0].ToUpperInvariant() } else { '' }
-        if (-not $expected) { Fail "No checksum found for $($asset.name)." }
-        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToUpperInvariant()
-        if ($actual -ne $expected) { Fail 'RTK checksum verification failed.' }
-        $extract = Join-Path $tmp 'extract'
-        Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
-        $exe = Get-ChildItem -LiteralPath $extract -Filter 'rtk.exe' -Recurse -File | Select-Object -First 1
-        if (-not $exe) { Fail 'The RTK archive did not contain rtk.exe.' }
-        New-Item -ItemType Directory -Path $RtkBinRoot -Force | Out-Null
-        Copy-Item -LiteralPath $exe.FullName -Destination (Join-Path $RtkBinRoot 'rtk.exe') -Force
-    } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
+        Write-Host "+ irm $archiveUrl -OutFile <temporary-archive>"
+        Invoke-RestMethod -Uri $archiveUrl -OutFile $archivePath -ErrorAction Stop
+        if ((-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) -or ((Get-Item -LiteralPath $archivePath).Length -eq 0)) {
+            Fail 'The RTK release archive was empty.'
+        }
+
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        $archiveStream = [IO.File]::OpenRead($archivePath)
+        try {
+            $actualHash = [BitConverter]::ToString($sha256.ComputeHash($archiveStream)).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $archiveStream.Dispose()
+            $sha256.Dispose()
+        }
+        if ($actualHash -ne $RtkWindowsAssetSha256) {
+            Fail "RTK checksum verification failed for $RtkWindowsAssetName. Expected $RtkWindowsAssetSha256 but got $actualHash."
+        }
+
+        Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath -Force
+        $executables = @(Get-ChildItem -LiteralPath $extractPath -Recurse -File -Filter 'rtk.exe')
+        if ($executables.Count -ne 1) {
+            Fail "The verified RTK archive did not contain exactly one rtk.exe (found $($executables.Count))."
+        }
+
+        New-Item -ItemType Directory -Force -Path $RtkBinRoot | Out-Null
+        $destination = Join-Path $RtkBinRoot 'rtk.exe'
+        Copy-Item -LiteralPath $executables[0].FullName -Destination $destination -Force
+        if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) {
+            Fail 'RTK was not copied to the managed bin directory.'
+        }
+        if (-not (Test-RtkTokenKiller $destination)) {
+            Fail "The verified official RTK $RtkVersion failed the Rust Token Killer identity check."
+        }
+        return $destination
+    } finally {
+        if (Test-Path -LiteralPath $temporaryRoot) {
+            Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
+
 function Connect-RtkToKimi([string]$RtkExe) {
     New-Item -ItemType Directory -Path $KimiRuntimeHome -Force | Out-Null
     Step 'Connecting RTK to Kimi Code'
@@ -7117,6 +7106,7 @@ if ($DeepSeekHarnessExe) {
 }
 
 $RtkExe = Find-Rtk
+if ($RtkExe -and -not $env:LAZYDEV_BIN_DIR) { $RtkBinRoot = Split-Path -Parent $RtkExe }
 $RtkCurrentVersion = ''
 $RtkLatestVersion = ''
 $RtkNeedsUpdate = $true
@@ -7124,7 +7114,7 @@ $RtkUpdateAvailable = $false
 if ($RtkExe) {
     $RtkCurrentVersion = Get-RtkVersion $RtkExe
     if ($RtkCurrentVersion -and (Test-RtkTokenKiller $RtkExe)) {
-        $RtkLatestVersion = Get-RtkLatestVersion
+        $RtkLatestVersion = $RtkVersion
         if ($RtkLatestVersion) {
             if (Test-VersionAtLeast $RtkCurrentVersion $RtkLatestVersion) {
                 $RtkNeedsUpdate = $false
@@ -7267,15 +7257,11 @@ if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime-node') -PathType Con
 Step 'RTK'
 if ($RtkNeedsUpdate) {
     Write-Host 'RTK is missing, outdated, or not the Rust Token Killer - installing the official RTK first.'
-    # Use a managed directory for repairs so a stale saved PATH entry cannot
-    # make the verifier select an unrelated `rtk` binary after installation.
     $RtkBinRoot = $ExternalBinRoot
-    Install-Rtk
+    $RtkExe = Install-Rtk
     $env:Path = "$BinRoot;$CodexBinRoot;$RtkBinRoot;$(Join-Path $HOME '.kimi-code\bin');$env:Path"
-    $RtkInstalledPath = Join-Path $RtkBinRoot 'rtk.exe'
-    if (-not (Test-Path -LiteralPath $RtkInstalledPath -PathType Leaf)) { Fail 'RTK did not install rtk.exe into the managed bin.' }
-    if (-not (Test-RtkTokenKiller $RtkInstalledPath)) { Fail 'Installed RTK is not the Rust Token Killer.' }
-    $RtkExe = $RtkInstalledPath
+    if (-not $RtkExe -or -not (Test-Path -LiteralPath $RtkExe -PathType Leaf)) { Fail 'RTK did not install a usable launcher.' }
+    if (-not (Test-RtkTokenKiller $RtkExe)) { Fail 'Installed RTK is not the Rust Token Killer.' }
     $RtkCurrentVersion = Get-RtkVersion $RtkExe
     if (-not $RtkCurrentVersion) { Fail 'Could not read the installed RTK version.' }
     $PersistedRtkCommand = $RtkExe
