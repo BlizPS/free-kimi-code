@@ -7296,29 +7296,29 @@ if ($LazyDevNeedsUpdate) {
 
         New-Item -ItemType Directory -Path $BinRoot -Force | Out-Null
         $launcherContent = @(
-            '@echo off'
-            'setlocal'
-            ('set "LAZYDEV_ROOT={0}"' -f $InstallRoot)
-            ('set "PATH={0};{1};%PATH%"' -f $BinRoot, $KimiBinRoot)
-            'where py.exe >nul 2>&1'
-            'if not errorlevel 1 ('
-            '  py.exe -3 "%LAZYDEV_ROOT%\cli\lazydev.py" %*'
-            '  set "EXIT_CODE=%ERRORLEVEL%"'
-            '  endlocal & exit /b %EXIT_CODE%'
-            ')'
-            'where python.exe >nul 2>&1'
-            'if not errorlevel 1 ('
-            '  python.exe "%LAZYDEV_ROOT%\cli\lazydev.py" %*'
-            '  set "EXIT_CODE=%ERRORLEVEL%"'
-            '  endlocal & exit /b %EXIT_CODE%'
-            ')'
-            'where uv.exe >nul 2>&1'
-            'if not errorlevel 1 ('
-            '  uv.exe run --no-project --python 3.13 "%LAZYDEV_ROOT%\cli\lazydev.py" %*'
-            '  set "EXIT_CODE=%ERRORLEVEL%"'
-            '  endlocal & exit /b %EXIT_CODE%'
-            ')'
-            'echo LazyDev requires Python 3.10+ or uv. The installer does not install Node.js. 1>&2'
+            '@echo off',
+            'setlocal',
+            ('set "LAZYDEV_ROOT={0}"' -f $InstallRoot),
+            ('set "PATH={0};{1};%PATH%"' -f $BinRoot, $KimiBinRoot),
+            'where py.exe >nul 2>&1',
+            'if not errorlevel 1 (',
+            '  py.exe -3 "%LAZYDEV_ROOT%\cli\lazydev.py" %*',
+            '  set "EXIT_CODE=%ERRORLEVEL%"',
+            '  endlocal & exit /b %EXIT_CODE%',
+            ')',
+            'where python.exe >nul 2>&1',
+            'if not errorlevel 1 (',
+            '  python.exe "%LAZYDEV_ROOT%\cli\lazydev.py" %*',
+            '  set "EXIT_CODE=%ERRORLEVEL%"',
+            '  endlocal & exit /b %EXIT_CODE%',
+            ')',
+            'where uv.exe >nul 2>&1',
+            'if not errorlevel 1 (',
+            '  uv.exe run --no-project --python 3.13 "%LAZYDEV_ROOT%\cli\lazydev.py" %*',
+            '  set "EXIT_CODE=%ERRORLEVEL%"',
+            '  endlocal & exit /b %EXIT_CODE%',
+            ')',
+            'echo LazyDev requires Python 3.10+ or uv. The installer does not install Node.js. 1>&2',
             'endlocal & exit /b 1'
         ) -join [Environment]::NewLine
         Set-Content -LiteralPath $Launcher -Value $launcherContent -Encoding ASCII
