@@ -35,6 +35,8 @@ assert.ok(py.includes('def _openai_sse_to_anthropic'), 'Claude Code streaming ad
 assert.ok(py.includes('def _launch_claude'), 'Claude Code launcher missing');
 assert.ok(py.includes('ANTHROPIC_BASE_URL'), 'Claude Code proxy environment missing');
 assert.ok(py.includes('CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY'), 'Claude Code gateway model discovery missing');
+assert.ok(py.includes('def _claude_messaging_args'), 'Claude Code user-namespace messaging fallback missing');
+assert.ok(py.includes('--messaging-socket-path'), 'Claude Code explicit messaging socket escape hatch missing');
 assert.ok(py.includes('def _anthropic_to_openai'), 'Python Anthropic response adapter missing');
 assert.ok(py.includes('def _anthropic_sse_to_openai'), 'Python Anthropic streaming adapter missing');
 assert.ok(py.includes('headers["x-api-key"] = key'), 'Python Anthropic API key header missing');

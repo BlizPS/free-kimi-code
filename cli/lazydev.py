@@ -4029,6 +4029,63 @@ def _launch_antigravity(agy: str, provider: dict[str,Any], pc: dict[str,Any], wo
     except KeyboardInterrupt: return 130
 
 
+def _claude_uid_mapping_available() -> bool:
+    """Return whether Linux exposes a usable UID map for Claude's socket checks."""
+    if os.name == "nt" or sys.platform == "darwin":
+        return True
+    if not sys.platform.startswith("linux"):
+        return True
+    uid_map = Path("/proc/self/uid_map")
+    try:
+        raw = uid_map.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        # If /proc is unavailable, don't force a special launch mode.
+        return True
+    if not raw:
+        # Some Android kernels expose an empty uid_map for processes that are
+        # not actually inside a collapsed user namespace. Claude Code 2.1.248
+        # and related builds can misclassify this as an unmapped namespace.
+        return False
+    rows = []
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        try:
+            inside, outside, count = (int(x) for x in parts)
+        except ValueError:
+            continue
+        rows.append((inside, outside, count))
+    if not rows:
+        return False
+    uid = os.geteuid()
+    return any(inside <= uid < inside + count for inside, _outside, count in rows)
+
+
+def _claude_messaging_args() -> tuple[list[str], Path | None]:
+    """Provide an explicit private socket path when uid-map probing is unreliable."""
+    if os.name == "nt" or not sys.platform.startswith("linux"):
+        return [], None
+    if _claude_uid_mapping_available():
+        return [], None
+    base = Path(os.environ.get("LAZYDEV_CLAUDE_MESSAGING_DIR", str(HOME / ".lazydev" / "claude-messaging")))
+    base.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(base, 0o700)
+    except OSError:
+        pass
+    socket_path = base / f"session-{os.getpid()}.sock"
+    try:
+        socket_path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        # Claude will report a precise startup error if the path is unusable;
+        # don't delete or alter anything we cannot safely identify as stale.
+        return [], None
+    return ["--messaging-socket-path", str(socket_path)], socket_path
+
+
 def _launch_claude(claude: str, provider: dict[str,Any], pc: dict[str,Any], workspace: Path, proxy: _ProviderProxy, resume: bool = False) -> int:
     _ensure_cross_ui_skills()
     env = _clean_ui_env()
@@ -4049,7 +4106,8 @@ def _launch_claude(claude: str, provider: dict[str,Any], pc: dict[str,Any], work
     env["DISABLE_FEEDBACK_COMMAND"] = "1"
     env["DISABLE_ERROR_REPORTING"] = "1"
     env["LAZYDEV_CLAUDE_PROXY"] = "1"
-    args = ["--continue"] if resume else []
+    messaging_args, _messaging_socket = _claude_messaging_args()
+    args = (["--continue"] if resume else []) + messaging_args
     try:
         return subprocess.call([claude, *args], cwd=str(workspace), env=env)
     except KeyboardInterrupt:
