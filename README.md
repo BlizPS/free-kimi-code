@@ -51,7 +51,7 @@ Run `lazydev setup` to see the providers and models currently available to your 
 
 The installer can install **Kimi Code → Codex → Antigravity → Claude Code** in that order. Each component is optional through a `Y/n` prompt. When all four are installed, `lazydev chat` and `lazydev resume` offer all four native UIs.
 
-Claude Code is launched through LazyDev's local **Anthropic-compatible proxy**, so its requests use the provider and model selected in `lazydev setup`. No separate provider configuration is required inside LazyDev. Claude Code itself still follows its own official authentication and service requirements.
+Claude Code uses the same LazyDev provider/model route as the other native CLIs. No second provider setup is required.
 
 ### 🎯 Model-Aware Tools & Thinking
 
@@ -96,11 +96,9 @@ lazydev setup
 lazydev chat
 ```
 
-### Universal Skills
+### Skills
 
-```sh
-npx skills add BlizPS/free-kimi-code --all
-```
+`lazydev chat` syncs the bundled Lazy Developer skills into each supported native CLI, including Claude Code.
 
 ## Commands
 
@@ -124,7 +122,7 @@ lazydev version           Show the installed version
 
 ### Claude Code
 
-When Claude Code is selected from `lazydev chat`, LazyDev starts its local Anthropic-compatible proxy and passes the configured route through `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`. Claude Code's native `/model` flow can use gateway model discovery when supported by the installed Claude Code version.
+When Claude Code is selected from `lazydev chat`, it uses the same configured LazyDev route while keeping the native Claude Code interface and session flow.
 
 ### Resume
 
@@ -147,9 +145,12 @@ lazydev doctor
 
 The repository includes smoke tests covering skills, providers, MCP, artifacts, filesystem guards, context handling, sessions, proxies, authentication, installers, efficiency, language detection, and plugin manifests.
 
-## 📚 Project Docs
 
-[Getting Started](docs/getting-started.md) · [Provider & Model Routing](docs/provider-routing.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · [COMPATIBILITY.md](COMPATIBILITY.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [SUPPORT.md](SUPPORT.md)
+## 📚 Docs
+
+[Getting Started](docs/getting-started.md) · [Claude Code Integration](docs/claude-code.md) · [Skills](docs/skills.md) · [Provider & Model Routing](docs/provider-routing.md) · [Troubleshooting](docs/troubleshooting.md)
+
+[Architecture](ARCHITECTURE.md) · [Compatibility](COMPATIBILITY.md) · [Contributing](CONTRIBUTING.md) · [Support](SUPPORT.md)
 
 ## ❓ FAQ
 
@@ -189,7 +190,7 @@ If Free Kimi Code is useful to you, a star helps other developers discover the p
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT See [LICENSE](LICENSE)
 
 <div align="center">
   <sub>Built by <strong>BlizPS</strong> · Free Kimi Code 1.0.3 · Lazy Developer · Kimi Code + Codex + Antigravity + Claude Code</sub>

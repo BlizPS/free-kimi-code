@@ -31,6 +31,9 @@ from pathlib import Path
 from typing import Any
 
 VERSION = "1.0.3"
+CLAUDE_EXPOSED_MODEL_ALIAS = "sonnet"
+CLAUDE_ANDROID_MESSAGING_BUG_MIN = (2, 1, 248)
+CLAUDE_ANDROID_MESSAGING_BUG_MAX = (2, 1, 251)
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -2039,7 +2042,7 @@ def _openai_to_anthropic_response(payload: dict[str, Any], model: str) -> dict[s
         "id": str(payload.get("id") or f"msg_{secrets.token_hex(8)}"),
         "type": "message",
         "role": "assistant",
-        "model": str(payload.get("model") or model),
+        "model": str(model or payload.get("model") or ""),
         "content": content,
         "stop_reason": stop_reason,
         "stop_sequence": None,
@@ -2335,15 +2338,16 @@ class _ProviderProxy:
                     return self._send_json(401, {"error": {"message": "Unauthorized"}})
                 path=self.path.split("?",1)[0]
                 model=str(outer.pc.get("model") or "lazydev")
+                exposed_model = CLAUDE_EXPOSED_MODEL_ALIAS
                 info = outer.pc.get("modelInfo") if isinstance(outer.pc.get("modelInfo"), dict) else {}
                 context = model_context_size(outer.provider, outer.pc)
                 output = model_output_size(outer.provider, outer.pc)
                 if path == "/v1/models":
                     return self._send_json(200, {"object":"list","data":[{
-                        "id":model,
+                        "id":exposed_model,
                         "object":"model",
                         "owned_by":"lazydev",
-                        "display_name":str(info.get("name") or model),
+                        "display_name":f"LazyDev · {str(info.get("name") or model)}",
                         "context_window":int(context),
                         "max_context_window":int(context),
                         "effective_context_window_percent":95,
@@ -2353,12 +2357,12 @@ class _ProviderProxy:
                     }]})
                 if path.startswith("/v1/models/"):
                     requested=path.rsplit("/",1)[-1]
-                    if requested == model:
+                    if requested in {model, exposed_model}:
                         return self._send_json(200, {
-                            "id":model,
+                            "id":exposed_model,
                             "object":"model",
                             "owned_by":"lazydev",
-                            "display_name":str(info.get("name") or model),
+                            "display_name":f"LazyDev · {str(info.get("name") or model)}",
                             "context_window":int(context),
                             "max_context_window":int(context),
                             "effective_context_window_percent":95,
@@ -2754,6 +2758,13 @@ class _ProviderProxy:
                             except Exception:
                                 pass
                             if outer.provider.get("id") == "anthropic":
+                                try:
+                                    direct_payload = json.loads(payload.decode("utf-8", "replace"))
+                                    if isinstance(direct_payload, dict) and "model" in direct_payload:
+                                        direct_payload["model"] = CLAUDE_EXPOSED_MODEL_ALIAS
+                                    payload = json.dumps(direct_payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                                except Exception:
+                                    pass
                                 self.send_response(status)
                                 self.send_header("Content-Type", headers.get("Content-Type", "application/json"))
                                 self.send_header("Content-Length", str(len(payload)))
@@ -2761,7 +2772,8 @@ class _ProviderProxy:
                                 self.send_header("Connection", "close")
                                 self.end_headers(); self.wfile.write(payload); self.close_connection = True; return
                             if is_stream:
-                                raw_stream = _openai_sse_to_anthropic(payload, attempt_model)
+                                wire_model = CLAUDE_EXPOSED_MODEL_ALIAS
+                                raw_stream = _openai_sse_to_anthropic(payload, wire_model)
                                 self.send_response(200)
                                 self.send_header("Content-Type", "text/event-stream")
                                 self.send_header("Content-Length", str(len(raw_stream)))
@@ -2770,7 +2782,8 @@ class _ProviderProxy:
                                 self.end_headers(); self.wfile.write(raw_stream); self.close_connection = True; return
                             try:
                                 source_payload = json.loads(payload.decode("utf-8", "replace"))
-                                completion = _openai_to_anthropic_response(source_payload, attempt_model)
+                                wire_model = CLAUDE_EXPOSED_MODEL_ALIAS
+                                completion = _openai_to_anthropic_response(source_payload, wire_model)
                             except Exception as exc:
                                 return self._send_json(502, {"error": {"message": f"Claude response conversion failed: {exc}"}})
                             return self._send_json(200, completion)
@@ -2781,7 +2794,7 @@ class _ProviderProxy:
                             except Exception:
                                 pass
                             if is_stream:
-                                raw_stream = _anthropic_sse_to_openai(payload, attempt_model)
+                                raw_stream = _anthropic_sse_to_openai(payload, CLAUDE_EXPOSED_MODEL_ALIAS)
                                 self.send_response(200)
                                 self.send_header("Content-Type", "text/event-stream")
                                 self.send_header("Content-Length", str(len(raw_stream)))
@@ -2790,7 +2803,7 @@ class _ProviderProxy:
                                 self.end_headers(); self.wfile.write(raw_stream); self.close_connection = True; return
                             try:
                                 source_payload = json.loads(payload.decode("utf-8", "replace"))
-                                completion = _anthropic_to_openai(source_payload, attempt_model)
+                                completion = _anthropic_to_openai(source_payload, CLAUDE_EXPOSED_MODEL_ALIAS)
                             except Exception as exc:
                                 return self._send_json(502, {"error": {"message": f"Anthropic response conversion failed: {exc}"}})
                             return self._send_json(200, completion)
@@ -3502,9 +3515,40 @@ def _ensure_antigravity_home(shared: Path | None = None) -> Path:
     return native
 
 
+def _ensure_claude_skills(shared: Path | None = None) -> None:
+    """Expose the bundled LazyDev skills through Claude Code's user skill path.
+
+    Keep this as per-skill links/copies instead of replacing ~/.claude/skills so
+    existing user skills remain untouched.
+    """
+    shared = shared or _ensure_shared_skill_root()
+    target_root = HOME / ".claude" / "skills"
+    target_root.parent.mkdir(parents=True, exist_ok=True)
+    target_root.mkdir(parents=True, exist_ok=True)
+    for name, _description in SKILLS:
+        source = shared / name
+        target = target_root / name
+        if target.exists() or target.is_symlink():
+            try:
+                if target.is_symlink() and target.resolve() == source.resolve():
+                    continue
+            except OSError:
+                pass
+            # Preserve an existing user-managed skill with the same name.
+            continue
+        try:
+            target.symlink_to(source, target_is_directory=True)
+        except OSError:
+            try:
+                shutil.copytree(source, target, dirs_exist_ok=True)
+            except OSError:
+                pass
+
+
 def _ensure_cross_ui_skills() -> None:
     shared = _ensure_shared_skill_root()
     _ensure_codex_skills(shared)
+    _ensure_claude_skills(shared)
     agy_home = _ensure_antigravity_home(shared)
     target_root = agy_home / "skills"
     if target_root.is_symlink():
@@ -4062,54 +4106,118 @@ def _claude_uid_mapping_available() -> bool:
     return any(inside <= uid < inside + count for inside, _outside, count in rows)
 
 
-def _claude_messaging_args() -> tuple[list[str], Path | None]:
-    """Provide an explicit private socket path when uid-map probing is unreliable."""
+def _claude_version_tuple(claude: str) -> tuple[int, int, int] | None:
+    try:
+        proc = subprocess.run([claude, "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=3, check=False)
+        match = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", proc.stdout or "")
+        return tuple(int(part) for part in match.groups()) if match else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def _claude_unshare_prefix() -> list[str]:
+    """Return a mapped user-namespace wrapper when Linux exposes no usable UID map."""
+    if os.name == "nt" or not sys.platform.startswith("linux"):
+        return []
+    if _claude_uid_mapping_available():
+        return []
+    unshare = shutil.which("unshare")
+    if not unshare:
+        return []
+    try:
+        probe = subprocess.run(
+            [unshare, "-Ur", "true"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+        if probe.returncode == 0:
+            return [unshare, "-Ur", "--"]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return []
+
+
+def _claude_android_messaging_workaround_needed(claude: str) -> bool:
+    """Detect the Android/Termux Claude Code regression documented in #90908.
+
+    Claude Code 2.1.248-2.1.251 misread Android's empty /proc/self/uid_map and
+    rejected the daemon socket before it could start. On later/unknown versions
+    we leave native messaging enabled so upstream fixes are preserved.
+    """
+    if not IS_TERMUX or not sys.platform.startswith("linux"):
+        return False
+    if _claude_uid_mapping_available():
+        return False
+    version = _claude_version_tuple(claude)
+    if version is None:
+        # Fail closed only on the exact Android shape reported by the issue:
+        # empty uid_map and no user-namespace proc entry.
+        try:
+            return not Path("/proc/self/ns/user").exists() and Path("/proc/self/uid_map").read_bytes() == b""
+        except OSError:
+            return False
+    return CLAUDE_ANDROID_MESSAGING_BUG_MIN <= version <= CLAUDE_ANDROID_MESSAGING_BUG_MAX
+
+
+def _claude_messaging_args(claude: str | None = None) -> tuple[list[str], Path | None]:
+    """Return safe messaging arguments for environments with a verified UID map."""
     if os.name == "nt" or not sys.platform.startswith("linux"):
         return [], None
-    if _claude_uid_mapping_available():
+    if not _claude_uid_mapping_available():
+        # --messaging-socket-path does not bypass Claude's uid-map ownership check.
         return [], None
-    base = Path(os.environ.get("LAZYDEV_CLAUDE_MESSAGING_DIR", str(HOME / ".lazydev" / "claude-messaging")))
-    base.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(base, 0o700)
-    except OSError:
-        pass
-    socket_path = base / f"session-{os.getpid()}.sock"
-    try:
-        socket_path.unlink()
-    except FileNotFoundError:
-        pass
-    except OSError:
-        # Claude will report a precise startup error if the path is unusable;
-        # don't delete or alter anything we cannot safely identify as stale.
-        return [], None
-    return ["--messaging-socket-path", str(socket_path)], socket_path
+    return [], None
 
 
 def _launch_claude(claude: str, provider: dict[str,Any], pc: dict[str,Any], workspace: Path, proxy: _ProviderProxy, resume: bool = False) -> int:
     _ensure_cross_ui_skills()
     env = _clean_ui_env()
     env.update({k: v for k, v in _command_env_with_managed_bins().items() if k == "PATH"})
+    route_model = str(pc.get("model") or "")
     env["LAZYDEV_VERSION"] = VERSION
     env["LAZYDEV_ARTIFACT_DIR"] = str(ARTIFACT_DIR)
-    env["LAZYDEV_MODEL"] = str(pc.get("model") or "")
+    env["LAZYDEV_MODEL"] = route_model
     env["LAZYDEV_SKILLS_DIR"] = str(HOME / ".agents" / "skills")
-    # Claude Code consumes the standard Anthropic-compatible gateway settings.
-    # LazyDev pins provider/model routing inside the loopback proxy; it does not
-    # spoof Claude's identity or disable Claude Code's own authentication rules.
+    env["LAZYDEV_CLAUDE_SKILLS_DIR"] = str(HOME / ".claude" / "skills")
     env["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{proxy.port}"
     env["ANTHROPIC_AUTH_TOKEN"] = str(proxy.token)
+    env["ANTHROPIC_MODEL"] = CLAUDE_EXPOSED_MODEL_ALIAS
     env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
-    env["LAZYDEV_CLAUDE_MODEL"] = str(pc.get("model") or "")
+    env["LAZYDEV_CLAUDE_MODEL"] = route_model
+    env["LAZYDEV_CLAUDE_EXPOSED_MODEL"] = CLAUDE_EXPOSED_MODEL_ALIAS
     env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "190000"
     env["DISABLE_AUTOUPDATER"] = "1"
     env["DISABLE_FEEDBACK_COMMAND"] = "1"
     env["DISABLE_ERROR_REPORTING"] = "1"
     env["LAZYDEV_CLAUDE_PROXY"] = "1"
-    messaging_args, _messaging_socket = _claude_messaging_args()
-    args = (["--continue"] if resume else []) + messaging_args
+
+    # Linux user-namespace environments may expose no usable uid_map. Prefer a
+    # real mapped namespace so Claude can keep background/cross-session messaging
+    # ownership checks intact. If neither mapping nor unshare is available, keep
+    # foreground chat/resume usable without surfacing the daemon warning.
+    uid_mapping_missing = sys.platform.startswith("linux") and not _claude_uid_mapping_available()
+    unshare_prefix = _claude_unshare_prefix() if uid_mapping_missing else []
+    if unshare_prefix:
+        env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "unshare-uid-map"
+        messaging_args = []
+    elif uid_mapping_missing:
+        env["DISABLE_GROWTHBOOK"] = "1"
+        env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "uid-map-unavailable"
+        messaging_args = []
+    else:
+        messaging_args, _messaging_socket = _claude_messaging_args(claude)
+
+    # Always expose a Claude-recognized alias to the native CLI. LazyDev's proxy
+    # maps that alias to route_model internally, preventing provider IDs from being
+    # persisted into Claude sessions and triggering restore warnings later.
+    args = ["--model", CLAUDE_EXPOSED_MODEL_ALIAS]
+    if resume:
+        args.append("--continue")
+    args.extend(messaging_args)
     try:
-        return subprocess.call([claude, *args], cwd=str(workspace), env=env)
+        return subprocess.call([*unshare_prefix, claude, *args], cwd=str(workspace), env=env)
     except KeyboardInterrupt:
         return 130
 

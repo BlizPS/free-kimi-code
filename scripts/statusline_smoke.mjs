@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const hook = path.resolve('hooks/lazydev-statusline.mjs');
 const payload = {
-  model: { name: 'z-ai/glm-5.2:free', display_name: 'GLM-5.2' },
+  model: { name: 'test/model-alpha:free', display_name: 'Model Alpha' },
   context_window: {
     used_percentage: 37.25,
     context_window_size: 32768,

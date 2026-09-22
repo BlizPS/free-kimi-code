@@ -21,7 +21,7 @@ class Upstream(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header('Content-Length',str(len(payload))); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(payload)
 up=ThreadingHTTPServer(('127.0.0.1',0),Upstream); threading.Thread(target=up.serve_forever,daemon=True).start()
 provider=next(p for p in PROVIDERS if p['id']=='openrouter')
-pc={'apiKey':'test','model':'z-ai/glm-5.2:free','baseUrl':f'http://127.0.0.1:{up.server_address[1]}/v1','modelInfo':{'context':1048576,'output':8192,'toolUse':False}}
+pc={'apiKey':'test','model':'test/model-alpha:free','baseUrl':f'http://127.0.0.1:{up.server_address[1]}/v1','modelInfo':{'context':1048576,'output':8192,'toolUse':False}}
 proxy=_ProviderProxy(provider,pc)
 try:
     req=Request(f'http://127.0.0.1:{proxy.port}/v1/chat/completions',data=json.dumps({'model':pc['model'],'messages':[{'role':'user','content':'hi'}]}).encode(),headers={'Authorization':f'Bearer {proxy.token}','Content-Type':'application/json'},method='POST')

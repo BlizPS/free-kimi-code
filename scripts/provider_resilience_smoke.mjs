@@ -11,7 +11,7 @@ assert.equal(transientRetryDelayMs(2, {}, { baseMs: 800, maxMs: 8000, jitter: 0 
 assert.equal(shouldRetryTransient({ status: 429, attempt: 0, maxRetries: 8 }), true);
 assert.equal(shouldRetryTransient({ status: 429, attempt: 8, maxRetries: 8 }), false);
 assert.equal(shouldRetryTransient({ status: 429, attempt: 0, maxRetries: 8, committed: true }), false);
-assert.match(buildTransientFailureMessage({ provider: 'OpenRouter', model: 'z-ai/glm-5.2:free', status: 429, attempts: 9 }), /temporarily unavailable/);
+assert.match(buildTransientFailureMessage({ provider: 'OpenRouter', model: 'test/model-alpha:free', status: 429, attempts: 9 }), /temporarily unavailable/);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = fs.readFileSync(path.join(root, 'scripts', 'lazydev.mjs'), 'utf8');
 assert.match(src, /allow_fallbacks: true/);

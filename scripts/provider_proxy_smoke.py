@@ -123,17 +123,17 @@ try:
             model_req = Request(f"http://127.0.0.1:{claude_proxy.port}/v1/models", headers={"x-api-key":claude_proxy.token}, method="GET")
             with urlopen(model_req, timeout=10) as response:
                 models = json.loads(response.read().decode())
-                assert response.status == 200 and models["data"][0]["id"] == "route-model", models
+                assert response.status == 200 and models["data"][0]["id"] == "sonnet", models
             message_body = {"model":"sonnet","max_tokens":128,"system":"You are LazyDev.","messages":[{"role":"user","content":"hello"}],"stream":False}
             req = Request(f"http://127.0.0.1:{claude_proxy.port}/v1/messages", data=json.dumps(message_body).encode(), headers={"x-api-key":claude_proxy.token,"Content-Type":"application/json"}, method="POST")
             with urlopen(req, timeout=10) as response:
                 payload = json.loads(response.read().decode())
-                assert response.status == 200 and payload["type"] == "message" and payload["content"][0]["text"] == "hello", payload
+                assert response.status == 200 and payload["type"] == "message" and payload["content"][0]["text"] == "hello" and payload["model"] == "sonnet", payload
             stream_body = {**message_body, "stream":True}
             req_stream = Request(f"http://127.0.0.1:{claude_proxy.port}/v1/messages", data=json.dumps(stream_body).encode(), headers={"Authorization":f"Bearer {claude_proxy.token}","Content-Type":"application/json"}, method="POST")
             with urlopen(req_stream, timeout=10) as response:
                 stream_payload = response.read().decode()
-                assert response.status == 200 and "message_start" in stream_payload and "text_delta" in stream_payload and "message_stop" in stream_payload, stream_payload
+                assert response.status == 200 and "message_start" in stream_payload and "text_delta" in stream_payload and "message_stop" in stream_payload and '"model":"sonnet"' in stream_payload, stream_payload
             assert len(claude_calls) >= 2 and all(call["model"] == "route-model" for call in claude_calls), claude_calls
         finally:
             claude_proxy.close()
