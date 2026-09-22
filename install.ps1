@@ -87,7 +87,7 @@ if (Test-Path -LiteralPath $StateBackupFile -PathType Leaf) {
         if (-not $PersistedUiRuntimeDir -and $backup.ui_runtime_dir) { $PersistedUiRuntimeDir = [string]$backup.ui_runtime_dir }
     } catch {}
 }
-if (Test-Path -LiteralPath $CliRegistryFile -PathType Leaf -or Test-Path -LiteralPath $CliRegistryBackupFile -PathType Leaf) {
+if ((Test-Path -LiteralPath $CliRegistryFile -PathType Leaf) -or (Test-Path -LiteralPath $CliRegistryBackupFile -PathType Leaf)) {
     foreach ($registryPath in @($CliRegistryFile, $CliRegistryBackupFile)) {
         if (-not (Test-Path -LiteralPath $registryPath -PathType Leaf)) { continue }
         try {
@@ -6704,13 +6704,12 @@ function Install-CliUiRuntime {
     Step "Installing CLI UI helper $LazyDevUiVersion"
     New-Item -ItemType Directory -Path $LazyDevUiHome -Force | Out-Null
     $packagePath = Join-Path $LazyDevUiHome 'package.json'
-    Set-Content -LiteralPath $packagePath -Encoding UTF8 -Value @"
-{
-  `"name`": `"@blizps/lazydev-ui-runtime`",
-  `"private`": true,
-  `"dependencies`": { `"$LazyDevUiPackage`": `"$LazyDevUiVersion`" }
-}
-"@
+    $uiPackage = [ordered]@{
+        name = '@blizps/lazydev-ui-runtime'
+        private = $true
+        dependencies = [ordered]@{ $LazyDevUiPackage = $LazyDevUiVersion }
+    }
+    $uiPackage | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $packagePath -Encoding UTF8
     Push-Location $LazyDevUiHome
     try {
         & $npm install --no-package-lock --ignore-scripts --omit=dev
@@ -7298,8 +7297,8 @@ if ($LazyDevNeedsUpdate) {
         $launcherContent = @(
             '@echo off',
             'setlocal',
-            ('set "LAZYDEV_ROOT={0}"' -f $InstallRoot),
-            ('set "PATH={0};{1};%PATH%"' -f $BinRoot, $KimiBinRoot),
+            ('set "LAZYDEV_ROOT=' + $InstallRoot + '"'),
+            ('set "PATH=' + $BinRoot + ';' + $KimiBinRoot + ';%PATH%"'),
             'where py.exe >nul 2>&1',
             'if not errorlevel 1 (',
             '  py.exe -3 "%LAZYDEV_ROOT%\cli\lazydev.py" %*',
@@ -7450,13 +7449,12 @@ if ($InstallDeepSeekHarness -and $DeepSeekHarnessNeedsUpdate) {
     if (-not $node -or -not $npm) { Fail 'DeepSeek Harness needs Node.js and a package manager.' }
     New-Item -ItemType Directory -Path $DeepSeekHarnessRuntime -Force | Out-Null
     $pkgPath = Join-Path $DeepSeekHarnessRuntime 'package.json'
-    Set-Content -LiteralPath $pkgPath -Encoding UTF8 -Value @"
-{
-  `"name`": `"@blizps/lazydev-deepseek-harness-runtime`",
-  `"private`": true,
-  `"dependencies`": { `"$DeepSeekHarnessPackage`": `"$DeepSeekHarnessTargetVersion`" }
-}
-"@
+    $dshPackage = [ordered]@{
+        name = '@blizps/lazydev-deepseek-harness-runtime'
+        private = $true
+        dependencies = [ordered]@{ $DeepSeekHarnessPackage = $DeepSeekHarnessTargetVersion }
+    }
+    $dshPackage | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $pkgPath -Encoding UTF8
     Push-Location $DeepSeekHarnessRuntime
     try {
         & $npm install --no-package-lock --include=optional --omit=dev
