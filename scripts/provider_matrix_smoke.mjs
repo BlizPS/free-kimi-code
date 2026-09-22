@@ -46,7 +46,7 @@ assert.ok(py.includes('def _claude_unshare_prefix'), 'Claude mapped user-namespa
 assert.ok(py.includes('env["DISABLE_GROWTHBOOK"] = "1"'), 'Claude background fallback missing');
 assert.ok(py.includes('CLAUDE_ANDROID_MESSAGING_BUG_MIN = (2, 1, 248)'), 'Claude Android regression range minimum missing');
 assert.ok(py.includes('CLAUDE_ANDROID_MESSAGING_BUG_MAX = (2, 1, 251)'), 'Claude Android regression range maximum missing');
-assert.ok(py.includes('--messaging-socket-path'), 'Claude Code explicit messaging socket escape hatch missing');
+assert.ok(py.includes('CLAUDE_ANDROID_SAFE_VERSION = (2, 1, 247)'), 'Claude Android compatibility pin missing');
 assert.ok(py.includes('def _anthropic_to_openai'), 'Python Anthropic response adapter missing');
 assert.ok(py.includes('def _anthropic_sse_to_openai'), 'Python Anthropic streaming adapter missing');
 assert.ok(py.includes('headers["x-api-key"] = key'), 'Python Anthropic API key header missing');

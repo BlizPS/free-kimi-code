@@ -190,7 +190,7 @@ If Free Kimi Code is useful to you, a star helps other developers discover the p
 
 ## License
 
-MIT See [LICENSE](LICENSE)
+MIT. See [LICENSE](LICENSE).
 
 <div align="center">
   <sub>Built by <strong>BlizPS</strong> · Free Kimi Code 1.0.3 · Lazy Developer · Kimi Code + Codex + Antigravity + Claude Code</sub>

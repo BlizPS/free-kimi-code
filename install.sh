@@ -18,6 +18,10 @@ LAZYDEV_VERSION="1.0.3"
 KIMI_INSTALL_URL="https://code.kimi.com/kimi-code/install.sh"
 ANTIGRAVITY_INSTALL_URL="https://antigravity.google/cli/install.sh"
 CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
+# Claude Code 2.1.248+ has an Android/Termux background-session regression
+# caused by empty /proc/self/uid_map detection. Upstream issue #90908 records
+# 2.1.247 as the last known-good Android version.
+CLAUDE_ANDROID_PINNED_VERSION="2.1.247"
 KIMI_RELEASE_API_URL="https://api.github.com/repos/MoonshotAI/kimi-code/releases/latest"
 CODEX_RELEASE_API_URL="https://api.github.com/repos/openai/codex/releases/latest"
 CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
@@ -7208,17 +7212,33 @@ CLAUDE_NEEDS_UPDATE=0
 CLAUDE_UPDATE_AVAILABLE=0
 if [ -n "$CLAUDE_COMMAND" ]; then
   CLAUDE_CURRENT_VERSION="$(extract_semver "$($CLAUDE_COMMAND --version 2>/dev/null || true)")"
-  CLAUDE_NEEDS_UPDATE=1
-  CLAUDE_UPDATE_AVAILABLE=1
-  if [ -n "$CLAUDE_CURRENT_VERSION" ]; then
-    say "Claude Code $CLAUDE_CURRENT_VERSION is installed — install/update available."
+  if [ "$ANDROID_TERMUX" -eq 1 ]; then
+    if [ "$CLAUDE_CURRENT_VERSION" = "$CLAUDE_ANDROID_PINNED_VERSION" ]; then
+      CLAUDE_NEEDS_UPDATE=0
+      CLAUDE_UPDATE_AVAILABLE=0
+      say "Claude Code $CLAUDE_CURRENT_VERSION is pinned for Android/Termux compatibility — skipped."
+    else
+      CLAUDE_NEEDS_UPDATE=1
+      CLAUDE_UPDATE_AVAILABLE=1
+      say "Claude Code ${CLAUDE_CURRENT_VERSION:-unknown} → $CLAUDE_ANDROID_PINNED_VERSION — Android/Termux compatibility install available."
+    fi
   else
-    say "Claude Code is installed — install/update available."
+    CLAUDE_NEEDS_UPDATE=1
+    CLAUDE_UPDATE_AVAILABLE=1
+    if [ -n "$CLAUDE_CURRENT_VERSION" ]; then
+      say "Claude Code $CLAUDE_CURRENT_VERSION is installed — install/update available."
+    else
+      say "Claude Code is installed — install/update available."
+    fi
   fi
 else
   CLAUDE_NEEDS_UPDATE=1
   CLAUDE_UPDATE_AVAILABLE=1
-  say "Claude Code not found — installation available."
+  if [ "$ANDROID_TERMUX" -eq 1 ]; then
+    say "Claude Code not found — installation of the Android/Termux-compatible $CLAUDE_ANDROID_PINNED_VERSION is available."
+  else
+    say "Claude Code not found — installation available."
+  fi
 fi
 
 RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
@@ -7760,9 +7780,16 @@ if [ "$INSTALL_CLAUDE" -eq 1 ] && [ "$CLAUDE_NEEDS_UPDATE" -eq 1 ]; then
   if ! curl -fsSL "$CLAUDE_INSTALL_URL" -o "$CLAUDE_INSTALL_SCRIPT"; then
     fatal "Could not download the official Claude Code installer."
   fi
-  if ! bash "$CLAUDE_INSTALL_SCRIPT" >"$CLAUDE_LOG" 2>&1; then
-    cat "$CLAUDE_LOG" >&2 || true
-    fatal "Claude Code installer failed."
+  if [ "$ANDROID_TERMUX" -eq 1 ]; then
+    if ! bash "$CLAUDE_INSTALL_SCRIPT" "$CLAUDE_ANDROID_PINNED_VERSION" >"$CLAUDE_LOG" 2>&1; then
+      cat "$CLAUDE_LOG" >&2 || true
+      fatal "Claude Code installer failed for Android/Termux pinned version $CLAUDE_ANDROID_PINNED_VERSION."
+    fi
+  else
+    if ! bash "$CLAUDE_INSTALL_SCRIPT" >"$CLAUDE_LOG" 2>&1; then
+      cat "$CLAUDE_LOG" >&2 || true
+      fatal "Claude Code installer failed."
+    fi
   fi
   cat "$CLAUDE_LOG"
   PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$HOME/.local/bin:$HOME/.kimi-code/bin:$PATH"; export PATH
@@ -7770,6 +7797,16 @@ if [ "$INSTALL_CLAUDE" -eq 1 ] && [ "$CLAUDE_NEEDS_UPDATE" -eq 1 ]; then
   CLAUDE_COMMAND="$(find_claude 2>/dev/null || true)"
   [ -n "$CLAUDE_COMMAND" ] || fatal "Claude Code did not install a usable launcher."
   CLAUDE_CURRENT_VERSION="$(extract_semver "$($CLAUDE_COMMAND --version 2>/dev/null || true)")"
+  if [ "$ANDROID_TERMUX" -eq 1 ] && [ "$CLAUDE_CURRENT_VERSION" != "$CLAUDE_ANDROID_PINNED_VERSION" ]; then
+    fatal "Claude Code $CLAUDE_CURRENT_VERSION was installed, but Android/Termux requires pinned $CLAUDE_ANDROID_PINNED_VERSION for background-session compatibility."
+  fi
+  if [ "$ANDROID_TERMUX" -eq 1 ]; then
+    # Keep the native launcher on the known-good Android build. LazyDev also
+    # sets DISABLE_AUTOUPDATER when it launches Claude, but this persists the
+    # same policy for direct `claude` launches.
+    "$CLAUDE_COMMAND" config set autoUpdates false --global >/dev/null 2>&1 || true
+    say "✓ Claude Code auto-updates disabled on Android/Termux ($CLAUDE_ANDROID_PINNED_VERSION pinned)"
+  fi
   say "✓ Claude Code ${CLAUDE_CURRENT_VERSION:-installed} ready"
   write_install_state
 fi

@@ -151,6 +151,10 @@ if 'CODEX_INSTALLED_BIN="$CODEX_BIN_DIR/codex"' not in sh or 'official installer
     errors.append('install.sh: Codex post-install verification fallback missing')
 if 'claude_command=%s' not in sh or 'CLAUDE_INSTALL_URL="https://claude.ai/install.sh"' not in sh or 'find_claude()' not in sh:
     errors.append('install.sh: Claude Code discovery/persistence/install contract missing')
+if 'CLAUDE_ANDROID_PINNED_VERSION="2.1.247"' not in sh or 'bash "$CLAUDE_INSTALL_SCRIPT" "$CLAUDE_ANDROID_PINNED_VERSION"' not in sh:
+    errors.append('install.sh: Android/Termux Claude pin to 2.1.247 missing')
+if 'config set autoUpdates false --global' not in sh:
+    errors.append('install.sh: Android/Termux Claude auto-update guard missing')
 if "$ClaudeInstallUrl = 'https://claude.ai/install.ps1'" not in ps or 'Find-Claude' not in ps:
     errors.append('install.ps1: Claude Code discovery/install contract missing')
 if 'resilient_download()' not in sh or '--http1.1' not in sh or '--retry 8' not in sh or ' -C - ' not in sh:

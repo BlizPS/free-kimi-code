@@ -34,6 +34,8 @@ VERSION = "1.0.3"
 CLAUDE_EXPOSED_MODEL_ALIAS = "sonnet"
 CLAUDE_ANDROID_MESSAGING_BUG_MIN = (2, 1, 248)
 CLAUDE_ANDROID_MESSAGING_BUG_MAX = (2, 1, 251)
+CLAUDE_ANDROID_SAFE_VERSION = (2, 1, 247)
+CLAUDE_ANDROID_SAFE_VERSION_TEXT = "2.1.247"
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -4140,25 +4142,46 @@ def _claude_unshare_prefix() -> list[str]:
 
 
 def _claude_android_messaging_workaround_needed(claude: str) -> bool:
-    """Detect the Android/Termux Claude Code regression documented in #90908.
-
-    Claude Code 2.1.248-2.1.251 misread Android's empty /proc/self/uid_map and
-    rejected the daemon socket before it could start. On later/unknown versions
-    we leave native messaging enabled so upstream fixes are preserved.
-    """
+    """Return True when Android/Termux needs the upstream-known-good Claude build."""
     if not IS_TERMUX or not sys.platform.startswith("linux"):
         return False
     if _claude_uid_mapping_available():
         return False
     version = _claude_version_tuple(claude)
     if version is None:
-        # Fail closed only on the exact Android shape reported by the issue:
-        # empty uid_map and no user-namespace proc entry.
         try:
-            return not Path("/proc/self/ns/user").exists() and Path("/proc/self/uid_map").read_bytes() == b""
+            return Path("/proc/self/ns/user").exists() is False and Path("/proc/self/uid_map").read_bytes() == b""
         except OSError:
             return False
-    return CLAUDE_ANDROID_MESSAGING_BUG_MIN <= version <= CLAUDE_ANDROID_MESSAGING_BUG_MAX
+    return version != CLAUDE_ANDROID_SAFE_VERSION
+
+
+def _claude_android_pinned_command() -> str | None:
+    """Find the known-good Claude binary installed by the native versioned installer."""
+    if not IS_TERMUX or not sys.platform.startswith("linux"):
+        return None
+    version = ".".join(str(x) for x in CLAUDE_ANDROID_SAFE_VERSION)
+    roots = (
+        HOME / ".local" / "share" / "claude" / "versions" / version,
+        HOME / ".claude" / "local" / "share" / "claude" / "versions" / version,
+    )
+    candidates = []
+    for root in roots:
+        candidates.extend((root / "claude", root / "claude-code", root))
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def _claude_stop_stale_daemon(claude: str) -> None:
+    """Best-effort cleanup of daemons left behind by a newer broken Android build."""
+    if not IS_TERMUX or not sys.platform.startswith("linux"):
+        return
+    try:
+        subprocess.run([claude, "daemon", "stop", "--any"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3, check=False)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def _claude_messaging_args(claude: str | None = None) -> tuple[list[str], Path | None]:
@@ -4173,6 +4196,14 @@ def _claude_messaging_args(claude: str | None = None) -> tuple[list[str], Path |
 
 def _launch_claude(claude: str, provider: dict[str,Any], pc: dict[str,Any], workspace: Path, proxy: _ProviderProxy, resume: bool = False) -> int:
     _ensure_cross_ui_skills()
+    pinned = _claude_android_pinned_command()
+    android_pinning_required = IS_TERMUX and sys.platform.startswith("linux") and not _claude_uid_mapping_available()
+    if android_pinning_required:
+        if pinned:
+            claude = pinned
+        else:
+            print(f"Claude Code on Android/Termux requires the pinned {CLAUDE_ANDROID_SAFE_VERSION_TEXT} build for background/session compatibility. Run the LazyDev installer again to install that build.", file=sys.stderr)
+            return 1
     env = _clean_ui_env()
     env.update({k: v for k, v in _command_env_with_managed_bins().items() if k == "PATH"})
     route_model = str(pc.get("model") or "")
@@ -4193,21 +4224,30 @@ def _launch_claude(claude: str, provider: dict[str,Any], pc: dict[str,Any], work
     env["DISABLE_ERROR_REPORTING"] = "1"
     env["LAZYDEV_CLAUDE_PROXY"] = "1"
 
-    # Linux user-namespace environments may expose no usable uid_map. Prefer a
-    # real mapped namespace so Claude can keep background/cross-session messaging
-    # ownership checks intact. If neither mapping nor unshare is available, keep
-    # foreground chat/resume usable without surfacing the daemon warning.
+    # Android/Termux: Claude Code 2.1.248+ has an upstream background-session
+    # regression around empty /proc/self/uid_map. LazyDev uses the pinned 2.1.247
+    # native binary when it is installed, and stops any stale newer daemon first.
     uid_mapping_missing = sys.platform.startswith("linux") and not _claude_uid_mapping_available()
-    unshare_prefix = _claude_unshare_prefix() if uid_mapping_missing else []
-    if unshare_prefix:
-        env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "unshare-uid-map"
+    android_bug = _claude_android_messaging_workaround_needed(claude)
+    if android_bug:
+        _claude_stop_stale_daemon(claude)
+        env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "android-pinned-2.1.247"
+        env["DISABLE_AUTOUPDATER"] = "1"
         messaging_args = []
-    elif uid_mapping_missing:
-        env["DISABLE_GROWTHBOOK"] = "1"
-        env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "uid-map-unavailable"
-        messaging_args = []
+        unshare_prefix = []
     else:
-        messaging_args, _messaging_socket = _claude_messaging_args(claude)
+        unshare_prefix = _claude_unshare_prefix() if uid_mapping_missing else []
+        if unshare_prefix:
+            env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "unshare-uid-map"
+            messaging_args = []
+        elif uid_mapping_missing:
+            # Do not pretend a custom messaging socket bypasses Claude's daemon
+            # ownership check. Keep foreground chat/resume usable instead.
+            env["DISABLE_GROWTHBOOK"] = "1"
+            env["LAZYDEV_CLAUDE_MESSAGING_WORKAROUND"] = "uid-map-unavailable"
+            messaging_args = []
+        else:
+            messaging_args, _messaging_socket = _claude_messaging_args(claude)
 
     # Always expose a Claude-recognized alias to the native CLI. LazyDev's proxy
     # maps that alias to route_model internally, preventing provider IDs from being
