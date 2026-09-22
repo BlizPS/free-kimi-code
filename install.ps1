@@ -7308,34 +7308,33 @@ if ($LazyDevNeedsUpdate) {
         Move-Item -LiteralPath $stage -Destination $InstallRoot -Force
 
         New-Item -ItemType Directory -Path $BinRoot -Force | Out-Null
-        # Use a literal here-string for the .cmd payload. This avoids parser-sensitive
-        # array/string composition and remains valid on Windows PowerShell 5.1.
-        $launcherContent = @"
-@echo off
-setlocal
-set "LAZYDEV_ROOT=$InstallRoot"
-set "PATH=$BinRoot;$KimiBinRoot;%PATH%"
-where py.exe >nul 2>&1
-if not errorlevel 1 (
-  py.exe -3 "%LAZYDEV_ROOT%\cli\lazydev.py" %*
-  set "EXIT_CODE=%ERRORLEVEL%"
-  endlocal & exit /b %EXIT_CODE%
-)
-where python.exe >nul 2>&1
-if not errorlevel 1 (
-  python.exe "%LAZYDEV_ROOT%\cli\lazydev.py" %*
-  set "EXIT_CODE=%ERRORLEVEL%"
-  endlocal & exit /b %EXIT_CODE%
-)
-where uv.exe >nul 2>&1
-if not errorlevel 1 (
-  uv.exe run --no-project --python 3.13 "%LAZYDEV_ROOT%\cli\lazydev.py" %*
-  set "EXIT_CODE=%ERRORLEVEL%"
-  endlocal & exit /b %EXIT_CODE%
-)
-echo LazyDev requires Python 3.10+ or uv. The installer does not install Node.js. 1>&2
-endlocal & exit /b 1
-"@
+        # Keep the .cmd payload in ordinary PowerShell strings for Windows PowerShell 5.1.
+        $launcherContent = @(
+            '@echo off',
+            'setlocal',
+            ('set "LAZYDEV_ROOT=' + $InstallRoot + '"'),
+            ('set "PATH=' + $BinRoot + ';' + $KimiBinRoot + ';%PATH%"'),
+            'where py.exe >nul 2>&1',
+            'if not errorlevel 1 (',
+            '  py.exe -3 "%LAZYDEV_ROOT%\cli\lazydev.py" %*',
+            '  set "EXIT_CODE=%ERRORLEVEL%"',
+            '  endlocal & exit /b %EXIT_CODE%',
+            ')',
+            'where python.exe >nul 2>&1',
+            'if not errorlevel 1 (',
+            '  python.exe "%LAZYDEV_ROOT%\cli\lazydev.py" %*',
+            '  set "EXIT_CODE=%ERRORLEVEL%"',
+            '  endlocal & exit /b %EXIT_CODE%',
+            ')',
+            'where uv.exe >nul 2>&1',
+            'if not errorlevel 1 (',
+            '  uv.exe run --no-project --python 3.13 "%LAZYDEV_ROOT%\cli\lazydev.py" %*',
+            '  set "EXIT_CODE=%ERRORLEVEL%"',
+            '  endlocal & exit /b %EXIT_CODE%',
+            ')',
+            'echo LazyDev requires Python 3.10+ or uv. The installer does not install Node.js. 1>&2',
+            'endlocal & exit /b 1'
+        ) -join [Environment]::NewLine
         Set-Content -LiteralPath $Launcher -Value $launcherContent -Encoding ASCII
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
         $parts = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
@@ -7489,8 +7488,9 @@ if ($InstallDeepSeekHarness -and $DeepSeekHarnessNeedsUpdate) {
 # Prefer the managed bin directory in new and current PowerShell sessions.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $entries = if ($userPath) { @($userPath -split ';' | Where-Object { $_ }) } else { @() }
-$entries = @($entries | Where-Object { $_ -ne $BinRoot -and $_ -ne (Join-Path $HOME '.kimi-code\bin') })
-$entries = @($BinRoot, $CodexBinRoot, $RtkBinRoot, (Join-Path $HOME '.kimi-code\bin')) + $entries
+$KimiBinPath = Join-Path $HOME '.kimi-code\bin'
+$entries = @($entries | Where-Object { ($_ -ne $BinRoot) -and ($_ -ne $KimiBinPath) })
+$entries = @($BinRoot, $CodexBinRoot, $RtkBinRoot, $KimiBinPath) + $entries
 [Environment]::SetEnvironmentVariable('Path', ($entries | Select-Object -Unique) -join ';', 'User')
 $env:Path = (($entries | Select-Object -Unique) -join ';')
 
