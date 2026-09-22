@@ -7830,13 +7830,11 @@ step "RTK"
 if [ "$RTK_NEEDS_UPDATE" -eq 1 ]; then
   say "RTK is missing, outdated, or not the Rust Token Killer — installing the official RTK first."
   mkdir -p "$RTK_BIN_DIR"
-  # Use the upstream Rust Token Killer installer exactly as documented by RTK.
-  # RTK_INSTALL_DIR forces the official binary into our durable managed bin.
-  RTK_INSTALL_DIR="$RTK_BIN_DIR" RTK_TELEMETRY_DISABLED=1 sh -c 'curl -fsSL "$RTK_INSTALL_URL" | sh'
+  curl -fsSL "$RTK_INSTALL_URL" | RTK_INSTALL_DIR="$RTK_BIN_DIR" RTK_TELEMETRY_DISABLED=1 sh
   PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$KIMI_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
   export PATH
-  RTK_COMMAND="$RTK_BIN_DIR/rtk"
-  [ -x "$RTK_COMMAND" ] || fatal "RTK did not install a usable launcher at $RTK_COMMAND."
+  RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
+  [ -n "$RTK_COMMAND" ] || fatal "RTK did not install a usable launcher."
   rtk_is_token_killer "$RTK_COMMAND" || fatal "Installed RTK is not the Rust Token Killer."
   RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
   [ -n "$RTK_CURRENT_VERSION" ] || fatal "Could not read the installed RTK version."
