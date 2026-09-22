@@ -113,8 +113,10 @@ if 'LAZYDEV_STATE_LOADED=1' not in sh or 'if [ "$LAZYDEV_STATE_LOADED" -eq 0 ] &
     errors.append('install.sh: persisted state must prevent PATH-based bin directory drift')
 if 'LAZYDEV_STATE_FILE' in sh and sh.index('LAZYDEV_STATE_FILE=') > sh.index('elif [ -f "$LAZYDEV_STATE_FILE" ]'):
     errors.append('install.sh: state file is read before it is initialized')
-if '"$candidate" gain >/dev/null 2>&1' not in sh:
-    errors.append('install.sh: RTK identity verification must use rtk gain')
+if 'version_output="$($candidate --version 2>/dev/null || true)"' not in sh or 'help_output="$($candidate --help 2>&1 || true)"' not in sh:
+    errors.append('install.sh: RTK identity verification must use deterministic --version/--help checks')
+if '"$candidate" gain >/dev/null 2>&1' in sh:
+    errors.append('install.sh: RTK identity verification must not gate installation on rtk gain')
 
 cli_text = (ROOT / 'cli' / 'lazydev.py').read_text(encoding='utf-8')
 launcher_text = (ROOT / 'scripts' / 'lazydev.mjs').read_text(encoding='utf-8')

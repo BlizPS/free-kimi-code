@@ -7277,13 +7277,23 @@ find_rtk() {
 }
 
 # Verify that an rtk executable is the Rust Token Killer (rtk-ai/rtk),
-# not the unrelated Rust Type Kit. Upstream documents `rtk gain` as the
-# canonical identity check. Keep this silent so installer output stays clean.
+# not the unrelated Rust Type Kit. Do not use `rtk gain` as the installer
+# identity gate: `gain` opens the analytics database and can fail on a valid
+# install when its data directory is unavailable or read-only. The RTK CLI
+# product signature is exposed by --help and is deterministic without storage.
 rtk_is_token_killer() {
   candidate="$1"
   [ -n "$candidate" ] || return 1
   [ -x "$candidate" ] || return 1
-  "$candidate" gain >/dev/null 2>&1
+
+  version_output="$($candidate --version 2>/dev/null || true)"
+  version="$(extract_semver "$version_output")"
+  [ -n "$version" ] || return 1
+
+  help_output="$($candidate --help 2>&1 || true)"
+  printf '%s\n' "$help_output" | grep -Fq 'Rust Token Killer' || return 1
+  printf '%s\n' "$help_output" | grep -Eq '^[[:space:]]*gain([[:space:]]|$)' || return 1
+  return 0
 }
 
 is_lazydev_launcher() {

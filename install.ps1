@@ -6621,21 +6621,24 @@ function Get-RtkVersion([string]$Exe) {
     try { return Get-VersionFromText ((& $Exe --version 2>$null) -join "`n") } catch { return '' }
 }
 function Test-RtkTokenKiller([string]$Exe) {
-    if (-not $Exe) { return $false }
-    $hadTelemetryDisabled = Test-Path Env:RTK_TELEMETRY_DISABLED
-    $previousTelemetryDisabled = $env:RTK_TELEMETRY_DISABLED
+    if (-not $Exe -or -not (Test-Path -LiteralPath $Exe -PathType Leaf)) { return $false }
     try {
-        $env:RTK_TELEMETRY_DISABLED = '1'
-        & $Exe gain *> $null
-        return ($LASTEXITCODE -eq 0)
+        # Do NOT use `rtk gain` as the identity test. `gain` touches the
+        # tracking SQLite database and can fail on Windows sandbox/AppContainer
+        # hosts even when the installed binary is the correct Rust Token Killer.
+        # The CLI identity is deterministic and does not require writable data:
+        # --version + --help must expose the RTK product signature and gain command.
+        $versionOutput = ((& $Exe --version 2>&1) | Out-String).Trim()
+        $version = Get-VersionFromText $versionOutput
+        if (-not $version) { return $false }
+
+        $helpOutput = ((& $Exe --help 2>&1) | Out-String)
+        if ($helpOutput -notmatch '(?i)Rust Token Killer') { return $false }
+        if ($helpOutput -notmatch '(?m)^\s*gain\b') { return $false }
+
+        return $true
     } catch {
         return $false
-    } finally {
-        if ($hadTelemetryDisabled) {
-            $env:RTK_TELEMETRY_DISABLED = $previousTelemetryDisabled
-        } else {
-            Remove-Item Env:RTK_TELEMETRY_DISABLED -ErrorAction SilentlyContinue
-        }
     }
 }
 function Get-PythonCommand {
@@ -7321,10 +7324,10 @@ if ($RtkNeedsUpdate) {
     if (-not $RtkExe -or -not (Test-Path -LiteralPath $RtkExe -PathType Leaf)) {
         Fail 'RTK did not install a usable launcher.'
     }
-    if (-not (Test-RtkTokenKiller $RtkExe)) {
-        Fail "Installed RTK at '$RtkExe' is not the Rust Token Killer."
-    }
     $RtkCurrentVersion = Get-RtkVersion $RtkExe
+    if (-not $RtkCurrentVersion -or -not (Test-RtkTokenKiller $RtkExe)) {
+        Fail "Installed RTK at '$RtkExe' failed the Rust Token Killer identity/runtime check."
+    }
     if (-not $RtkCurrentVersion) { Fail 'Could not read the installed RTK version.' }
     $PersistedRtkCommand = $RtkExe
     Write-Host "[OK] Rust Token Killer $RtkCurrentVersion ready"
