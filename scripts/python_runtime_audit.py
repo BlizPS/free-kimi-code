@@ -27,7 +27,7 @@ for required in {"chat", "setup", "detect_languages", "write_kimi_files", "refre
 
 for path in ROOT.glob("skills/*/SKILL.md"):
     text = path.read_text(encoding="utf-8")
-    if 'version: "1.0.3"' not in text:
+    if 'version: "1.0.0"' not in text:
         errors.append(f"skill version drift: {path.relative_to(ROOT)}")
 
 expected = {"lazy-developer", "lazy-debug", "lazy-review", "lazy-test"}

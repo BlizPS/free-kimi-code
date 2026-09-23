@@ -31,8 +31,8 @@ for p in sorted(SOURCE.glob("*/SKILL.md")):
         errors.append(f"{expected}: frontmatter name mismatch")
     if len(desc) > 360:
         errors.append(f"{expected}: discovery description is too long ({len(desc)} chars)")
-    if "version: \"1.0.3\"" not in text:
-        errors.append(f"{expected}: missing skill metadata version 1.0.3")
+    if "version: \"1.0.0\"" not in text:
+        errors.append(f"{expected}: missing skill metadata version 1.0.0")
     rows.append((expected, approx_tokens(text), DATA["baseline_by_skill"].get(expected, 0)))
 
 required = DATA["required"]

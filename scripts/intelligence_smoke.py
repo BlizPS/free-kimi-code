@@ -4,7 +4,7 @@ import json,re,sys
 ROOT=Path(__file__).resolve().parents[1]
 errors=[]
 package=json.loads((ROOT/"package.json").read_text())
-if package.get("version")!="1.0.3": errors.append("package version is not 1.0.3")
+if package.get("version")!="1.0.0": errors.append("package version is not 1.0.0")
 js=(ROOT/"runtime/intelligence-kernel.mjs").read_text()
 for signal in ["evidence-first reasoning", "verify", "scope_lock", "context_lean"]:
     if signal.lower() not in js.lower(): errors.append(f"intelligence signal missing: {signal}")
@@ -21,4 +21,4 @@ for p in ROOT.rglob("*"):
     if any(re.search(rf"\b{re.escape(word)}\b", t) for word in forbidden): errors.append(f"release-word leakage: {p.relative_to(ROOT)}")
 if errors:
     print("FAIL"); print("\n".join("- "+e for e in errors)); sys.exit(1)
-print("PASS: adaptive intelligence kernel, 1.0.3 release identity, and release-word hygiene")
+print("PASS: adaptive intelligence kernel, 1.0.0 release identity, and release-word hygiene")

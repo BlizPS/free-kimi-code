@@ -17,7 +17,7 @@ $Branch = if ($env:LAZYDEV_BRANCH) { $env:LAZYDEV_BRANCH } else { 'main' }
 
 # Prefer bundled source when this script is executed from an extracted archive.
 $LocalSourceDir = if ($env:LAZYDEV_SOURCE_DIR) { $env:LAZYDEV_SOURCE_DIR } elseif ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'package.json')) -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'cli\lazydev.py'))) { $PSScriptRoot } else { '' }
-$LazyDevVersion = '1.0.3'
+$LazyDevVersion = '1.0.0'
 $KimiInstallUrl = 'https://code.kimi.com/kimi-code/install.ps1'
 $ClaudeInstallUrl = 'https://claude.ai/install.ps1'
 $AntigravityInstallUrl = 'https://antigravity.google/cli/install.ps1'
@@ -6815,7 +6815,7 @@ function Invoke-LazyJson([string]$Uri, [hashtable]$Headers=@{}) {
 }
 
 function Get-GitHubRevision {
-    $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.3' }
+    $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.0' }
     try {
         $data = Invoke-LazyJson -Headers $headers -Uri $GitHubApiUrl
         if ($data.sha -match '^[0-9a-fA-F]{40}$') { return $data.sha }
@@ -6851,7 +6851,7 @@ function Get-LazyDevLocalSourceRevision([string]$SourceDir) {
 }
 function Get-KimiLatestVersion {
     try {
-        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.3' }
+        $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.0' }
         $data = Invoke-LazyJson -Headers $headers -Uri $KimiReleasesApiUrl
         $tag = [string]$data.tag_name
         $m = [regex]::Match($tag, '(\d+\.\d+\.\d+)$')
@@ -6861,7 +6861,7 @@ function Get-KimiLatestVersion {
 }
 function Get-GitHubReleaseVersion([string]$ApiUrl) {
     try {
-        $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.3' }
+        $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.0' }
         $data = Invoke-LazyJson -Headers $headers -Uri $ApiUrl
         $tag = [string]$data.tag_name
         $m = [regex]::Match($tag, '(\d+\.\d+\.\d+)$')

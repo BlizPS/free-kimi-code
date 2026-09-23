@@ -4,7 +4,7 @@
   <br>
   <br>
 
-  [![Validated](https://img.shields.io/badge/validated-1.0.3-22C55E?style=for-the-badge)](https://github.com/BlizPS/free-kimi-code/actions)
+  [![Validated](https://img.shields.io/badge/validated-1.0.0-22C55E?style=for-the-badge)](https://github.com/BlizPS/free-kimi-code/actions)
   [![License](https://img.shields.io/badge/license-MIT-22C55E?style=for-the-badge)](LICENSE)
   [![Platforms](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows%20%C2%B7%20Termux-0EA5E9?style=for-the-badge)](#-installation)
   [![Stars](https://img.shields.io/github/stars/BlizPS/free-kimi-code?style=for-the-badge&color=F59E0B)](https://github.com/BlizPS/free-kimi-code/stargazers)
@@ -217,5 +217,5 @@ If Free Kimi Code is useful to you, a star helps other developers discover the p
 MIT. See [LICENSE](LICENSE).
 
 <div align="center">
-  <sub>Built by <strong>BlizPS</strong> · Free Kimi Code 1.0.3 · Lazy Developer · Kimi Code + Codex + Antigravity + Claude Code + DeepSeek Harness</sub>
+  <sub>Built by <strong>BlizPS</strong> · Free Kimi Code 1.0.0 · Lazy Developer · Kimi Code + Codex + Antigravity + Claude Code + DeepSeek Harness</sub>
 </div>

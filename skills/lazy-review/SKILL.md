@@ -2,7 +2,7 @@
 name: lazy-review
 description: Use for diffs, security changes, generated code, regressions, and audits needing actionable findings.
 metadata:
-  version: "1.0.3"
+  version: "1.0.0"
 ---
 # Lazy Review
 

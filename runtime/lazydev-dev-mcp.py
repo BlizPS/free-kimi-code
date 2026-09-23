@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-VERSION = "1.0.3"
+VERSION = "1.0.0"
 MAX_TEXT = 120_000
 MAX_RESULTS = 80
 IGNORE_DIRS = {

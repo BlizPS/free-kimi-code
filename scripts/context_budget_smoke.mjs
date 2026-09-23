@@ -24,7 +24,7 @@ import { buildLanguageFrame, getLanguageReport } from '../systems/languages/inde
 import { buildGeminiRetryRequest, chunkFinishReason, chunkHasVisibleOutput, geminiOpenAIEndpoint, parseSseEvent, prepareGeminiRequest, responseHasUsableOutput, streamNeedsGeminiRetry } from '../runtime/gemini-resilience.mjs';
 import { compressAgenticMessages, FOVEANCE_DEFAULTS } from '../systems/token/foveance.mjs';
 
-const version = '1.0.3';
+const version = '1.0.0';
 const CONTEXT_ABSOLUTE_OUTPUT_CAP = 32768;
 const TOKEN_SAVINGS_FLOOR = 0.75;
 const TOKEN_SAVINGS_TARGET = 0.80;

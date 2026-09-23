@@ -16,7 +16,7 @@ body:
     attributes:
       label: Environment
       description: Include OS, terminal, native CLI, and LazyDev version.
-      placeholder: macOS / Linux / Windows / Termux · Kimi Code/Codex/Antigravity · 1.0.3
+      placeholder: macOS / Linux / Windows / Termux · Kimi Code/Codex/Antigravity · 1.0.0
     validations:
       required: true
   - type: textarea
