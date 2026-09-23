@@ -84,7 +84,7 @@ curl -fsSL "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install
 ### Windows PowerShell
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install.ps1")))
+irm "https://raw.githubusercontent.com/BlizPS/free-kimi-code/main/install.ps1" | iex
 ```
 
 The installer asks which native coding CLIs to install or update in this order:
