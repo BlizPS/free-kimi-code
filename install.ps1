@@ -71,20 +71,24 @@ try {
     if ($Help) { $scriptArgs += '-Help' }
     if ($DryRun) { $scriptArgs += '-DryRun' }
 
-    # Execute the core in this PowerShell process. Spawning powershell.exe from an
-    # irm | iex bootstrap can make the host look like it suddenly closed when the
-    # child process terminates on some Windows terminal hosts.
-    #
-    # The core is read as text and run as an in-memory scriptblock (instead of
-    # "& $corePath", which invokes the .ps1 file directly and is therefore
-    # subject to the machine's Execution Policy). This mirrors how this very
-    # bootstrapper is executed via "irm | iex" and avoids failures like:
+    # Execute the core via a child PowerShell process with the Execution Policy
+    # bypassed for that process only (this does NOT change the user's
+    # system-wide Execution Policy). This is the same pattern already used
+    # elsewhere in install-core.ps1 for the Kimi/Codex/Antigravity/Claude/uv
+    # sub-installers, so it is a proven-safe way to run a downloaded .ps1 file
+    # without hitting:
     #   "... cannot be loaded because running scripts is disabled on this system."
-    # on hosts with a Restricted/AllSigned policy, without changing the user's
-    # system-wide Execution Policy.
-    $coreContent = Get-Content -LiteralPath $corePath -Raw -Encoding UTF8
-    $coreBlock = [scriptblock]::Create($coreContent)
-    & $coreBlock @scriptArgs
+    #
+    # An earlier version of this bootstrap tried to avoid spawning a child
+    # process by re-parsing the core script's text in-process via
+    # [scriptblock]::Create(). That re-parse is fragile for a script this
+    # large (it can corrupt or mis-tokenize content, such as embedded
+    # batch-script fragments and special characters, producing spurious
+    # "Missing closing ')'/'}'" parse errors that do not occur when the file
+    # is loaded normally). Running the file directly, just with the policy
+    # bypassed, avoids that class of bug entirely. The console is not
+    # redirected, so interactive Y/n prompts in the core script still work.
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $corePath @scriptArgs
     $code = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
     $global:LASTEXITCODE = $code
     if ($code -ne 0) {
