@@ -6630,7 +6630,7 @@ function Ensure-PythonRunner {
         Step 'Installing standalone uv for the native Python LazyDev CLI'
         $tempUv = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-uv-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri 'https://astral.sh/uv/install.ps1' -OutFile $tempUv
+            Invoke-LazyDownload 'https://astral.sh/uv/install.ps1' $tempUv
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tempUv
             if ($LASTEXITCODE -ne 0) { Fail "uv installer exited with code $LASTEXITCODE." }
         } finally {
@@ -6767,10 +6767,57 @@ function Expand-EmbeddedLazyDevSource([string]$Destination) {
     Remove-Item -LiteralPath $payloadPath -Force -ErrorAction SilentlyContinue
 }
 
+function Invoke-LazyDownload([string]$Uri, [string]$OutFile, [hashtable]$Headers=@{}) {
+    $dir = Split-Path -Parent $OutFile
+    if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+
+    $curl = Get-Command 'curl.exe' -ErrorAction SilentlyContinue
+    if ($curl) {
+        $curlArgs = @('--fail','--silent','--show-error','--location','--http1.1','--connect-timeout','20','--max-time','1800','--retry','8','--retry-delay','2','--retry-max-time','1800','--speed-time','90','--speed-limit','1024','--output',$OutFile)
+        foreach ($key in $Headers.Keys) { $curlArgs += @('--header',("{0}: {1}" -f $key,$Headers[$key])) }
+        & $curl.Source @curlArgs $Uri
+        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $OutFile -PathType Leaf) -and ((Get-Item -LiteralPath $OutFile).Length -gt 0)) { return }
+        Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+    }
+
+    $client = $null
+    $response = $null
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
+        $client = New-Object System.Net.Http.HttpClient
+        $client.Timeout = [TimeSpan]::FromMinutes(30)
+        foreach ($key in $Headers.Keys) {
+            [void]$client.DefaultRequestHeaders.TryAddWithoutValidation([string]$key,[string]$Headers[$key])
+        }
+        $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
+        $response.EnsureSuccessStatusCode() | Out-Null
+        $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+        if (-not $bytes -or $bytes.Length -eq 0) { throw 'The server returned an empty response.' }
+        [IO.File]::WriteAllBytes($OutFile, $bytes)
+    } catch {
+        throw "Could not download $Uri. Check your internet connection, proxy/VPN, or TLS settings. $($_.Exception.Message)"
+    } finally {
+        if ($response) { $response.Dispose() }
+        if ($client) { $client.Dispose() }
+    }
+}
+
+function Invoke-LazyJson([string]$Uri, [hashtable]$Headers=@{}) {
+    $temp = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-json-" + [guid]::NewGuid().ToString('N') + '.json')
+    try {
+        Invoke-LazyDownload -Headers $Headers -Uri $Uri -OutFile $temp
+        $raw = [IO.File]::ReadAllText($temp)
+        try { return ($raw | ConvertFrom-Json) } catch { throw "Invalid JSON returned by $Uri." }
+    } finally {
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Get-GitHubRevision {
     $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.3' }
     try {
-        $data = Invoke-RestMethod -Headers $headers -Uri $GitHubApiUrl
+        $data = Invoke-LazyJson -Headers $headers -Uri $GitHubApiUrl
         if ($data.sha -match '^[0-9a-fA-F]{40}$') { return $data.sha }
     } catch {}
     return $null
@@ -6805,7 +6852,7 @@ function Get-LazyDevLocalSourceRevision([string]$SourceDir) {
 function Get-KimiLatestVersion {
     try {
         $headers = @{ Accept='application/vnd.github+json'; 'User-Agent'='lazy-developer-installer/1.0.3' }
-        $data = Invoke-RestMethod -Headers $headers -Uri $KimiReleasesApiUrl
+        $data = Invoke-LazyJson -Headers $headers -Uri $KimiReleasesApiUrl
         $tag = [string]$data.tag_name
         $m = [regex]::Match($tag, '(\d+\.\d+\.\d+)$')
         if ($m.Success) { return $m.Groups[1].Value }
@@ -6815,7 +6862,7 @@ function Get-KimiLatestVersion {
 function Get-GitHubReleaseVersion([string]$ApiUrl) {
     try {
         $headers = @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='lazy-developer-installer/1.0.3' }
-        $data = Invoke-RestMethod -Headers $headers -Uri $ApiUrl
+        $data = Invoke-LazyJson -Headers $headers -Uri $ApiUrl
         $tag = [string]$data.tag_name
         $m = [regex]::Match($tag, '(\d+\.\d+\.\d+)$')
         if ($m.Success) { return $m.Groups[1].Value }
@@ -6913,7 +6960,7 @@ function Install-Rtk {
     $extractPath = Join-Path $temporaryRoot 'extracted'
     try {
         New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
-        Invoke-RestMethod -Uri $archiveUrl -OutFile $archivePath -ErrorAction Stop
+        Invoke-LazyDownload $archiveUrl $archivePath
         if ((-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) -or ((Get-Item -LiteralPath $archivePath).Length -eq 0)) { throw 'The RTK release archive was empty.' }
         $sha256=[Security.Cryptography.SHA256]::Create(); try {
             $stream=[IO.File]::OpenRead($archivePath); try {
@@ -7247,7 +7294,7 @@ if ($LazyDevNeedsUpdate) {
         if ($LocalSourceDir) {
             $sourceDirPath = $LocalSourceDir
         } else {
-            Invoke-WebRequest -UseBasicParsing -Uri $ArchiveUrl -OutFile $archive
+            Invoke-LazyDownload $ArchiveUrl $archive
             Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
             $sourceDir = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
             if (-not $sourceDir) { Fail 'Downloaded Lazy Developer source could not be unpacked.' }
@@ -7345,7 +7392,7 @@ if ($InstallKimi -and $KimiNeedsUpdate) {
     $kimiInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
     $kimiInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-kimi-install-" + [guid]::NewGuid().ToString('N') + '.log')
     try {
-        Invoke-WebRequest -UseBasicParsing -Uri $KimiInstallUrl -OutFile $kimiInstallerPath
+        Invoke-LazyDownload $KimiInstallUrl $kimiInstallerPath
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $kimiInstallerPath *> $kimiInstallerLog
         $kimiExitCode = $LASTEXITCODE
         if (Test-Path -LiteralPath $kimiInstallerLog) { Get-Content -LiteralPath $kimiInstallerLog | Write-Host }
@@ -7395,7 +7442,7 @@ if ($InstallAntigravity -and $AgyNeedsUpdate) {
     $agyInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-antigravity-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
     $agyInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-antigravity-install-" + [guid]::NewGuid().ToString('N') + '.log')
     try {
-        Invoke-WebRequest -UseBasicParsing -Uri $AntigravityInstallUrl -OutFile $agyInstallerPath
+        Invoke-LazyDownload $AntigravityInstallUrl $agyInstallerPath
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agyInstallerPath *> $agyInstallerLog
         $agyExitCode = $LASTEXITCODE
         if (Test-Path -LiteralPath $agyInstallerLog) { Get-Content -LiteralPath $agyInstallerLog | Write-Host }
@@ -7419,7 +7466,7 @@ if ($InstallClaude -and $ClaudeNeedsUpdate) {
     $claudeInstallerPath = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-claude-install-" + [guid]::NewGuid().ToString('N') + '.ps1')
     $claudeInstallerLog = Join-Path ([IO.Path]::GetTempPath()) ("lazydev-claude-install-" + [guid]::NewGuid().ToString('N') + '.log')
     try {
-        Invoke-WebRequest -UseBasicParsing -Uri $ClaudeInstallUrl -OutFile $claudeInstallerPath
+        Invoke-LazyDownload $ClaudeInstallUrl $claudeInstallerPath
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $claudeInstallerPath *> $claudeInstallerLog
         $claudeExitCode = $LASTEXITCODE
         if (Test-Path -LiteralPath $claudeInstallerLog) { Get-Content -LiteralPath $claudeInstallerLog | Write-Host }
