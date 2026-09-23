@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "cli"))
 import lazydev as mod
 
-assert mod.VERSION == "1.0.0"
+assert mod.VERSION == "1.0.3"
 assert mod.CLAUDE_EXPOSED_MODEL_ALIAS == "sonnet"
 assert mod.CLAUDE_ANDROID_MESSAGING_BUG_MIN == (2, 1, 248)
 assert mod.CLAUDE_ANDROID_MESSAGING_BUG_MAX == (2, 1, 251)

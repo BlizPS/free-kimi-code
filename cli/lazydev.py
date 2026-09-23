@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "1.0.0"
+VERSION = "1.0.3"
 CLAUDE_EXPOSED_MODEL_ALIAS = "sonnet"
 CLAUDE_ANDROID_MESSAGING_BUG_MIN = (2, 1, 248)
 CLAUDE_ANDROID_MESSAGING_BUG_MAX = (2, 1, 251)
@@ -3835,7 +3835,7 @@ def _write_codex_runtime(proxy: _ProviderProxy, pc: dict[str, Any]) -> Path:
         f'cwd = {toml_quote(str(ROOT))}',
         'startup_timeout_sec = 30',
         'tool_timeout_sec = 60',
-        'env = { LAZYDEV_BROWSER_USER_AGENT = "LazyDev-Browser/1.0.0" }',
+        'env = { LAZYDEV_BROWSER_USER_AGENT = "LazyDev-Browser/1.0.3" }',
     ]) + '\n'
     dev_mcp = _lazydev_dev_mcp_entry()
     config = config.rstrip() + '\n\n' + '\n'.join([

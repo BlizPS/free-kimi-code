@@ -2,7 +2,7 @@
 name: lazy-developer
 description: Use for implementing, refactoring, packaging, UI/UX, responsive design, animation, design system, 3D/Three.js/WebGL, SEO, and shipping work.
 metadata:
-  version: "1.0.0"
+  version: "1.0.3"
 ---
 # Lazy Developer
 RESEARCH → UNDERSTAND → PLAN → ACT → OBSERVE → VERIFY → SHIP. Native systems remain active.

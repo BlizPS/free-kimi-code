@@ -15,13 +15,13 @@ for p in ROOT.rglob('*.json'):
     if '.git' in p.parts: continue
     try: d=json.loads(p.read_text(encoding='utf-8'))
     except Exception as e: errors.append(f'invalid JSON {p.relative_to(ROOT)}: {e}'); continue
-    # Package/plugin version is 1.0.0; keep the Agent Plugins schema URL at its own schema revision.
-    if isinstance(d,dict) and isinstance(d.get('version'), str) and d['version'] != '1.0.0':
+    # Package/plugin version is 1.0.3; keep the Agent Plugins schema URL at its own schema revision.
+    if isinstance(d,dict) and isinstance(d.get('version'), str) and d['version'] != '1.0.3':
         errors.append(f'version drift {p.relative_to(ROOT)}: {d["version"]!r}')
 rp=json.loads((ROOT/'plugin.json').read_text())
 allowed={'$schema','name','version','description','author','repository','license','keywords'}
-if rp.get('$schema')!='https://agent-plugins.org/schemas/1.0.0/plugin.schema.json': errors.append('root plugin.json missing Agent Plugins 1.0 schema')
-if rp.get('name')!='lazy-developer' or rp.get('version')!='1.0.0': errors.append('root plugin.json identity/version mismatch')
+if rp.get('$schema')!='https://agent-plugins.org/schemas/1.0.3/plugin.schema.json': errors.append('root plugin.json missing Agent Plugins 1.0 schema')
+if rp.get('name')!='lazy-developer' or rp.get('version')!='1.0.3': errors.append('root plugin.json identity/version mismatch')
 extra=set(rp)-allowed
 if extra: errors.append('root plugin.json unsupported keys: '+', '.join(sorted(extra)))
 readme=(ROOT/'README.md').read_text(encoding='utf-8')

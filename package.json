@@ -1,6 +1,6 @@
 {
   "name": "@blizps/lazy-developer",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Free Kimi Code is a portable Lazy Developer layer for Kimi Code, Codex, Antigravity, Claude Code, and DeepSeek Harness with AI coding skills, model routing, MCP, context optimization, and safe developer tooling.",
   "keywords": [
     "agent-skills",

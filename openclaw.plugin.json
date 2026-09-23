@@ -1,7 +1,7 @@
 {
   "id": "lazy-developer",
   "name": "Lazy Developer",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Token-efficient engineering skills with verification, security awareness, and intelligent UI/UX + 3D design-system generation.",
   "configSchema": {
     "type": "object",

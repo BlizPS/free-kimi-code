@@ -8,7 +8,7 @@
       "name": "lazy-developer",
       "source": "./",
       "description": "Portable engineering skills and commands for coding, debugging, review, testing, and verification.",
-      "version": "1.0.0",
+      "version": "1.0.3",
       "author": {
         "name": "BlizPS"
       },
