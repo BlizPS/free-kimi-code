@@ -20,7 +20,7 @@ for p in ROOT.rglob('*.json'):
         errors.append(f'version drift {p.relative_to(ROOT)}: {d["version"]!r}')
 rp=json.loads((ROOT/'plugin.json').read_text())
 allowed={'$schema','name','version','description','author','repository','license','keywords'}
-if rp.get('$schema')!='https://agent-plugins.org/schemas/1.0.3/plugin.schema.json': errors.append('root plugin.json missing Agent Plugins 1.0 schema')
+if rp.get('$schema')!='https://agent-plugins.org/schemas/1.0.0/plugin.schema.json': errors.append('root plugin.json missing Agent Plugins 1.0 schema')
 if rp.get('name')!='lazy-developer' or rp.get('version')!='1.0.3': errors.append('root plugin.json identity/version mismatch')
 extra=set(rp)-allowed
 if extra: errors.append('root plugin.json unsupported keys: '+', '.join(sorted(extra)))

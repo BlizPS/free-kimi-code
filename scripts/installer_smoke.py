@@ -165,8 +165,6 @@ else:
     order = [ps.index(x) for x in ["Step 'RTK'", 'Step \"Installing/updating Lazy Developer $LazyDevVersion\"', 'Installing/updating Kimi Code to the latest available release', 'Installing/updating official Codex CLI', 'Installing/updating official Antigravity CLI', "Step 'Installing/updating official Claude Code'"]]
     if order != sorted(order): errors.append('install.ps1: lifecycle order must be RTK → LazyDev → Kimi → Codex → Antigravity → Claude Code')
     if ps.index("Step 'RTK'") > ps.index('Step \"Installing/updating Lazy Developer $LazyDevVersion\"'): errors.append('install.ps1: RTK lifecycle marker must precede LazyDev install')
-if "'-ExecutionPolicy', 'Bypass'" not in ps or "'-File', $corePath" not in ps:
-    errors.append('install.ps1: restricted-policy bootstrap fallback missing')
 if 'Refresh-ActiveLazyDevLauncher' not in ps:
     errors.append('install.ps1: active LazyDev launcher refresh missing')
 if "$CodexInstalledPath = Join-Path $CodexBinRoot 'codex.exe'" not in ps or 'official' not in ps:
@@ -195,6 +193,8 @@ for name, text in [('install.sh', sh), ('install.ps1', ps)]:
         errors.append(f'{name}: private Node.js installation/download must not be present')
     if 'NODE_BIN="$(command -v node' in text or 'node.exe "%LAZYDEV_ROOT%' in text:
         errors.append(f'{name}: installer still launches LazyDev through Node.js')
+if 'ScriptBlock]::Create' in ps or 'scriptblock]::Create' in ps:
+    errors.append('install.ps1: must not parse downloaded bytes with ScriptBlock.Create')
 if 'scriptblock]::Create' in (ROOT/'scripts/lazydev.mjs').read_text(encoding='utf-8').lower():
     errors.append('scripts/lazydev.mjs: Windows installer hint still uses ScriptBlock.Create')
 for name, text in [('install.sh', sh), ('install.ps1', ps)]:

@@ -33,7 +33,7 @@ if package_data:
         errors.append("package.json files must include cli/")
 allowed = {"$schema", "name", "version", "description", "author", "repository", "license", "keywords"}
 if rp:
-    if rp.get("$schema") != "https://agent-plugins.org/schemas/1.0.3/plugin.schema.json":
+    if rp.get("$schema") != "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json":
         errors.append("root plugin.json schema mismatch")
     if rp.get("name") != "lazy-developer":
         errors.append("root plugin.json name mismatch")

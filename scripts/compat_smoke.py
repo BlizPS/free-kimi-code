@@ -30,7 +30,7 @@ else:
     if 'python3' not in text or 'Lazy Developer native CLI' not in text: errors.append('native CLI must be a Python entrypoint')
 pkg=load('package.json')
 if pkg and pkg.get('bin',{}).get('lazydev')!='./cli/lazydev.py': errors.append('package.json lazydev bin target mismatch')
-if root and root.get('$schema')!='https://agent-plugins.org/schemas/1.0.3/plugin.schema.json': errors.append('root Agent Plugins schema mismatch')
+if root and root.get('$schema')!='https://agent-plugins.org/schemas/1.0.0/plugin.schema.json': errors.append('root Agent Plugins schema mismatch')
 for p in ROOT.rglob('*'):
     if '.git' in p.parts: continue
     if p.is_symlink(): errors.append(f'symlink not allowed: {p.relative_to(ROOT)}')

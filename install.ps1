@@ -1,5 +1,5 @@
 # Lazy Developer Windows bootstrapper.
-# Keep this file small and ASCII-only so irm / iex is reliable in Windows PowerShell 5.1.
+# Keep this file small and ASCII-only so irm / iex and ScriptBlock::Create are reliable in Windows PowerShell 5.1.
 [CmdletBinding()]
 param(
     [switch]$Help,
@@ -71,29 +71,21 @@ try {
     if ($Help) { $scriptArgs += '-Help' }
     if ($DryRun) { $scriptArgs += '-DryRun' }
 
-    # The bootstrap can itself be executed with `irm | iex` while the machine
-    # still has Restricted execution policy. Invoking a downloaded .ps1 with `&`
-    # would then be blocked. Run the core through a fresh PowerShell process with
-    # a process-scoped Bypass policy instead; this does not change the user's
-    # persistent execution-policy settings.
-    $hostExe = Get-Command 'powershell.exe' -ErrorAction SilentlyContinue
-    if (-not $hostExe) {
-        $hostExe = Get-Command 'pwsh.exe' -ErrorAction SilentlyContinue
-    }
-    if (-not $hostExe) {
-        throw 'PowerShell executable was not found.'
-    }
-
-    $childArgs = @(
-        '-NoLogo',
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', $corePath
-    ) + $scriptArgs
-
-    & $hostExe.Source @childArgs
-    $code = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    # Execute the core in this PowerShell process. Spawning powershell.exe from an
+    # irm | iex bootstrap can make the host look like it suddenly closed when the
+    # child process terminates on some Windows terminal hosts.
+    #
+    # The core is read as text and run as an in-memory scriptblock (instead of
+    # "& $corePath", which invokes the .ps1 file directly and is therefore
+    # subject to the machine's Execution Policy). This mirrors how this very
+    # bootstrapper is executed via "irm | iex" and avoids failures like:
+    #   "... cannot be loaded because running scripts is disabled on this system."
+    # on hosts with a Restricted/AllSigned policy, without changing the user's
+    # system-wide Execution Policy.
+    $coreContent = Get-Content -LiteralPath $corePath -Raw -Encoding UTF8
+    $coreBlock = [scriptblock]::Create($coreContent)
+    & $coreBlock @scriptArgs
+    $code = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
     $global:LASTEXITCODE = $code
     if ($code -ne 0) {
         Write-Host "Lazy Developer installer finished with exit code $code." -ForegroundColor Red
