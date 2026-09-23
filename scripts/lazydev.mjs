@@ -2311,7 +2311,7 @@ function runNativeCommand(subcommand = 'chat') {
     return 1;
   }
   const candidates = isWin
-    ? [['python.exe', [pythonFile, subcommand]], ['python3.exe', [pythonFile, subcommand]], ['py.exe', ['-3', pythonFile, subcommand]]]
+    ? [['py.exe', ['-3', pythonFile, subcommand]], ['python.exe', [pythonFile, subcommand]]]
     : [['python3', [pythonFile, subcommand]], ['python', [pythonFile, subcommand]]];
   for (const [command, args] of candidates) {
     const result = spawnSync(command, args, {

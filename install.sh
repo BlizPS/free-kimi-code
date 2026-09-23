@@ -26,7 +26,8 @@ KIMI_RELEASE_API_URL="https://api.github.com/repos/MoonshotAI/kimi-code/releases
 CODEX_RELEASE_API_URL="https://api.github.com/repos/openai/codex/releases/latest"
 CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
 ANTIGRAVITY_RELEASE_API_URL="https://api.github.com/repos/google-antigravity/antigravity-cli/releases/latest"
-RTK_INSTALL_URL="https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh"
+RTK_VERSION="0.44.2"
+RTK_RELEASE_BASE_URL="https://github.com/rtk-ai/rtk/releases/download/v$RTK_VERSION"
 REPO_ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz"
 GITHUB_API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"
 
@@ -7224,76 +7225,28 @@ find_deepseek_harness() {
 
 find_rtk() {
   add_external_cli_bin_directories
-  # The official RTK installer installs <RTK_INSTALL_DIR>/rtk. Keep legacy
-  # LazyDev locations and normal user bin directories discoverable.
-  for candidate in \
-    "${RTK_COMMAND:-}" "$SAVED_RTK_COMMAND" \
-    "${RTK_BIN_DIR:-}/rtk" \
-    "${LAZYDEV_BIN_DIR:-}/rtk" \
-    "$HOME/.local/share/lazydev/rtk/rtk" \
-    "$HOME/.local/share/lazydev/rtk" \
-    "$HOME/.local/share/lazydev/bin/rtk" \
-    "$HOME/.local/bin/rtk" \
-    "$HOME/.cargo/bin/rtk" \
-    "/usr/local/bin/rtk"; do
-    if [ -n "$candidate" ] && [ -x "$candidate" ] && [ ! -d "$candidate" ]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-    # Migrate old state that accidentally saved the containing directory.
-    if [ -n "$candidate" ] && [ -d "$candidate" ] && [ -x "$candidate/rtk" ]; then
-      printf '%s\n' "$candidate/rtk"
-      return 0
-    fi
+  for candidate in "${RTK_BIN_DIR:-}/rtk" "$HOME/.local/bin/rtk" "${RTK_COMMAND:-}" "$SAVED_RTK_COMMAND" "$HOME/.cargo/bin/rtk" "/usr/local/bin/rtk"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ] && [ ! -d "$candidate" ]; then printf '%s\n' "$candidate"; return 0; fi
   done
-  # Bounded recovery for old managed layouts; never scan all of HOME.
-  for root in \
-    "$HOME/.local/share/lazydev" \
-    "$HOME/.local/share/lazydev.previous" \
-    "$HOME/.local/bin" \
-    "$HOME/.cargo/bin" \
-    "$HOME/.nvm" \
-    "$HOME/.volta" \
-    "$HOME/.asdf" \
-    "$HOME/.local/share/uv" \
-    "${PREFIX:-}/bin"; do
-    [ -d "$root" ] || continue
-    found="$(find "$root" -maxdepth 4 -type f -name rtk -perm -111 -print 2>/dev/null | head -n 1 || true)"
-    if [ -n "$found" ]; then
-      printf '%s\n' "$found"
-      return 0
-    fi
-  done
-  found="$(find_cli_in_home rtk 2>/dev/null || true)"
-  if [ -n "$found" ]; then
-    printf '%s\n' "$found"
-    return 0
-  fi
-  if command -v rtk >/dev/null 2>&1; then
-    command -v rtk
-    return 0
-  fi
+  if command -v rtk >/dev/null 2>&1; then command -v rtk; return 0; fi
   return 1
 }
 
-# Verify that an rtk executable is the Rust Token Killer (rtk-ai/rtk),
-# not the unrelated Rust Type Kit. Do not use `rtk gain` as the installer
-# identity gate: `gain` opens the analytics database and can fail on a valid
-# install when its data directory is unavailable or read-only. The RTK CLI
-# product signature is exposed by --help and is deterministic without storage.
-rtk_is_token_killer() {
-  candidate="$1"
-  [ -n "$candidate" ] || return 1
-  [ -x "$candidate" ] || return 1
-
-  version_output="$($candidate --version 2>/dev/null || true)"
-  version="$(extract_semver "$version_output")"
-  [ -n "$version" ] || return 1
-
-  help_output="$($candidate --help 2>&1 || true)"
-  printf '%s\n' "$help_output" | grep -Fq 'Rust Token Killer' || return 1
-  printf '%s\n' "$help_output" | grep -Eq '^[[:space:]]*gain([[:space:]]|$)' || return 1
-  return 0
+verify_rtk_command() {
+  if [ "$dry_run" -eq 1 ]; then
+    print_command env RTK_TELEMETRY_DISABLED=1 rtk --version
+    print_command env RTK_TELEMETRY_DISABLED=1 rtk gain
+    return 0
+  fi
+  rtk_path=$(command -v rtk 2>/dev/null) || fail "RTK was installed, but 'rtk' is not available on PATH."
+  print_command env RTK_TELEMETRY_DISABLED=1 "$rtk_path" --version
+  if ! RTK_TELEMETRY_DISABLED=1 "$rtk_path" --version; then
+    fail "The 'rtk' command at $rtk_path is not a compatible Rust Token Killer installation. Remove the conflicting command from PATH, then rerun the installer."
+  fi
+  print_command env RTK_TELEMETRY_DISABLED=1 "$rtk_path" gain
+  if ! RTK_TELEMETRY_DISABLED=1 "$rtk_path" gain; then
+    fail "The 'rtk' command at $rtk_path is not a compatible Rust Token Killer installation. Remove the conflicting command from PATH, then rerun the installer."
+  fi
 }
 
 is_lazydev_launcher() {
@@ -7573,30 +7526,30 @@ else
   say "DeepSeek Harness not found — installation available."
 fi
 
+add_external_cli_bin_directories
 RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
 RTK_CURRENT_VERSION=""
-RTK_LATEST_VERSION=""
 RTK_NEEDS_UPDATE=1
 RTK_UPDATE_AVAILABLE=0
 if [ -n "$RTK_COMMAND" ]; then
   case "$RTK_COMMAND" in /*) RTK_BIN_DIR="$(dirname "$RTK_COMMAND")";; esac
   RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
-  if [ -n "$RTK_CURRENT_VERSION" ] && rtk_is_token_killer "$RTK_COMMAND"; then
-    RTK_LATEST_FILE="$TMP_DIR/rtk-latest.version"
-    (get_rtk_latest_version >"$RTK_LATEST_FILE" 2>/dev/null || true) &
-    RTK_LATEST_PID=$!
-  elif [ -n "$RTK_CURRENT_VERSION" ]; then
-    RTK_CURRENT_VERSION=""
-    RTK_UPDATE_AVAILABLE=1
-    say "A different RTK package is installed — the Rust Token Killer will be installed by LazyDev."
+  if [ -n "$RTK_CURRENT_VERSION" ]; then
+    if RTK_TELEMETRY_DISABLED=1 "$RTK_COMMAND" --version >/dev/null 2>&1 && RTK_TELEMETRY_DISABLED=1 "$RTK_COMMAND" gain >/dev/null 2>&1; then
+      RTK_NEEDS_UPDATE=0
+      say "RTK $RTK_CURRENT_VERSION is installed and verified — skipped."
+    else
+      RTK_CURRENT_VERSION=""
+      RTK_UPDATE_AVAILABLE=1
+      say "An incompatible or unknown RTK command is installed — the pinned Rust Token Killer will replace it."
+    fi
   else
-    RTK_NEEDS_UPDATE=0
-    RTK_UPDATE_AVAILABLE=0
-    say "RTK is installed but its version could not be detected — skipped."
+    RTK_UPDATE_AVAILABLE=1
+    say "RTK is installed but could not be verified — the pinned Rust Token Killer will replace it."
   fi
 else
   RTK_UPDATE_AVAILABLE=1
-  say "RTK not found — installation available."
+  say "RTK not found — the pinned Rust Token Killer will be installed."
 fi
 
 # Start the LazyDev revision check in parallel too. This removes the extra
@@ -7838,22 +7791,41 @@ clear 2>/dev/null || true
 # the official RTK installation first.
 step "RTK"
 if [ "$RTK_NEEDS_UPDATE" -eq 1 ]; then
-  say "RTK is missing, outdated, or not the Rust Token Killer — installing the official RTK first."
+  say "RTK is missing, incompatible, or not the Rust Token Killer — installing the pinned Rust Token Killer first."
   mkdir -p "$RTK_BIN_DIR"
-  curl -fsSL "$RTK_INSTALL_URL" | RTK_INSTALL_DIR="$RTK_BIN_DIR" RTK_TELEMETRY_DISABLED=1 sh
-  PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$KIMI_BIN_DIR:$HOME/.kimi-code/bin:$PATH"
-  export PATH
-  RTK_COMMAND="$(find_rtk 2>/dev/null || true)"
-  [ -n "$RTK_COMMAND" ] || fatal "RTK did not install a usable launcher."
-  rtk_is_token_killer "$RTK_COMMAND" || fatal "Installed RTK is not the Rust Token Killer."
+  rtk_platform=$(uname -s)
+  rtk_architecture=$(uname -m)
+  case "$rtk_platform:$rtk_architecture" in
+    Linux:x86_64|Linux:amd64) rtk_asset_name="rtk-x86_64-unknown-linux-musl.tar.gz"; rtk_asset_sha256="d94cc2a3e57fa534892b5235a726e7eeb7523f205a5f8f48f853bfcae7be7e33" ;;
+    Linux:aarch64|Linux:arm64) rtk_asset_name="rtk-aarch64-unknown-linux-gnu.tar.gz"; rtk_asset_sha256="5cd3f7fa2697faf9e5b77a10ce4e699006e02d4752d792f06550697eb4b8e8a9" ;;
+    Darwin:x86_64|Darwin:amd64) rtk_asset_name="rtk-x86_64-apple-darwin.tar.gz"; rtk_asset_sha256="636f808db86b2cefab7db7dd9393da8b6e4721bb2ffaa0644e3ffa52d3420d81" ;;
+    Darwin:aarch64|Darwin:arm64) rtk_asset_name="rtk-aarch64-apple-darwin.tar.gz"; rtk_asset_sha256="b7c2218eca538b54e63fa594a8ce58bd3716851b01b3b0dc026515323baf6393" ;;
+    *) fatal "RTK $RTK_VERSION does not provide a release for $rtk_platform $rtk_architecture." ;;
+  esac
+  rtk_archive_url="$RTK_RELEASE_BASE_URL/$rtk_asset_name"
+  rtk_archive="$TMP_DIR/rtk-$RTK_VERSION.tar.gz"
+  say "+ curl -fsSL $rtk_archive_url -o <temporary-archive>"
+  curl -fsSL "$rtk_archive_url" -o "$rtk_archive" || fatal "Could not download RTK $RTK_VERSION."
+  [ -s "$rtk_archive" ] || fatal "The downloaded RTK archive was empty."
+  if command -v sha256sum >/dev/null 2>&1; then rtk_actual_sha256=$(sha256sum "$rtk_archive") || fatal "Could not hash the downloaded RTK archive."; elif command -v shasum >/dev/null 2>&1; then rtk_actual_sha256=$(shasum -a 256 "$rtk_archive") || fatal "Could not hash the downloaded RTK archive."; else fatal "RTK installation requires sha256sum or shasum for checksum verification."; fi
+  rtk_actual_sha256=${rtk_actual_sha256%% *}
+  [ "$rtk_actual_sha256" = "$rtk_asset_sha256" ] || fatal "RTK checksum verification failed for $rtk_asset_name."
+  rtk_archive_entries=$(tar -tzf "$rtk_archive" 2>/dev/null) || fatal "The verified RTK archive could not be inspected."
+  [ "$rtk_archive_entries" = "rtk" ] || fatal "The verified RTK archive did not contain exactly one root rtk executable."
+  temporary_binary="$RTK_BIN_DIR/.rtk.$$"
+  tar -xOzf "$rtk_archive" rtk >"$temporary_binary" || { rm -f "$temporary_binary"; fatal "The verified RTK executable could not be extracted."; }
+  [ -s "$temporary_binary" ] || { rm -f "$temporary_binary"; fatal "The verified RTK executable was empty."; }
+  chmod +x "$temporary_binary"
+  mv -f "$temporary_binary" "$RTK_BIN_DIR/rtk"
+  RTK_COMMAND="$RTK_BIN_DIR/rtk"
+  PATH="$LAZYDEV_BIN_DIR:$CODEX_BIN_DIR:$RTK_BIN_DIR:$KIMI_BIN_DIR:$HOME/.kimi-code/bin:$PATH"; export PATH
+  hash -r 2>/dev/null || true
+  verify_rtk_command
   RTK_CURRENT_VERSION="$(extract_semver "$($RTK_COMMAND --version 2>/dev/null || true)")"
   [ -n "$RTK_CURRENT_VERSION" ] || fatal "Could not read the installed RTK version."
-  say "✓ RTK $RTK_CURRENT_VERSION ready"
+  say "✓ Rust Token Killer $RTK_CURRENT_VERSION verified at $RTK_COMMAND"
   write_install_state
-else
-  say "✓ RTK ${RTK_CURRENT_VERSION:-installed} already current — skipped."
 fi
-
 # Lazy Developer runtime is refreshed before the selected AI UIs.
 # Python is only needed for the LazyDev runtime. Defer this potentially slow
 # bootstrap until after the quick component detection and user choices.
